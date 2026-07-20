@@ -1,9 +1,16 @@
 import sqlite3
+from dataclasses import dataclass, replace
 
-from ai_kp.kp.prompts import KP_SYSTEM_PROMPT, build_turn_prompt
+from ai_kp.kp.context_builder import ContextAssembly, ContextBuilder, estimate_tokens
+from ai_kp.kp.turn_output import KpTurnOutput, StructuredOutputError, parse_kp_turn_output
 from ai_kp.llm.base import ChatMessage, LlmClient
-from ai_kp.memory.npc_candidates import NpcCandidateService
-from ai_kp.memory.retrieval import MemoryRetriever
+
+
+@dataclass(frozen=True)
+class KpTurnResult:
+    output: KpTurnOutput
+    context: ContextAssembly
+    repaired: bool = False
 
 
 class KpOrchestrator:
@@ -17,29 +24,46 @@ class KpOrchestrator:
         player_action: str,
         pc_id: str | None = None,
         location: str | None = None,
+        map_id: str | None = None,
         profession_hint: str | None = None,
-    ) -> str:
-        memories = MemoryRetriever(self.connection).retrieve(
-            player_action,
+        active_spoiler_tags: tuple[str, ...] = (),
+    ) -> KpTurnResult:
+        context = ContextBuilder(self.connection).build(
             campaign_id=campaign_id,
-            pc_id=pc_id,
-            visibility=("table", "kp"),
-        )
-        candidates = NpcCandidateService(self.connection).find_candidates(
-            campaign_id=campaign_id,
-            action_text=player_action,
-            location=location,
-            profession_hint=profession_hint,
-        )
-        prompt = build_turn_prompt(
             player_action=player_action,
-            memories=[item.text for item in memories],
-            npc_candidates=[f"{item.name}: {item.reason}" for item in candidates],
+            pc_id=pc_id,
+            location=location,
+            map_id=map_id,
+            profession_hint=profession_hint,
+            active_spoiler_tags=active_spoiler_tags,
+            visibility_scope="kp",
         )
-        return await self.llm.complete(
-            [
-                ChatMessage(role="system", content=KP_SYSTEM_PROMPT),
-                ChatMessage(role="user", content=prompt),
+        request_messages = [
+            ChatMessage(role=item["role"], content=item["content"]) for item in context.messages
+        ]
+        raw_output = await self.llm.complete(request_messages, temperature=0.3)
+        try:
+            output = parse_kp_turn_output(raw_output)
+            return KpTurnResult(output=output, context=context)
+        except StructuredOutputError as first_error:
+            repair_instruction = (
+                "上一次输出未通过 JSON 结构校验。"
+                f"错误：{str(first_error)[:1200]}\n"
+                "请仅返回修正后的完整 JSON 对象，不得添加解释。"
+            )
+            repair_messages = [
+                *request_messages,
+                ChatMessage(role="assistant", content=raw_output[:12000]),
+                ChatMessage(role="user", content=repair_instruction),
             ]
-        )
-
+            repaired_raw = await self.llm.complete(repair_messages, temperature=0.1)
+            output = parse_kp_turn_output(repaired_raw)
+            audited_messages = [
+                {"role": item.role, "content": item.content} for item in repair_messages
+            ]
+            audited_context = replace(
+                context,
+                messages=audited_messages,
+                token_estimate=sum(estimate_tokens(item["content"]) for item in audited_messages),
+            )
+            return KpTurnResult(output=output, context=audited_context, repaired=True)

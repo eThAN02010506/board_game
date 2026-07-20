@@ -83,6 +83,29 @@ KP专用线索。
 
                 self.assertEqual([chunk["text"] for chunk in visible_chunks], ["第一章线索。"])
 
+    def test_empty_spoiler_set_returns_only_untagged_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "test.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("雾港 1928")
+                chunks = chunk_plaintext_module(
+                    """@visibility=player
+已公开线索。
+
+@visibility=player @spoiler=chapter-2
+未解锁线索。""",
+                    title="玩家线索",
+                )
+                module = repo.create_module(campaign["id"], "玩家线索", chunks)
+
+                visible_chunks = repo.list_module_chunks(
+                    module["id"],
+                    allowed_visibility=("player", "table"),
+                    spoiler_tags=(),
+                )
+
+                self.assertEqual([chunk["text"] for chunk in visible_chunks], ["已公开线索。"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,11 +4,18 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
-TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+")
+WORD_RE = re.compile(r"[a-zA-Z0-9_]+")
+CJK_SEQUENCE_RE = re.compile(r"[\u3400-\u9fff]+")
 
 
 def tokenize(text: str) -> set[str]:
-    return {token.lower() for token in TOKEN_RE.findall(text)}
+    tokens = {token.lower() for token in WORD_RE.findall(text)}
+    for sequence in CJK_SEQUENCE_RE.findall(text):
+        if len(sequence) == 1:
+            tokens.add(sequence)
+            continue
+        tokens.update(sequence[index : index + 2] for index in range(len(sequence) - 1))
+    return tokens
 
 
 @dataclass(frozen=True)
@@ -54,18 +61,18 @@ class MemoryRetriever:
         for row in rows:
             text_tokens = tokenize(row["text"])
             lexical_score = len(query_tokens & text_tokens)
+            if lexical_score == 0:
+                continue
             score = lexical_score + (row["importance"] * 0.25)
-            if score > 0:
-                ranked.append(
-                    RetrievedMemory(
-                        id=row["id"],
-                        text=row["text"],
-                        scope=row["scope"],
-                        importance=row["importance"],
-                        visibility=row["visibility"],
-                        score=score,
-                    )
+            ranked.append(
+                RetrievedMemory(
+                    id=row["id"],
+                    text=row["text"],
+                    scope=row["scope"],
+                    importance=row["importance"],
+                    visibility=row["visibility"],
+                    score=score,
                 )
+            )
         ranked.sort(key=lambda item: item.score, reverse=True)
         return ranked[:limit]
-

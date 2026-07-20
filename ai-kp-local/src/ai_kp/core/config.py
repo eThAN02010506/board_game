@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     llm_api_key: str = Field(default="local")
     llm_model: str = Field(default="qwen3:8b")
     cors_origins: str = Field(default="http://localhost:5173")
+    local_admin_enabled: bool = True
+    admin_token: str | None = None
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -22,4 +24,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-
