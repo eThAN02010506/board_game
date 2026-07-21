@@ -1,13 +1,14 @@
 from collections.abc import Iterator
 from typing import cast
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ai_kp.core.config import Settings
 from ai_kp.core.db import connect
 from ai_kp.core.repository import Repository
 from ai_kp.security.repository import AuthenticatedMember
+from ai_kp.storage.repositories.investigators import AuthenticatedPlayer
 
 
 bearer = HTTPBearer(auto_error=False)
@@ -48,4 +49,16 @@ def get_identity(
 ) -> AuthenticatedMember:
     if identity is None:
         raise HTTPException(status_code=401, detail="Session token required")
+    return identity
+
+
+def get_player_identity(
+    x_ai_kp_player_token: str | None = Header(default=None),
+    repo: Repository = Depends(get_repo),
+) -> AuthenticatedPlayer:
+    if not x_ai_kp_player_token:
+        raise HTTPException(status_code=401, detail="Player profile token required")
+    identity = repo.authenticate_player_token(x_ai_kp_player_token)
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Invalid player profile token")
     return identity

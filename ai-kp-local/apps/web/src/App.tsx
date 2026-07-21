@@ -3,11 +3,12 @@ import {
   Brain,
   CircleDot,
   Dice5,
+  LayoutDashboard,
   ListChecks,
   Map,
-  MessageSquare,
   RefreshCw,
   Users,
+  UserRound,
   Wifi,
   WifiOff
 } from "lucide-react";
@@ -34,11 +35,13 @@ import type {
 } from "./api/types";
 import { ActionPanel } from "./features/actions/ActionPanel";
 import { CampaignPanel } from "./features/campaigns/CampaignPanel";
+import { InvestigatorPage } from "./features/investigators/InvestigatorPage";
 import { MapGeneratorPanel } from "./features/maps/MapGeneratorPanel";
 import { MapStage } from "./features/maps/MapStage";
 import { TokenPanel } from "./features/maps/TokenPanel";
 import { PlanningPanel } from "./features/planning/PlanningPanel";
 import { ProposalPanel } from "./features/proposals/ProposalPanel";
+import { RulebookPage } from "./features/rules/RulebookPage";
 import { SessionPanel } from "./features/sessions/SessionPanel";
 import { useWorkspaceRealtime } from "./hooks/useWorkspaceRealtime";
 import {
@@ -54,13 +57,21 @@ import {
 import "./styles.css";
 
 const navItems = [
-  { id: "workspace", label: "工作台", icon: MessageSquare, target: "workspace-section" },
-  { id: "maps", label: "地图棋子", icon: Map, target: "map-section" },
-  { id: "memory", label: "角色记忆", icon: Brain, target: "memory-section" },
-  { id: "planning", label: "功能规划", icon: ListChecks, target: "planning-section" },
-  { id: "npcs", label: "NPC", icon: Users, target: "planning-section" },
-  { id: "rules", label: "规则检定", icon: Dice5, target: "planning-section" }
-];
+  { id: "play", label: "游玩桌面", icon: LayoutDashboard, path: "/play", planned: false },
+  { id: "campaigns", label: "团与权限", icon: Users, path: "/campaigns", planned: false },
+  { id: "investigators", label: "调查员", icon: UserRound, path: "/investigators", planned: false },
+  { id: "maps", label: "地图棋子", icon: Map, path: "/maps", planned: false },
+  { id: "memory", label: "角色记忆", icon: Brain, path: "/memory", planned: false },
+  { id: "npcs", label: "NPC", icon: Users, path: "/npcs", planned: true },
+  { id: "rules", label: "规则知识", icon: Dice5, path: "/rules", planned: false },
+  { id: "planning", label: "功能规划", icon: ListChecks, path: "/planning", planned: true }
+] as const;
+
+type PageId = (typeof navItems)[number]["id"];
+
+function pageFromPath(pathname: string): PageId {
+  return navItems.find((item) => item.path === pathname)?.id ?? "play";
+}
 
 const defaultLocations = "旧码头, 废弃仓库, 报社, 警局";
 const defaultRoutes = "旧码头>废弃仓库\n旧码头>报社\n报社>警局";
@@ -99,6 +110,14 @@ function stringifyForLog(value: unknown) {
   );
 }
 
+function publicPcSummary(pc: PlayerCharacter): NonNullable<PlayerCharacter["public_summary"]> {
+  if (pc.public_summary) return pc.public_summary;
+  const declared = pc.sheet?.public_summary;
+  return declared && typeof declared === "object"
+    ? (declared as NonNullable<PlayerCharacter["public_summary"]>)
+    : {};
+}
+
 
 const initialAdminToken = readAdminToken();
 credentialBridge.admin(initialAdminToken);
@@ -121,7 +140,8 @@ export default function App() {
   const [selectedTokenId, setSelectedTokenId] = useState("");
   const [log, setLog] = useState("准备就绪。先连接后端，或直接创建一个测试团。");
   const [loading, setLoading] = useState(false);
-  const [activeNav, setActiveNav] = useState("workspace");
+  const [activeNav, setActiveNav] = useState<PageId>(() => pageFromPath(window.location.pathname));
+  const [characterExpanded, setCharacterExpanded] = useState(false);
   const [capabilities, setCapabilities] = useState<Capability[]>([]);
   const [capabilitiesLoading, setCapabilitiesLoading] = useState(true);
   const [capabilitiesError, setCapabilitiesError] = useState("");
@@ -224,11 +244,10 @@ export default function App() {
     setLog(nextToken ? "管理员口令已仅保存在当前浏览器会话。" : "管理员口令已清除。");
   }
 
-  function navigateWorkspace(id: string, target: string) {
+  function navigateWorkspace(id: PageId, path: string) {
     setActiveNav(id);
-    window.requestAnimationFrame(() => {
-      document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+    window.history.pushState({ page: id }, "", path);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function loadCapabilities() {
@@ -957,7 +976,14 @@ export default function App() {
   useEffect(() => {
     void loadCampaigns();
     void loadCapabilities();
+    const onPopState = () => setActiveNav(pageFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  const currentPage = navItems.find((item) => item.id === activeNav) ?? navItems[0];
+  const activePc = pcs.find((pc) => pc.id === authIdentity?.pc_id) ?? null;
+  const otherPcs = pcs.filter((pc) => pc.id !== authIdentity?.pc_id);
 
   return (
     <main className="app-shell">
@@ -974,14 +1000,12 @@ export default function App() {
                 aria-pressed={activeNav === item.id}
                 className={`nav-item ${activeNav === item.id ? "active" : ""}`}
                 key={item.id}
-                onClick={() => navigateWorkspace(item.id, item.target)}
+                onClick={() => navigateWorkspace(item.id, item.path)}
                 type="button"
               >
                 <Icon size={17} />
                 {item.label}
-                {(item.id === "planning" || item.id === "npcs" || item.id === "rules") && (
-                  <small>规划</small>
-                )}
+                {item.planned && <small>规划</small>}
               </button>
             );
           })}
@@ -991,8 +1015,8 @@ export default function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">本地跑团开发工作台</p>
-            <h1>{activeCampaign?.title ?? "创建或载入一个团"}</h1>
+            <p className="eyebrow">{currentPage.label}</p>
+            <h1>{activeCampaign?.title ?? "AI KP Local"}</h1>
           </div>
           <div className="topbar-actions">
             <button className="ghost-button" onClick={loadCampaigns} type="button">
@@ -1024,15 +1048,13 @@ export default function App() {
           </div>
         </header>
 
-        <PlanningPanel
-          activeNav={activeNav}
-          capabilities={capabilities}
-          error={capabilitiesError}
-          loading={capabilitiesLoading}
-          onRetry={() => void loadCapabilities()}
-        />
+        {activeNav === "investigators" && (
+          <InvestigatorPage campaign={activeCampaign} identity={authIdentity} />
+        )}
 
-        <div className="dev-grid">
+        {activeNav === "rules" && <RulebookPage identity={authIdentity} />}
+
+        {activeNav === "campaigns" && <div className="page-grid campaign-page-grid">
           <CampaignPanel
             activeCampaignId={activeCampaign?.id}
             adminToken={adminToken}
@@ -1082,6 +1104,13 @@ export default function App() {
             visibleJoinCode={visibleJoinCode}
           />
 
+          <section className="response-panel page-log-panel">
+            <div className="panel-heading"><h2>团管理记录</h2><AlertCircle size={18} /></div>
+            <pre>{log}</pre>
+          </section>
+        </div>}
+
+        {activeNav === "maps" && <div className="page-grid map-page-grid">
           {authIdentity?.role === "kp" && (
             <MapGeneratorPanel
               locationsText={locationsText}
@@ -1131,6 +1160,84 @@ export default function App() {
             tokenLocation={tokenLocation}
           />
 
+          <section className="response-panel page-log-panel">
+            <div className="panel-heading"><h2>地图操作记录</h2><AlertCircle size={18} /></div>
+            <pre>{log}</pre>
+          </section>
+        </div>}
+
+        {activeNav === "play" && <div className="play-page">
+          <aside className={`play-character-card ${characterExpanded ? "expanded" : ""}`}>
+            <div className="panel-heading">
+              <div><p className="eyebrow">当前调查员</p><h2>{activePc?.name ?? "尚未绑定角色"}</h2></div>
+              <button className="ghost-button" onClick={() => setCharacterExpanded((value) => !value)} type="button">
+                {characterExpanded ? "收起" : "放大"}
+              </button>
+            </div>
+            {activePc ? (
+              <>
+                <div className="mini-sheet-grid">
+                  {Object.entries(activePc.sheet ?? {}).slice(0, characterExpanded ? 24 : 8).map(([key, value]) => (
+                    <span key={key}><small>{key}</small><strong>{typeof value === "object" ? "…" : String(value)}</strong></span>
+                  ))}
+                </div>
+                {characterExpanded && <pre>{stringifyForLog(activePc.sheet ?? {})}</pre>}
+              </>
+            ) : <p className="permission-hint">先在“团与权限”页加入会话并绑定已批准角色。</p>}
+            <div className="party-summary">
+              <div className="party-summary-heading"><strong>其他调查员</strong><small>公开摘要</small></div>
+              {otherPcs.length ? otherPcs.map((pc) => {
+                const location = activeMap?.tokens?.find(
+                  (token) => token.actor_type === "pc" && token.actor_id === pc.id
+                )?.location_name;
+                const summary = publicPcSummary(pc);
+                const attributes = summary.attributes ?? {};
+                return (
+                  <article className="party-member-mini" key={pc.id}>
+                    <div><strong>{pc.name}</strong><span>{location ?? "位置未知"}</span></div>
+                    <small>
+                      {summary.cash !== undefined ? `现金 ${summary.cash}` : "现金未公开"}
+                      {Object.keys(attributes).length ? ` · ${Object.entries(attributes).slice(0, 3).map(([key, value]) => `${key.toUpperCase()} ${value}`).join(" / ")}` : " · 属性未公开"}
+                    </small>
+                  </article>
+                );
+              }) : <small>目前没有其他已加入的调查员。</small>}
+            </div>
+            <TokenPanel
+              activeMap={activeMap}
+              identity={authIdentity}
+              movableTokens={movableTokens}
+              moveTarget={moveTarget}
+              onMoveTargetChange={setMoveTarget}
+              onMoveToken={moveToken}
+              onPlaceToken={placeToken}
+              onSelectedTokenIdChange={setSelectedTokenId}
+              onTokenActorIdChange={setTokenActorId}
+              onTokenLabelChange={setTokenLabel}
+              onTokenLocationChange={setTokenLocation}
+              pcs={pcs}
+              selectedToken={selectedToken}
+              selectedTokenId={selectedTokenId}
+              tokenActorId={tokenActorId}
+              tokenLabel={tokenLabel}
+              tokenLocation={tokenLocation}
+            />
+          </aside>
+
+          <div className="play-map-column">
+            <MapStage
+              activeMap={activeMap}
+              activeMapImage={activeMapImage}
+              hasIdentity={Boolean(authIdentity)}
+              maps={maps}
+              onOpenMap={(mapId) => void openMap(mapId)}
+              onRefresh={() => void loadMaps()}
+              onSetPublished={(published) => void setMapPublished(published)}
+              role={authIdentity?.role}
+            />
+          </div>
+
+          <div className="play-action-column">
           <ActionPanel
             identity={authIdentity}
             loading={loading}
@@ -1170,15 +1277,34 @@ export default function App() {
               proposals={proposals}
             />
           )}
-
           <section className="response-panel">
             <div className="panel-heading">
-              <h2>API 回显</h2>
+              <h2>桌面记录</h2>
               <AlertCircle size={18} />
             </div>
             <pre>{log}</pre>
           </section>
+          </div>
         </div>
+        }
+
+        {activeNav === "memory" && <section className="page-card memory-page">
+          <div className="page-intro">
+            <div><p className="eyebrow">角色时间线与召回</p><h2>角色记忆</h2></div>
+            <Brain size={24} />
+          </div>
+          <label>寻找事件、人物或线索<textarea value={playerAction} onChange={(event) => setPlayerAction(event.target.value)} /></label>
+          <button className="primary-button" disabled={!authIdentity} onClick={() => void searchMemory()} type="button"><Brain size={16} />检索当前角色记忆</button>
+          <pre>{log}</pre>
+        </section>}
+
+        <PlanningPanel
+          activeNav={activeNav}
+          capabilities={capabilities}
+          error={capabilitiesError}
+          loading={capabilitiesLoading}
+          onRetry={() => void loadCapabilities()}
+        />
       </section>
     </main>
   );

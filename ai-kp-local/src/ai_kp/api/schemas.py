@@ -1,3 +1,5 @@
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
 from ai_kp.kp.turn_output import (
@@ -40,6 +42,56 @@ class PlayerActionCreate(BaseModel):
 class PcCreate(BaseModel):
     name: str
     sheet: dict = Field(default_factory=dict)
+
+
+class PlayerProfileCreate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=80)
+
+
+class InvestigatorCreate(BaseModel):
+    canonical_sheet: dict[str, Any]
+    source_type: Literal["manual", "xlsx"] = "manual"
+    source_hash: str | None = None
+    source_filename: str | None = Field(default=None, max_length=255)
+    template_id: str | None = Field(default=None, max_length=120)
+    parser_version: str | None = Field(default=None, max_length=40)
+    warnings: list[str] = Field(default_factory=list, max_length=100)
+
+
+class InvestigatorSubmit(BaseModel):
+    revision_id: str | None = None
+
+
+class InvestigatorReview(BaseModel):
+    action: Literal["approved", "changes_requested"]
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class InvestigatorAssignment(BaseModel):
+    investigator_id: str
+
+
+class InvestigatorCampaignStateUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    current_hp: int | None = None
+    current_san: int | None = None
+    current_mp: int | None = None
+    current_luck: int | None = None
+    conditions: list[dict[str, Any]] | None = None
+    inventory_delta: dict[str, Any] | None = None
+    current_game_time: str | None = Field(default=None, max_length=120)
+
+
+class RuleQueryRequest(BaseModel):
+    ruleset_id: str = Field(default="coc7-keeper-cn-2002c", max_length=120)
+    question: str = Field(min_length=2, max_length=2000)
+    top_k: int = Field(default=8, ge=1, le=30)
+
+
+class RuleExecuteRequest(BaseModel):
+    ruleset_id: str = Field(default="coc7-keeper-cn-2002c", max_length=120)
+    rule_key: str = Field(min_length=3, max_length=160)
+    inputs: dict[str, Any] = Field(default_factory=dict)
 
 
 class NpcCreate(BaseModel):

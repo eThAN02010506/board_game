@@ -61,6 +61,193 @@ export type PlayerCharacter = {
   campaign_id: string;
   name: string;
   sheet?: Record<string, unknown>;
+  public_summary?: {
+    occupation?: string;
+    cash?: number | string;
+    attributes?: Record<string, number>;
+    status?: string;
+  };
+};
+
+export type PlayerProfile = {
+  id: string;
+  display_name: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PlayerProfileBundle = {
+  profile: PlayerProfile;
+  player_token: string;
+};
+
+export type CharacterSheet = {
+  schema_version: string;
+  ruleset_id: string;
+  identity: {
+    name: string;
+    player_name?: string;
+    era?: string;
+    occupation?: string;
+    age?: number;
+    gender?: string;
+    residence?: string;
+    birthplace?: string;
+  };
+  characteristics: Record<string, number>;
+  derived: {
+    max_hp: number;
+    max_mp: number;
+    initial_san: number;
+    max_san: number;
+    mov: number;
+    damage_bonus: string;
+    build: number;
+    dodge: number;
+  };
+  skills: Array<{
+    skill_key: string;
+    display_name: string;
+    specialization?: string | null;
+    base_value: number;
+    occupation_points: number;
+    interest_points: number;
+    development_points: number;
+    current_value: number;
+    half_value: number;
+    fifth_value: number;
+    growth_mark: boolean;
+  }>;
+  [key: string]: unknown;
+};
+
+export type CharacterSkillCatalogItem = {
+  skill_key: string;
+  display_name: string;
+  default_specialization: string | null;
+  base_value: number;
+  base_formula: "fixed" | "dex_half" | "edu";
+  specialization_editable: boolean;
+  creation_points_allowed: boolean;
+  description: string;
+  order: number;
+};
+
+export type InvestigatorRevision = {
+  id: string;
+  investigator_id: string;
+  revision_no: number;
+  source_type: "manual" | "xlsx";
+  canonical_sheet: CharacterSheet;
+  public_summary: Record<string, unknown>;
+  warnings: string[];
+};
+
+export type Investigator = {
+  id: string;
+  owner_profile_id: string;
+  name: string;
+  ruleset_id: string;
+  current_revision_id: string;
+  current_revision: InvestigatorRevision;
+};
+
+export type InvestigatorImportPreview = {
+  canonical_sheet: CharacterSheet;
+  warnings: string[];
+  source_hash: string;
+  source_filename: string;
+  template_id: string;
+  parser_version: string;
+  ignored_formula_cells: number;
+};
+
+export type InvestigatorManualPreview = {
+  canonical_sheet: CharacterSheet;
+  warnings: string[];
+};
+
+export type CharacterReview = {
+  id: string;
+  action: "submitted" | "changes_requested" | "approved" | "withdrawn";
+  revision_id: string;
+  comment: string | null;
+  created_at: string;
+};
+
+export type InvestigatorCampaignState = {
+  campaign_id: string;
+  investigator_id: string;
+  approved_revision_id: string;
+  current_hp: number;
+  current_san: number;
+  current_mp: number;
+  current_luck: number;
+  conditions: Array<Record<string, unknown>>;
+  inventory_delta: Record<string, unknown>;
+  state_version: number;
+  current_game_time: string | null;
+};
+
+export type CampaignInvestigator = {
+  campaign_id: string;
+  investigator_id: string;
+  owner_profile_id: string;
+  name: string;
+  status: "draft" | "submitted" | "changes_requested" | "approved" | "withdrawn";
+  submitted_revision_id: string | null;
+  approved_revision_id: string | null;
+  legacy_pc_id: string | null;
+  review_comment: string | null;
+  submitted_revision: InvestigatorRevision | null;
+  approved_revision: InvestigatorRevision | null;
+  campaign_state: InvestigatorCampaignState | null;
+  reviews: CharacterReview[];
+  diff: Array<{ path: string; before: unknown; after: unknown }>;
+};
+
+export type RuleSource = {
+  id: string;
+  ruleset_id: string;
+  title: string;
+  source_filename: string;
+  source_hash: string;
+  page_count: number;
+  status: "extracting" | "extracted" | "indexing" | "ready" | "failed";
+  chunk_count: number;
+  rule_count: number;
+  object_status_counts?: Record<string, number>;
+  latest_run?: {
+    stage: string;
+    status: string;
+    processed_count: number;
+    accepted_count: number;
+    rejected_count: number;
+    cursor_page: number;
+  } | null;
+};
+
+export type RuleQueryResult = {
+  retrieval_backend: "minirag" | "lexical_fallback";
+  source: RuleSource;
+  chunks: Array<{
+    id: string;
+    page_start: number;
+    page_end: number;
+    chapter?: string | null;
+    section?: string | null;
+    text: string;
+  }>;
+  rules: Array<{
+    id: string;
+    rule_key: string;
+    title: string;
+    status: string;
+    object: {
+      summary?: string;
+      execution?: { kind?: string };
+    };
+  }>;
 };
 
 export type PlayerActionRecord = {

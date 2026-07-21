@@ -28,6 +28,16 @@ from ai_kp.security.repository import AuthenticatedMember
 router = APIRouter()
 
 
+def _public_pc_summary(pc: dict) -> dict:
+    sheet = pc.get("sheet") if isinstance(pc.get("sheet"), dict) else {}
+    declared = sheet.get("public_summary") if isinstance(sheet.get("public_summary"), dict) else {}
+    return {
+        key: declared[key]
+        for key in ("occupation", "cash", "attributes", "status")
+        if key in declared
+    }
+
+
 @router.post("/campaigns/{campaign_id}/pcs")
 def create_pc(
     campaign_id: str,
@@ -56,7 +66,12 @@ def list_pcs(
     return [
         pc
         if pc["id"] == identity.pc_id
-        else {"id": pc["id"], "campaign_id": pc["campaign_id"], "name": pc["name"]}
+        else {
+            "id": pc["id"],
+            "campaign_id": pc["campaign_id"],
+            "name": pc["name"],
+            "public_summary": _public_pc_summary(pc),
+        }
         for pc in pcs
     ]
 

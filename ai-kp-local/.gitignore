@@ -7,6 +7,8 @@ __pycache__/
 .mypy_cache/
 .env
 data/*.sqlite3
+data/rag/
+src/model/
 node_modules/
 .pnpm-store/
 dist/

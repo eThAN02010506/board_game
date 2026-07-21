@@ -50,7 +50,16 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
             await self.client.post(
                 f"/campaigns/{self.campaign_a['id']}/pcs",
                 headers=self.kp_a_headers,
-                json={"name": "Investigator B", "sheet": {"图书馆使用": 70}},
+                json={
+                    "name": "Investigator B",
+                    "sheet": {
+                        "图书馆使用": 70,
+                        "public_summary": {
+                            "cash": 18,
+                            "attributes": {"dex": 55, "app": 60},
+                        },
+                    },
+                },
             )
         ).json()
         self.map_a = (
@@ -537,6 +546,10 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
         pcs_by_id = {pc["id"]: pc for pc in player_pc_list.json()}
         self.assertEqual(pcs_by_id[self.pc_a["id"]]["sheet"], {"侦查": 60})
         self.assertNotIn("sheet", pcs_by_id[self.pc_other["id"]])
+        self.assertEqual(
+            pcs_by_id[self.pc_other["id"]]["public_summary"],
+            {"cash": 18, "attributes": {"dex": 55, "app": 60}},
+        )
 
     async def test_draft_maps_are_invisible_until_published_and_move_history_is_sanitized(self) -> None:
         draft_map = (

@@ -78,13 +78,25 @@ CAPABILITIES: tuple[Capability, ...] = (
     ),
     Capability(
         id="character_sheets",
-        label="完整角色卡创建与阅读",
-        status="partial",
+        label="玩家调查员创建与角色卡",
+        status="available",
         phase="F2",
         audience="all",
-        summary="已能创建空白 PC 并绑定玩家；缺少规则化编辑、导入、校验和展示 UI。",
-        dependencies=("session_roles",),
-        acceptance=("玩家可本地编辑自己的角色卡，其他玩家只看到公开摘要。",),
+        summary=(
+            "玩家长期档案、独立调查员页面、完整手工建卡、安全 Excel 预览和不可变草稿版本已可用；"
+            "按团提交、KP 退回/批准、字段差异、已批准版本绑定和团内运行状态均已可用。"
+        ),
+        dependencies=("session_roles", "seat_invitations"),
+        acceptance=(
+            "玩家可在独立页面创建和编辑自己的调查员，KP 可查看，其他玩家只看到公开摘要。",
+            "玩家可导入已识别版本的 Excel 角色卡，并在保存前查看字段映射、缺失项和校验警告。",
+            "导入过程不执行工作簿公式或宏，并保留原文件哈希、模板版本和导入审计记录。",
+            "Excel 只提供玩家输入；属性半值、生命值、魔法值、移动力、伤害加值和技能结果由确定性规则服务重新计算。",
+            "角色卡按草稿、待审核、退回修改、已批准流转；KP 退回时必须填写玩家可见的修改意见。",
+            "每个团的 KP 独立审核准确的角色卡版本；玩家修改已提交内容后必须重新提交，未批准版本不得进入该团或提供给 AI。",
+            "同一玩家可把同一调查员用于不同团次，而无需重新创建或重复导入角色卡。",
+            "已批准版本不可变；团内 HP、SAN、MP、临时状态和物品变化存入独立的团内运行状态。",
+        ),
     ),
     Capability(
         id="seat_invitations",
@@ -94,7 +106,10 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="kp",
         summary="以单次、可撤销、可绑定角色的邀请替代共享加入码，并为长期角色建立稳定玩家身份。",
         dependencies=("session_roles",),
-        acceptance=("撤销某一席位不会影响其他玩家，旧邀请不能被再次使用。",),
+        acceptance=(
+            "撤销某一席位不会影响其他玩家，旧邀请不能被再次使用。",
+            "玩家身份可跨团次恢复；撤销某次团的席位不会删除该玩家拥有的调查员。",
+        ),
     ),
     Capability(
         id="module_library",
@@ -132,19 +147,30 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="planned",
         phase="F1",
         audience="all",
-        summary="支持玩家掷骰、实体骰录入、暗骰、KP 覆盖和检定后结果草稿。",
+        summary="按本地 CoC7 规则来源处理玩家掷骰、实体骰录入、暗骰、KP 覆盖和检定后结果草稿。",
         dependencies=("proposal_approval", "character_sheets"),
-        acceptance=("掷骰前不得写入只有成功时才成立的事件或记忆。",),
+        acceptance=(
+            "掷骰前不得写入只有成功时才成立的事件或记忆。",
+            "每次判定保存规则集版本、章节页码、原始骰值、难度、奖惩骰、结果和角色状态版本。",
+            "KP 覆盖必须记录理由；规则判定在关闭模型并重启后仍可重放得到相同结果。",
+        ),
     ),
     Capability(
         id="ruleset_plugins",
         label="规则系统插件",
-        status="planned",
+        status="partial",
         phase="F3",
         audience="all",
-        summary="把 CoC7 检定、伤害、成长等规则从通用回合流程中分离，并允许替换其他跑团系统。",
+        summary=(
+            "已有可追溯 PDF 原文块、MiniRAG 本地召回、JSON 规则候选、三层校验和封闭 DSL 执行器；"
+            "尚未完成全部 CoC7 规则对象、检定状态机和其他系统插件。"
+        ),
         dependencies=("check_resolution",),
-        acceptance=("切换规则系统不会改写既有事件，检定结果可由对应插件重放验证。",),
+        acceptance=(
+            "切换规则系统不会改写既有事件，检定结果可由对应插件重放验证。",
+            "核心规则、书中可选规则、团规、临场 KP 裁定和平台策略使用不同来源标签。",
+            "AI 不能绕过规则插件直接提交依赖检定的伤害、理智、成长或其它状态变化。",
+        ),
     ),
     Capability(
         id="character_timeline",
@@ -225,6 +251,23 @@ CAPABILITIES: tuple[Capability, ...] = (
         summary="在页面中检测 /v1/models、选择真实 model ID、测试连接并保存本地配置。",
         dependencies=("model_adapter",),
         acceptance=("不猜测模型文件名，只使用提供者实际暴露的 model ID。",),
+    ),
+    Capability(
+        id="model_quantization_profiles",
+        label="4/8 位模型量化方案",
+        status="planned",
+        phase="F4",
+        audience="kp",
+        summary=(
+            "保留 4 位、8 位与混合 4/8 位本地模型方案；当前只保存基线模型，"
+            "不实现运行时转换、微调或热切换。"
+        ),
+        dependencies=("model_management",),
+        acceptance=(
+            "使用同一套真实 AI KP 样例对 4 位、8 位和混合量化进行质量、内存、首字延迟和生成速度对比。",
+            "量化产物与配置记录基座模型、精度、工具版本和内容哈希，且不进入 Git。",
+            "切换模型不改写团会话、记忆、规则对象或地图资产。",
+        ),
     ),
     Capability(
         id="campaign_backup_restore",

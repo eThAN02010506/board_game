@@ -17,6 +17,53 @@ CREATE TABLE IF NOT EXISTS campaigns (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS player_profiles (
+  id TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS investigators (
+  id TEXT PRIMARY KEY,
+  owner_profile_id TEXT NOT NULL REFERENCES player_profiles(id) ON DELETE CASCADE,
+  ruleset_id TEXT NOT NULL DEFAULT 'coc7-keeper-cn-2002c',
+  name TEXT NOT NULL,
+  current_revision_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  archived_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS investigator_revisions (
+  id TEXT PRIMARY KEY,
+  investigator_id TEXT NOT NULL REFERENCES investigators(id) ON DELETE CASCADE,
+  revision_no INTEGER NOT NULL,
+  canonical_json TEXT NOT NULL,
+  public_summary_json TEXT NOT NULL DEFAULT '{}',
+  source_type TEXT NOT NULL CHECK (source_type IN ('manual', 'xlsx')),
+  source_hash TEXT,
+  template_id TEXT,
+  parser_version TEXT,
+  warnings_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(investigator_id, revision_no)
+);
+
+CREATE TABLE IF NOT EXISTS character_imports (
+  id TEXT PRIMARY KEY,
+  owner_profile_id TEXT NOT NULL REFERENCES player_profiles(id) ON DELETE CASCADE,
+  investigator_id TEXT NOT NULL REFERENCES investigators(id) ON DELETE CASCADE,
+  revision_id TEXT NOT NULL REFERENCES investigator_revisions(id) ON DELETE CASCADE,
+  source_filename TEXT NOT NULL,
+  source_hash TEXT NOT NULL,
+  template_id TEXT NOT NULL,
+  parser_version TEXT NOT NULL,
+  warnings_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS campaign_sessions (
   id TEXT PRIMARY KEY,
   campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
@@ -38,7 +85,8 @@ CREATE TABLE IF NOT EXISTS session_members (
   token_hash TEXT NOT NULL UNIQUE,
   joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  revoked_at TEXT
+  revoked_at TEXT,
+  player_profile_id TEXT REFERENCES player_profiles(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS player_characters (
@@ -47,6 +95,54 @@ CREATE TABLE IF NOT EXISTS player_characters (
   name TEXT NOT NULL,
   sheet_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS campaign_investigators (
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  investigator_id TEXT NOT NULL REFERENCES investigators(id) ON DELETE CASCADE,
+  owner_profile_id TEXT NOT NULL REFERENCES player_profiles(id) ON DELETE CASCADE,
+  submitted_revision_id TEXT REFERENCES investigator_revisions(id) ON DELETE RESTRICT,
+  approved_revision_id TEXT REFERENCES investigator_revisions(id) ON DELETE RESTRICT,
+  legacy_pc_id TEXT REFERENCES player_characters(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'submitted', 'changes_requested', 'approved', 'withdrawn')),
+  review_comment TEXT,
+  reviewed_by_member_id TEXT REFERENCES session_members(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (campaign_id, investigator_id)
+);
+
+CREATE TABLE IF NOT EXISTS character_reviews (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  investigator_id TEXT NOT NULL REFERENCES investigators(id) ON DELETE CASCADE,
+  revision_id TEXT NOT NULL REFERENCES investigator_revisions(id) ON DELETE RESTRICT,
+  action TEXT NOT NULL
+    CHECK (action IN ('submitted', 'changes_requested', 'approved', 'withdrawn')),
+  actor_member_id TEXT REFERENCES session_members(id) ON DELETE SET NULL,
+  actor_profile_id TEXT REFERENCES player_profiles(id) ON DELETE SET NULL,
+  comment TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS investigator_campaign_state (
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  investigator_id TEXT NOT NULL REFERENCES investigators(id) ON DELETE CASCADE,
+  approved_revision_id TEXT NOT NULL REFERENCES investigator_revisions(id) ON DELETE RESTRICT,
+  current_hp INTEGER NOT NULL,
+  current_san INTEGER NOT NULL,
+  current_mp INTEGER NOT NULL,
+  current_luck INTEGER NOT NULL,
+  conditions_json TEXT NOT NULL DEFAULT '[]',
+  inventory_delta_json TEXT NOT NULL DEFAULT '{}',
+  state_version INTEGER NOT NULL DEFAULT 0,
+  current_game_time TEXT,
+  last_event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (campaign_id, investigator_id)
 );
 
 CREATE TABLE IF NOT EXISTS npcs (
@@ -261,7 +357,118 @@ CREATE TABLE IF NOT EXISTS memories (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS rule_sources (
+  id TEXT PRIMARY KEY,
+  ruleset_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  source_filename TEXT NOT NULL,
+  source_hash TEXT NOT NULL UNIQUE,
+  page_count INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'extracted'
+    CHECK (status IN ('extracting', 'extracted', 'indexing', 'ready', 'failed')),
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS rule_ingestion_runs (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL REFERENCES rule_sources(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
+  stage TEXT NOT NULL,
+  cursor_page INTEGER NOT NULL DEFAULT 0,
+  agent_model TEXT,
+  prompt_version TEXT,
+  processed_count INTEGER NOT NULL DEFAULT 0,
+  accepted_count INTEGER NOT NULL DEFAULT 0,
+  rejected_count INTEGER NOT NULL DEFAULT 0,
+  error_text TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS rule_chunks (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL REFERENCES rule_sources(id) ON DELETE CASCADE,
+  page_start INTEGER NOT NULL,
+  page_end INTEGER NOT NULL,
+  order_index INTEGER NOT NULL,
+  chapter TEXT,
+  section TEXT,
+  content_kind TEXT NOT NULL DEFAULT 'text' CHECK (content_kind IN ('text', 'table')),
+  audience TEXT NOT NULL DEFAULT 'all' CHECK (audience IN ('all', 'player', 'kp')),
+  text TEXT NOT NULL,
+  text_hash TEXT NOT NULL,
+  extraction_status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (extraction_status IN ('pending', 'processing', 'completed', 'failed')),
+  minirag_doc_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source_id, order_index),
+  UNIQUE(source_id, text_hash)
+);
+
+CREATE TABLE IF NOT EXISTS rule_objects (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL REFERENCES rule_sources(id) ON DELETE CASCADE,
+  rule_key TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  rule_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'candidate'
+    CHECK (status IN ('candidate', 'validated', 'review_required', 'quarantined')),
+  object_json TEXT NOT NULL,
+  object_hash TEXT NOT NULL,
+  confidence REAL NOT NULL DEFAULT 0,
+  validation_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source_id, rule_key, version)
+);
+
+CREATE TABLE IF NOT EXISTS rule_object_citations (
+  rule_object_id TEXT NOT NULL REFERENCES rule_objects(id) ON DELETE CASCADE,
+  chunk_id TEXT NOT NULL REFERENCES rule_chunks(id) ON DELETE CASCADE,
+  page INTEGER NOT NULL,
+  evidence_text TEXT NOT NULL,
+  evidence_hash TEXT NOT NULL,
+  PRIMARY KEY (rule_object_id, chunk_id, evidence_hash)
+);
+
+CREATE TABLE IF NOT EXISTS rule_relations (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL REFERENCES rule_sources(id) ON DELETE CASCADE,
+  source_rule_key TEXT NOT NULL,
+  target_rule_key TEXT NOT NULL,
+  relation_type TEXT NOT NULL,
+  evidence_chunk_id TEXT REFERENCES rule_chunks(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source_id, source_rule_key, target_rule_key, relation_type)
+);
+
+CREATE TABLE IF NOT EXISTS rule_validation_issues (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL REFERENCES rule_sources(id) ON DELETE CASCADE,
+  chunk_id TEXT REFERENCES rule_chunks(id) ON DELETE SET NULL,
+  run_id TEXT REFERENCES rule_ingestion_runs(id) ON DELETE SET NULL,
+  validation_layer TEXT NOT NULL,
+  error_text TEXT NOT NULL,
+  candidate_json TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_campaign_created ON events(campaign_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_investigators_owner
+  ON investigators(owner_profile_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_investigator_revisions_character
+  ON investigator_revisions(investigator_id, revision_no);
+CREATE INDEX IF NOT EXISTS idx_character_imports_owner
+  ON character_imports(owner_profile_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_campaign_investigators_status
+  ON campaign_investigators(campaign_id, status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_campaign_investigators_owner
+  ON campaign_investigators(owner_profile_id, campaign_id);
+CREATE INDEX IF NOT EXISTS idx_character_reviews_target
+  ON character_reviews(campaign_id, investigator_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_sessions_one_active
   ON campaign_sessions(campaign_id) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_session_members_session ON session_members(session_id, joined_at);
@@ -291,6 +498,17 @@ CREATE INDEX IF NOT EXISTS idx_module_chunks_visibility ON module_chunks(visibil
 CREATE INDEX IF NOT EXISTS idx_memories_campaign_scope ON memories(campaign_id, scope);
 CREATE INDEX IF NOT EXISTS idx_memories_pc ON memories(pc_id);
 CREATE INDEX IF NOT EXISTS idx_memories_npc ON memories(npc_id);
+CREATE INDEX IF NOT EXISTS idx_rule_sources_ruleset ON rule_sources(ruleset_id, status);
+CREATE INDEX IF NOT EXISTS idx_rule_chunks_source_page
+  ON rule_chunks(source_id, page_start, order_index);
+CREATE INDEX IF NOT EXISTS idx_rule_chunks_status
+  ON rule_chunks(source_id, extraction_status);
+CREATE INDEX IF NOT EXISTS idx_rule_objects_key_status
+  ON rule_objects(source_id, rule_key, status);
+CREATE INDEX IF NOT EXISTS idx_rule_citations_chunk
+  ON rule_object_citations(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_rule_validation_issues_source
+  ON rule_validation_issues(source_id, validation_layer);
 """
 
 

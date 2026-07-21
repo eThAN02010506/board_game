@@ -15,12 +15,47 @@ from ai_kp.maps.repository import MapRepository
 from ai_kp.realtime.repository import RealtimeRepository
 from ai_kp.security.repository import SecurityRepository
 from ai_kp.storage.repositories.turns import TurnRepository
+from ai_kp.storage.repositories.investigators import InvestigatorRepository
+from ai_kp.storage.repositories.rulebooks import RulebookRepository
 from ai_kp.storage.repositories.world import WorldRepository
 from ai_kp.storage.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
 from ai_kp.storage.sqlite import SQLiteRepository
 
 
 PROJECT_ROOT = Path(__file__).parents[1]
+
+
+def test_rules_reference_declares_source_identity_and_ai_boundary() -> None:
+    reference = (PROJECT_ROOT / "docs" / "RULES_REFERENCE.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "coc7-keeper-cn-2002c" in reference
+    assert "f6113754ea095de0a60b6fb593f38df0041e0573858c28f41204a1edd039f707" in reference
+    assert "coc7_core" in reference
+    assert "platform_policy" in reference
+    assert "deterministic ruleset services" in reference
+    assert "must not commit facts that depend on an unresolved roll" in reference
+
+
+def test_character_sheet_design_separates_identity_revision_review_and_runtime() -> None:
+    reference = (PROJECT_ROOT / "docs" / "CHARACTER_SHEET_MODEL.md").read_text(
+        encoding="utf-8"
+    )
+
+    for token in (
+        "eeb4ceea026bf172cd3337f42f1815da897c5c7fa46fb61641b83ef146759545",
+        "investigators",
+        "investigator_revisions",
+        "campaign_investigators",
+        "investigator_campaign_state",
+        "approved_revision_id",
+        "changes_requested",
+        "禁止运行宏",
+        "后端按",
+        "逐阶段真实验收",
+    ):
+        assert token in reference
 
 
 def _imports(path: Path) -> set[str]:
@@ -37,6 +72,14 @@ def _imports(path: Path) -> set[str]:
 def _service_method_calls(path: Path) -> set[tuple[str, str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     service_variables: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for argument in node.args.args:
+            if isinstance(argument.annotation, ast.Name) and argument.annotation.id.endswith(
+                "Service"
+            ):
+                service_variables[argument.arg] = argument.annotation.id
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
@@ -135,6 +178,19 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
             ("TurnService", "reject"),
             ("TurnService", "create_ai_proposal"),
         },
+        "investigators.py": {
+            ("InvestigatorService", "create_profile"),
+            ("InvestigatorService", "preview_excel"),
+            ("InvestigatorService", "create_investigator"),
+            ("InvestigatorService", "revise_investigator"),
+        },
+        "rulebooks.py": {
+            ("RulebookService", "ingest_pdf"),
+            ("RulebookService", "index_source"),
+            ("RulebookService", "extract_rules"),
+            ("RulebookService", "query"),
+            ("RulebookService", "execute"),
+        },
     }
 
     for filename, required_calls in expected.items():
@@ -153,6 +209,8 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         ContextAssemblyRepository,
         SecurityRepository,
         RealtimeRepository,
+        InvestigatorRepository,
+        RulebookRepository,
     )
     assert Repository.__mro__.count(SQLiteRepository) == 1
     assert Repository.create_campaign is WorldRepository.create_campaign
@@ -161,16 +219,21 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     assert Repository.create_context_assembly is ContextAssemblyRepository.create_context_assembly
     assert Repository.create_campaign_session is SecurityRepository.create_campaign_session
     assert Repository.append_realtime_event is RealtimeRepository.append_realtime_event
+    assert Repository.create_investigator is InvestigatorRepository.create_investigator
+    assert Repository.create_rule_source is RulebookRepository.create_rule_source
 
 
-def test_formal_migration_registry_keeps_all_five_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 5
+def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
+    assert LATEST_SCHEMA_VERSION == 8
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
         (3, "add_map_status"),
         (4, "add_map_token_version"),
         (5, "add_proposed_npc_updates_to_turn_proposals"),
+        (6, "add_player_owned_investigator_library"),
+        (7, "add_rulebook_dual_storage"),
+        (8, "add_campaign_investigator_review_and_runtime_state"),
     ]
 
 

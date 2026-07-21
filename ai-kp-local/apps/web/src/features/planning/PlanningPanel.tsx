@@ -32,12 +32,6 @@ const navCopy = {
     title: "NPC 档案与跨本关系",
     intro:
       "这里规划 NPC 搜索、相遇记录、关系变化、可再出现判断，以及跨模组重逢时间线；当前仅呈现真实实现进度。"
-  },
-  rules: {
-    eyebrow: "功能规划 · 规则",
-    title: "规则检定与掷骰台",
-    intro:
-      "这里规划待检定请求、公开或暗骰、加值、结果落库与人类 KP 接管；当前 AI 草稿提出检定不等于掷骰闭环已经完成。"
   }
 } as const;
 
@@ -45,11 +39,6 @@ function selectCapabilities(activeNav: string, capabilities: Capability[]) {
   const unfinished = capabilities.filter((capability) => capability.status !== "available");
   if (activeNav === "npcs") {
     return unfinished.filter((capability) => capability.id === "npc_reappearance");
-  }
-  if (activeNav === "rules") {
-    return unfinished.filter((capability) =>
-      ["check_resolution", "ruleset_plugins", "human_kp_modes"].includes(capability.id)
-    );
   }
   return unfinished;
 }
@@ -61,7 +50,7 @@ export function PlanningPanel({
   loading,
   onRetry
 }: Props) {
-  if (activeNav !== "planning" && activeNav !== "npcs" && activeNav !== "rules") return null;
+  if (activeNav !== "planning" && activeNav !== "npcs") return null;
 
   const copy = navCopy[activeNav];
   const visibleCapabilities = selectCapabilities(activeNav, capabilities);

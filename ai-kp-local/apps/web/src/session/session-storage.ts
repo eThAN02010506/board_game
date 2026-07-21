@@ -3,6 +3,16 @@ import type { Role } from "../api/types";
 const tokenStoragePrefix = "ai-kp-session-token:";
 const mapSelectionStoragePrefix = "ai-kp-active-map:";
 const adminTokenStorageKey = "ai-kp-admin-token";
+const playerProfileTokenStorageKey = "ai-kp-player-profile-token";
+
+export function readPlayerProfileToken() {
+  return localStorage.getItem(playerProfileTokenStorageKey) ?? "";
+}
+
+export function writePlayerProfileToken(token: string) {
+  if (token) localStorage.setItem(playerProfileTokenStorageKey, token);
+  else localStorage.removeItem(playerProfileTokenStorageKey);
+}
 
 export function readAdminToken() {
   return sessionStorage.getItem(adminTokenStorageKey) ?? "";

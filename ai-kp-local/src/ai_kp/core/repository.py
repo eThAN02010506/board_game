@@ -5,6 +5,8 @@ from ai_kp.maps.repository import MapRepository
 from ai_kp.realtime.repository import RealtimeRepository
 from ai_kp.security.repository import SecurityRepository
 from ai_kp.storage.repositories.turns import TurnRepository
+from ai_kp.storage.repositories.investigators import InvestigatorRepository
+from ai_kp.storage.repositories.rulebooks import RulebookRepository
 from ai_kp.storage.repositories.world import WorldRepository
 from ai_kp.storage.rows import decode_json_field, row_to_dict
 
@@ -18,6 +20,8 @@ class Repository(
     ContextAssemblyRepository,
     SecurityRepository,
     RealtimeRepository,
+    InvestigatorRepository,
+    RulebookRepository,
 ):
     """Backward-compatible facade over the feature-specific SQLite repositories."""
 

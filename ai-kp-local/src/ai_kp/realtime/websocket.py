@@ -1,9 +1,10 @@
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import suppress
 import json
 from pathlib import Path
 import time
+from typing import TypeVar
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -18,9 +19,24 @@ HEARTBEAT_INTERVAL_SECONDS = 15.0
 CLIENT_TIMEOUT_SECONDS = 45.0
 MAX_CLIENT_FRAME_BYTES = 8 * 1024
 
+T = TypeVar("T")
+
 
 class FrameTooLargeError(ValueError):
     pass
+
+
+async def _run_thread_safely(
+    operation: Callable[..., T], /, *args: object, **kwargs: object
+) -> T:
+    """Finish a started worker operation before cancellation can close its resources."""
+    task = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        with suppress(Exception):
+            await task
+        raise
 
 
 async def _receive_limited_json(websocket: WebSocket) -> object:
@@ -50,7 +66,7 @@ async def handle_realtime_websocket(
         return
 
     await websocket.accept()
-    connection = await asyncio.to_thread(connect, db_path)
+    connection = await _run_thread_safely(connect, db_path)
     repo = Repository(connection)
     receive_task: asyncio.Task[object] | None = None
     try:
@@ -76,7 +92,7 @@ async def handle_realtime_websocket(
         if not isinstance(ticket, str) or not ticket:
             await websocket.close(code=4401, reason="Invalid realtime ticket")
             return
-        identity = await asyncio.to_thread(repo.consume_realtime_ticket, ticket)
+        identity = await _run_thread_safely(repo.consume_realtime_ticket, ticket)
         ticket = ""
         if identity is None:
             await websocket.close(code=4401, reason="Invalid realtime ticket")
@@ -84,7 +100,7 @@ async def handle_realtime_websocket(
         requested_cursor = message.get("after_cursor")
         cursor_key = requested_cursor if isinstance(requested_cursor, str) else ""
         resolved_cursor = (
-            await asyncio.to_thread(
+            await _run_thread_safely(
                 repo.resolve_visible_realtime_cursor,
                 event_key=cursor_key,
                 session_id=identity.session_id,
@@ -115,13 +131,13 @@ async def handle_realtime_websocket(
         last_heartbeat = last_client_activity
 
         while True:
-            refreshed_identity = await asyncio.to_thread(
+            refreshed_identity = await _run_thread_safely(
                 repo.get_active_session_member,
                 identity.member_id,
                 identity.session_id,
             )
             if refreshed_identity is None:
-                connection_status = await asyncio.to_thread(
+                connection_status = await _run_thread_safely(
                     repo.get_session_member_connection_status,
                     identity.member_id,
                     identity.session_id,
@@ -137,7 +153,7 @@ async def handle_realtime_websocket(
                 await websocket.close(close_code, reason="Session credential expired")
                 return
             identity = refreshed_identity
-            events = await asyncio.to_thread(
+            events = await _run_thread_safely(
                 repo.list_visible_realtime_events,
                 session_id=identity.session_id,
                 role=identity.role,
@@ -204,4 +220,4 @@ async def handle_realtime_websocket(
             receive_task.cancel()
             with suppress(asyncio.CancelledError):
                 await receive_task
-        await asyncio.to_thread(connection.close)
+        await _run_thread_safely(connection.close)

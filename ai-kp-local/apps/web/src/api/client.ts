@@ -7,13 +7,15 @@ type CredentialSnapshot = {
   adminToken: string;
   role: Role | "";
   pcId: string | null;
+  playerToken: string;
 };
 
 const credentials: CredentialSnapshot = {
   accessToken: "",
   adminToken: "",
   role: "",
-  pcId: null
+  pcId: null,
+  playerToken: ""
 };
 
 export const credentialBridge = {
@@ -24,6 +26,9 @@ export const credentialBridge = {
   },
   admin(adminToken: string) {
     credentials.adminToken = adminToken;
+  },
+  player(playerToken: string) {
+    credentials.playerToken = playerToken;
   },
   snapshot(): Readonly<CredentialSnapshot> {
     return { ...credentials };
@@ -43,6 +48,9 @@ async function sendJson<T>(
   }
   if (adminToken) {
     headers.set("X-AI-KP-Admin-Token", adminToken);
+  }
+  if (credentials.playerToken) {
+    headers.set("X-AI-KP-Player-Token", credentials.playerToken);
   }
   const response = await fetch(`${apiBase}${url}`, { ...init, headers });
   if (!response.ok) {
@@ -66,4 +74,33 @@ export function requestJsonWithAccessToken<T>(
 
 export function fetchCapabilities(): Promise<Capability[]> {
   return requestJson<Capability[]>("/capabilities");
+}
+
+export async function requestFile<T>(url: string, file: File): Promise<T> {
+  return requestBinary(url, file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+}
+
+export async function requestBinary<T>(
+  url: string,
+  file: File,
+  contentType = "application/octet-stream"
+): Promise<T> {
+  const headers = new Headers();
+  headers.set("Content-Type", contentType);
+  headers.set("X-File-Name", encodeURIComponent(file.name));
+  if (credentials.accessToken) {
+    headers.set("Authorization", `Bearer ${credentials.accessToken}`);
+  }
+  if (credentials.adminToken) {
+    headers.set("X-AI-KP-Admin-Token", credentials.adminToken);
+  }
+  if (credentials.playerToken) {
+    headers.set("X-AI-KP-Player-Token", credentials.playerToken);
+  }
+  const response = await fetch(`${apiBase}${url}`, { method: "POST", headers, body: file });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<T>;
 }

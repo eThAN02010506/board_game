@@ -3,7 +3,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute, APIRouter, APIWebSocketRoute
 
 from ai_kp.api.errors import register_error_handlers
-from ai_kp.api.routers import campaigns, maps, realtime, sessions, system, turns, world
+from ai_kp.api.routers import (
+    campaigns,
+    investigators,
+    maps,
+    realtime,
+    rulebooks,
+    sessions,
+    system,
+    turns,
+    world,
+)
 from ai_kp.core.config import Settings, get_settings
 from ai_kp.core.db import connect, init_db
 
@@ -79,6 +89,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         system.router,
         realtime.router,
         campaigns.router,
+        investigators.router,
+        rulebooks.router,
         sessions.router,
         world.router,
         maps.router,

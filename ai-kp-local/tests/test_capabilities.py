@@ -28,7 +28,6 @@ class CapabilityPlaceholderTests(unittest.TestCase):
             item["id"]: item["status"] for item in list_capabilities(include_available=False)
         }
         expected = {
-            "character_sheets",
             "seat_invitations",
             "module_library",
             "module_document_import",
@@ -43,6 +42,7 @@ class CapabilityPlaceholderTests(unittest.TestCase):
             "map_reveal_editor",
             "image_map_generation",
             "model_management",
+            "model_quantization_profiles",
             "campaign_backup_restore",
             "human_kp_modes",
             "voice_companion",
@@ -50,6 +50,19 @@ class CapabilityPlaceholderTests(unittest.TestCase):
         }
         self.assertEqual(expected, set(unfinished))
         self.assertTrue(all(status in {"partial", "planned"} for status in unfinished.values()))
+
+    def test_quantization_plan_keeps_four_and_eight_bit_profiles_deferred(self) -> None:
+        capability = next(
+            item for item in CAPABILITIES if item.id == "model_quantization_profiles"
+        )
+        plan_text = " ".join((capability.summary, *capability.acceptance))
+
+        self.assertEqual("planned", capability.status)
+        self.assertIn("4 位", plan_text)
+        self.assertIn("8 位", plan_text)
+        self.assertIn("不实现", plan_text)
+        self.assertIn("真实 AI KP 样例", plan_text)
+        self.assertIn("model_management", capability.dependencies)
 
     def test_public_catalog_endpoint_can_filter_available_features(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -62,6 +75,50 @@ class CapabilityPlaceholderTests(unittest.TestCase):
         self.assertTrue(payload)
         self.assertTrue(all(item["status"] in {"partial", "planned"} for item in payload))
         self.assertTrue(all(item["acceptance"] for item in payload))
+
+    def test_character_sheet_plan_keeps_player_ownership_and_excel_import(self) -> None:
+        character_sheets = next(
+            capability
+            for capability in CAPABILITIES
+            if capability.id == "character_sheets"
+        )
+        plan_text = " ".join((character_sheets.summary, *character_sheets.acceptance))
+
+        self.assertIn("独立调查员页面", plan_text)
+        self.assertIn("不可变草稿版本已可用", plan_text)
+        self.assertIn("按团提交", plan_text)
+        self.assertIn("Excel", plan_text)
+        self.assertIn("预览", plan_text)
+        self.assertIn("不执行工作簿公式或宏", plan_text)
+        self.assertIn("确定性规则服务重新计算", plan_text)
+        self.assertIn("退回修改", plan_text)
+        self.assertIn("修改意见", plan_text)
+        self.assertIn("每个团的 KP 独立审核", plan_text)
+        self.assertIn("未批准版本不得进入该团或提供给 AI", plan_text)
+        self.assertIn("不同团次", plan_text)
+        self.assertIn("已批准版本不可变", plan_text)
+        self.assertIn("团内运行状态", plan_text)
+        self.assertIn("seat_invitations", character_sheets.dependencies)
+
+    def test_rule_capabilities_require_traceable_deterministic_results(self) -> None:
+        capabilities = {capability.id: capability for capability in CAPABILITIES}
+        check_text = " ".join(
+            (
+                capabilities["check_resolution"].summary,
+                *capabilities["check_resolution"].acceptance,
+            )
+        )
+        plugin_text = " ".join(
+            (
+                capabilities["ruleset_plugins"].summary,
+                *capabilities["ruleset_plugins"].acceptance,
+            )
+        )
+
+        self.assertIn("章节页码", check_text)
+        self.assertIn("重放", check_text)
+        self.assertIn("可选规则", plugin_text)
+        self.assertIn("AI 不能绕过规则插件", plugin_text)
 
     def test_catalog_rejects_dependency_cycles(self) -> None:
         cyclic = (

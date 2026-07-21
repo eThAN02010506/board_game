@@ -17,6 +17,11 @@
 - 玩家角色主要事件与支线事件记忆
 - OpenAI-compatible LLM 适配层
 - React/Vite 前端工作台；启动时自动恢复当前浏览器会话及该 `campaign + role` 上次打开的地图
+- 独立调查员页面；本地长期玩家档案、安全 Excel 导入预览、规则重算与不可变草稿版本
+- 参考 `COC空白卡.xlsx` 的 67 项完整技能表；支持逐项职业/兴趣加点、专攻、搜索、预算和成功率即时计算，技能名悬停 3 秒显示简介
+- 玩家提交调查员、KP 退回修改/批准、批准版本绑定玩家席位与团内 HP/SAN/MP/幸运状态
+- 规则书双存储：SQLite 页码原文 + MiniRAG 本地索引；JSON 规则对象通过 Schema、引用、冲突三层校验后才可由确定性 DSL 执行
+- 分页式产品导航；游玩页同时呈现本人角色卡、队友公开摘要、中央地图和右侧滚动行动区
 - 团会话、共享加入码、KP/玩家服务端权限校验
 - 短期单次实时票据、同源 WebSocket、SQLite outbox、角色可见性过滤和断线重连
 - 玩家行动队列与 `submitted -> reviewed -> resolved/rejected` 生命周期
@@ -32,6 +37,12 @@ python3 -m venv .venv
 python -m pip install -e ".[dev]"
 cp .env.example .env
 uvicorn ai_kp.api.main:app --reload
+```
+
+需要导入和索引规则书时安装独立的本地 MiniRAG 依赖组：
+
+```bash
+python -m pip install -e ".[rulebook,dev]"
 ```
 
 前端：
@@ -54,8 +65,8 @@ VITE_BACKEND_TARGET=http://127.0.0.1:8000 pnpm run dev
 默认配置只适合在运行后端的同一台机器上开发。浏览器打开前端后，可以按下面的真实流程验收：
 
 1. 点击“连接后端”，创建测试团；前端会随即开启该团的 KP 会话。已有有效会话时，重载页面会自动恢复身份和该角色上次打开的地图。
-2. KP 创建角色卡，在“团会话与权限”中复制本次显示的加入码。
-3. 用另一个浏览器会话打开前端，输入加入码和玩家显示名；角色卡可以加入时填写，也可以由 KP 在成员列表中绑定。
+2. 用另一个浏览器会话输入加入码和玩家显示名，再在独立的“调查员”页面建立本机长期档案。玩家可导入支持的 Excel 角色卡，也可在 67 项完整技能表中手工分配职业点和兴趣点；闪避、母语和成功率由程序重算。
+3. 玩家保存不可变草稿版本并提交给当前团 KP。KP 可退回并留下修改意见，或批准当前版本后绑定到玩家席位；新版本审核期间不会覆盖已批准版本。
 4. KP 生成地图并放置绑定角色的棋子。新地图默认是草稿；发布后，玩家页面会自动显示地图，后续棋子移动也会自动同步，无需手动刷新。
 5. 玩家只能移动自己角色的棋子，并可在“玩家行动”中提交行动。行动会自动出现在 KP 队列；KP 选中后创建手工草稿或调用本地 AI。
 6. 行动被草稿认领后进入 `reviewed`；KP 批准草稿后变为 `resolved`，拒绝则变为 `rejected`，双方页面会自动同步状态。草稿未批准前不会写入正式事件与长期记忆。
@@ -74,18 +85,19 @@ ai-kp-local/
 │   ├── core/                   # 配置、schema、ID 与兼容 Repository facade
 │   ├── planning/               # 可机读的唯一能力目录
 │   ├── kp/  maps/  memory/     # KP 回合、地图与记忆域
-│   └── modules/ llm/ security/ realtime/ rules/ human_kp/
+│   └── modules/ llm/ security/ realtime/ rules/ rulebook/ human_kp/
 ├── apps/web/src/
 │   ├── api/                    # 请求客户端与 TypeScript DTO
 │   ├── session/                # sessionStorage 凭据与地图选择
 │   ├── hooks/                  # 前端 Provider 式实时连接与同步边界
-│   ├── features/               # 会话、地图、行动、草稿和功能规划面板
+│   ├── features/               # 独立调查员页，以及会话、地图、行动、草稿和规划功能
 │   └── shared/                 # 跨 feature 的纯展示组件
 ├── tests/                           # API/服务/存储/权限/实时回归测试
 └── docs/                            # 架构、能力规划与记忆验证文档
 ```
 
-`ai_kp.api.main:app` 继续是稳定启动入口，实际应用装配在 `api/app.py`。详细的分层边界和事务规则见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+`ai_kp.api.main:app` 继续是稳定启动入口，实际应用装配在 `api/app.py`。详细的分层边界和事务规则见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。调查员字段、Excel 导入、不可变版本、按团审批和跨团状态边界见 [`docs/CHARACTER_SHEET_MODEL.md`](docs/CHARACTER_SHEET_MODEL.md)。
+规则书 PDF 摄取、MiniRAG 隔离索引、三层校验、权限和真实验收见 [`docs/RULEBOOK_KNOWLEDGE.md`](docs/RULEBOOK_KNOWLEDGE.md)。
 
 ## 开发自检
 
@@ -158,6 +170,10 @@ AI_KP_LLM_MODEL=<从 /v1/models 响应取得的 id>
 3. 玩家视角、KP 视角、秘密信息分开存储。
 4. NPC 再出现必须通过时间、地点、关系、合理性和预算判断。
 5. 人类 KP 可以随时接管、覆盖、冻结或补写状态。
+6. CoC7 数值规则由可重放的确定性代码执行，AI 只能建议检定和叙事，不能充当规则计算器。
+7. 每项功能使用独立页面；游玩页只组合玩家当下需要同时查看的角色、队友摘要、地图和行动信息。
+
+游戏内规则以用户提供的 `Version2002c` 中文第七版守秘人规则书为本地权威来源。规则 PDF 不进入仓库；版本、文件哈希、章节页码索引、可选规则边界和实现验收要求见 [`docs/RULES_REFERENCE.md`](docs/RULES_REFERENCE.md)。角色卡审批等平台流程会明确标为产品策略，不冒充书中规则。
 
 ## 地图生成
 

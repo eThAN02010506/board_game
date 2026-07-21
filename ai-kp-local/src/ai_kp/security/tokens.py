@@ -30,6 +30,14 @@ def hash_access_token(token: str) -> str:
     return hash_secret(token, "access-token")
 
 
+def generate_player_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_player_token(token: str) -> str:
+    return hash_secret(token, "player-profile-token")
+
+
 def hash_join_code(code: str) -> str:
     return hash_secret(normalize_join_code(code), "join-code")
 

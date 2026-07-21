@@ -22,7 +22,7 @@ export function ActionPanel(props: Props) {
   return (
     <section className="tool-panel action-panel" id="memory-section">
       <div className="panel-heading">
-        <h2>行动/草稿测试</h2>
+        <h2>行动与桌面聊天</h2>
         <Brain size={18} />
       </div>
       <label>

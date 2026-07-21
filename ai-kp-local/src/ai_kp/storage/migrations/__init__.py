@@ -10,6 +10,9 @@ from ai_kp.storage.migrations import (
     v0003_map_status,
     v0004_map_token_version,
     v0005_proposal_npc_updates,
+    v0006_investigator_library,
+    v0007_rulebook_knowledge,
+    v0008_campaign_investigators,
 )
 
 
@@ -41,6 +44,21 @@ MIGRATIONS = (
         v0005_proposal_npc_updates.VERSION,
         v0005_proposal_npc_updates.NAME,
         v0005_proposal_npc_updates.migrate,
+    ),
+    Migration(
+        v0006_investigator_library.VERSION,
+        v0006_investigator_library.NAME,
+        v0006_investigator_library.migrate,
+    ),
+    Migration(
+        v0007_rulebook_knowledge.VERSION,
+        v0007_rulebook_knowledge.NAME,
+        v0007_rulebook_knowledge.migrate,
+    ),
+    Migration(
+        v0008_campaign_investigators.VERSION,
+        v0008_campaign_investigators.NAME,
+        v0008_campaign_investigators.migrate,
     ),
 )
 

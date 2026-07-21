@@ -19,6 +19,7 @@ The React workspace follows the same separation:
 - `apps/web/src/hooks/useWorkspaceRealtime.ts` is the frontend provider boundary for WebSocket lifecycle, cursor replay, event-to-refresh routing, burst coalescing, full sync, and stale campaign/session guards.
 - `apps/web/src/features` contains the campaign, session, map, action, proposal, and capability-planning panels. `shared` contains presentation components reused by features.
 - `apps/web/src/App.tsx` composes workspace state and feature callbacks; transport, session persistence, realtime-provider logic, and feature rendering are kept in their dedicated modules.
+- Top-level product areas use distinct history-backed paths (`/play`, `/campaigns`, `/investigators`, `/maps`, `/memory`, `/npcs`, `/rules`, and `/planning`). `/play` is the intentional composite exception: it places the controlled investigator and public party summaries beside the central map, with a separately scrollable action/chat column.
 
 ## Router-Service-Repository Boundary
 
@@ -36,6 +37,15 @@ Plain read-only or single-table use cases still pass through a service when a do
 `api/app.py` runs `init_db()` at application construction. Request dependencies call `connect()` but do not rerun schema initialization. File-backed databases use foreign keys, a 5-second busy timeout, WAL journal mode, and `synchronous=NORMAL`; in-memory test databases skip WAL.
 
 `core/db.py:SCHEMA` creates the current schema for a new database. Existing databases are advanced by the numbered, ordered migrations under `storage/migrations/`. Applied versions and names are recorded in `schema_migrations`; migration names are checked, future database versions fail closed, and each migration runs inside its own savepoint. Running `init_db()` again is idempotent. The additive migration helpers are compatibility code for real pre-migration SQLite files and must not be removed as apparent duplication.
+
+## Rulebook knowledge boundary
+
+`rulebook/` owns source PDF extraction, MiniRAG original-text indexing, JSON rule validation and the
+closed deterministic execution DSL. SQLite source chunks and MiniRAG files are deliberately dual
+storage: the index can be rebuilt, while page evidence and validated objects remain authoritative.
+The model can create candidates only. Schema, exact source citation and conflict checks determine
+status, and only `validated` objects reach the executor. This namespace must not contain campaign
+memory, module spoilers, NPC state or character history. See `docs/RULEBOOK_KNOWLEDGE.md`.
 
 The request transaction is committed only after the router and service finish. Any Python, SQLite, authorization, model-output, or domain validation exception triggers rollback. This includes business changes and their realtime outbox records, so a browser cannot receive an event for state that did not commit.
 
@@ -62,6 +72,14 @@ This catalogue is the single source of truth for delivery status, phase, depende
 - `context_assemblies` stores the exact prompt, included/excluded sources, visibility scope, and estimated token cost for an AI proposal.
 - `realtime_events` is a transactional SQLite outbox. Every row belongs to a session and has a server-enforced `session`, `kp`, or targeted `member` audience.
 - `realtime_tickets` stores only hashes of short-lived, single-use WebSocket tickets together with their member/session/campaign scope and consumption state.
+
+## Character Sheet Ownership and Revision Boundary
+
+The uploaded `COC空白卡.xlsx` is the field and interaction reference for investigator creation. It is not a database schema or a trusted calculation engine. [`CHARACTER_SHEET_MODEL.md`](CHARACTER_SHEET_MODEL.md) records the inspected sheet regions, canonical JSON shape, import audit, immutable revisions, per-campaign KP approval, runtime state, cross-campaign progression, page flow, and staged real-case tests.
+
+The target model separates global player-owned `investigators`, immutable `investigator_revisions`, per-campaign `campaign_investigators`, and mutable `investigator_campaign_state`. Excel imports read allow-listed player inputs and retain provenance, but never execute formulas or macros. Derived values are recomputed by deterministic ruleset services. A campaign and its AI context use only that campaign's `approved_revision_id`; live HP, SAN, MP, temporary conditions, and inventory deltas do not mutate the approved revision.
+
+The current campaign-bound `player_characters` table remains a compatibility placeholder until the staged migration is implemented and verified. It must not be extended into the permanent cross-campaign identity model.
 
 ## Session and Authorization Flow
 
@@ -123,6 +141,14 @@ The player-action response does not embed the linked proposal, KP notes, secret 
 5. Human KP approval atomically applies events, curated memories, NPC relationship updates, and validated map moves. Any invalid cross-campaign reference rolls the entire approval back.
 
 For a real local-model test, first query the provider's OpenAI-compatible `/v1/models` endpoint and use an ID returned in `data[].id` as `AI_KP_LLM_MODEL`. A guessed `.gguf` filename is not an API capability check. The provider is considered verified only after model discovery, `/v1/chat/completions`, and a complete validated KP proposal flow all succeed.
+
+## Rules Authority and AI Boundary
+
+[`RULES_REFERENCE.md`](RULES_REFERENCE.md) identifies the user-provided CoC7 Keeper Rulebook by version and content hash, maps implementation areas to printed and PDF pages, and defines the required source labels and delivery checks. The PDF remains a local reference and is not committed or served by this project.
+
+Game mechanics must run in deterministic ruleset services rather than in model prose. The model may suggest a check and narrate a validated outcome, but it cannot authoritatively calculate or directly commit dice thresholds, damage, healing, sanity, growth, chase movement, or other rule-dependent state. A mechanical result stores its ruleset version, source reference, normalized inputs, raw dice, outcome, affected state version, and any audited KP override.
+
+Core rules, book-optional rules, campaign house rules, one-off Keeper rulings, and platform workflow policies are distinct sources. Optional and house rules require explicit campaign configuration. Product policies such as character-sheet review must not be presented as though they came from the rulebook.
 
 ## Trust Boundary
 
