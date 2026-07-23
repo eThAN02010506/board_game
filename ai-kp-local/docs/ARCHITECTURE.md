@@ -13,6 +13,11 @@ The backend has explicit composition, transport, application, domain, ruleset, a
 - `src/ai_kp/platform/` owns ruleset-neutral memory, module, and scene logic. `director/` owns AI KP context and proposal orchestration. `rule_authoring/` owns extracted rule objects and deterministic validation/execution.
 - `src/ai_kp/infrastructure/database/` owns SQLite mechanics, schema, ordered migrations, and feature repositories. Its `Repository` facade intentionally supplies one shared transaction boundary to current application services.
 - `src/ai_kp/infrastructure/{knowledge,llm,realtime,security}/` owns external and persistence adapters. These layers may depend inward on domain contracts; domain packages do not depend on these adapters.
+- `src/ai_kp/application/realtime/` owns the authenticated connection lifecycle and pure wire-message
+  decisions. `platform/realtime/ports.py` defines channel and event-store contracts;
+  `infrastructure/realtime/` contains only Starlette, worker-thread, SQLite, and origin-check
+  adapters. Transport close codes and public message shapes are regression-tested independently
+  from those adapters.
 - `src/ai_kp/planning/capabilities.py` is the only product capability catalogue. It records available, partial, and planned capabilities together with dependencies and acceptance criteria.
 - `rulesets` is the application-facing executable-system boundary and currently registers only CoC7. Former `kp`, `maps`, `memory`, `modules`, `llm`, `security`, `realtime`, `rulebook`, `rules`, `characters`, `storage`, and selected `core` modules are compatibility paths only.
 
@@ -138,6 +143,11 @@ Seat revocation is session access revocation, not deletion of the stable player 
 5. The browser stores the last cursor per session member. It reconnects with exponential backoff, replays later visible events, and performs a safe full HTTP sync after connection readiness or an invalid cursor.
 6. Events are mapped to identity, member, PC, action, proposal, or map refresh groups. A 100 ms queue coalesces bursts, and those requests are silent so background sync does not replace the user's operation log or global loading state.
 7. Each poll revalidates the member and active session. Revocation or session closure sends an expiry signal and terminates the existing connection, rather than waiting for the next page reload.
+
+The connection loop is deliberately split by responsibility: the transport adapter enforces
+origin and frame boundaries, the application session controls authentication/replay/heartbeat
+lifecycle, and pure message functions decide protocol responses. New client message types must be
+added to the message layer rather than branching in the Starlette adapter.
 
 In development, Vite proxies both HTTP and WebSocket `/api` traffic. `VITE_BACKEND_TARGET` can point that proxy at a different test backend while preserving a same-origin browser connection.
 
