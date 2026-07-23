@@ -2,6 +2,9 @@
 
 from typing import Any, Protocol
 
+from ai_kp.platform.memory.npc_candidates import NpcCandidate
+from ai_kp.platform.memory.retrieval import RetrievedMemory
+from ai_kp.platform.modules.ingestion import ModuleChunk
 from ai_kp.platform.scenes.map_generation import GeneratedMap
 
 
@@ -295,6 +298,99 @@ class SessionStore(Protocol):
     ) -> dict: ...
 
 
+class WorldStore(RealtimeOutbox, Protocol):
+    def create_pc(self, campaign_id: str, name: str, sheet: dict | None = None) -> dict: ...
+
+    def list_pcs(self, campaign_id: str) -> list[dict]: ...
+
+    def append_event(
+        self,
+        campaign_id: str,
+        actor_type: str,
+        event_type: str,
+        summary: str,
+        *,
+        actor_id: str | None = None,
+        visibility: str = "table",
+        happened_at: str | None = None,
+        payload: dict | None = None,
+    ) -> dict: ...
+
+    def add_memory(
+        self,
+        text: str,
+        scope: str,
+        *,
+        campaign_id: str | None = None,
+        pc_id: str | None = None,
+        npc_id: str | None = None,
+        importance: int = 1,
+        visibility: str = "table",
+        happened_at: str | None = None,
+        source_event_id: str | None = None,
+    ) -> dict: ...
+
+    def list_modules(self, campaign_id: str) -> list[dict]: ...
+
+    def create_module(
+        self,
+        campaign_id: str,
+        title: str,
+        chunks: list[ModuleChunk],
+        *,
+        source_type: str = "plaintext",
+    ) -> dict: ...
+
+    def get_module(self, module_id: str) -> dict: ...
+
+    def list_module_chunks(
+        self,
+        module_id: str,
+        *,
+        allowed_visibility: tuple[str, ...],
+        spoiler_tags: tuple[str, ...] | None,
+    ) -> list[dict]: ...
+
+    def retrieve_memories(
+        self,
+        query: str,
+        *,
+        campaign_id: str,
+        pc_id: str | None,
+        visibility: tuple[str, ...],
+    ) -> list[RetrievedMemory]: ...
+
+    def create_npc(
+        self,
+        name: str,
+        home_location: str | None = None,
+        profession: str | None = None,
+        public_notes: str = "",
+        secret_notes: str = "",
+    ) -> dict: ...
+
+    def link_npc_to_campaign(
+        self,
+        campaign_id: str,
+        npc_id: str,
+        *,
+        role: str = "encountered",
+        first_seen_time: str | None = None,
+        last_seen_time: str | None = None,
+        relationship_score: int = 0,
+        notes: str = "",
+    ) -> None: ...
+
+    def find_npc_candidates(
+        self,
+        *,
+        campaign_id: str,
+        action_text: str,
+        location: str | None = None,
+        profession_hint: str | None = None,
+    ) -> list[NpcCandidate]: ...
+
+
 __all__ = [
     "CampaignStore",
     "CheckStore",
@@ -302,4 +398,5 @@ __all__ = [
     "MapStore",
     "RealtimeOutbox",
     "SessionStore",
+    "WorldStore",
 ]

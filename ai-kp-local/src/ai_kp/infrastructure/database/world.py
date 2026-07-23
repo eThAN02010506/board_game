@@ -3,6 +3,8 @@
 import json
 
 from ai_kp.core.ids import new_id
+from ai_kp.platform.memory.npc_candidates import NpcCandidate, NpcCandidateService
+from ai_kp.platform.memory.retrieval import MemoryRetriever, RetrievedMemory
 from ai_kp.platform.modules.ingestion import ModuleChunk
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
@@ -37,6 +39,36 @@ class WorldRepository(SQLiteRepository):
             "SELECT * FROM campaigns ORDER BY created_at DESC"
         ).fetchall()
         return [row_to_dict(row) for row in rows]
+
+    def retrieve_memories(
+        self,
+        query: str,
+        *,
+        campaign_id: str,
+        pc_id: str | None,
+        visibility: tuple[str, ...],
+    ) -> list[RetrievedMemory]:
+        return MemoryRetriever(self.connection).retrieve(
+            query,
+            campaign_id=campaign_id,
+            pc_id=pc_id,
+            visibility=visibility,
+        )
+
+    def find_npc_candidates(
+        self,
+        *,
+        campaign_id: str,
+        action_text: str,
+        location: str | None = None,
+        profession_hint: str | None = None,
+    ) -> list[NpcCandidate]:
+        return NpcCandidateService(self.connection).find_candidates(
+            campaign_id=campaign_id,
+            action_text=action_text,
+            location=location,
+            profession_hint=profession_hint,
+        )
 
     def create_pc(self, campaign_id: str, name: str, sheet: dict | None = None) -> dict:
         pc_id = new_id("pc")

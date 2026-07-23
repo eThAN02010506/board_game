@@ -1,9 +1,7 @@
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.platform.memory.npc_candidates import NpcCandidateService
-from ai_kp.platform.memory.retrieval import MemoryRetriever
+from ai_kp.application.ports.repositories import WorldStore
 from ai_kp.platform.modules.ingestion import chunk_plaintext_module
 
 
@@ -68,7 +66,7 @@ class LinkNpcCommand:
 class WorldService:
     """Coordinate durable campaign-world writes and visibility-aware queries."""
 
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: WorldStore):
         self.repo = repo
 
     def create_pc(
@@ -180,7 +178,7 @@ class WorldService:
             if view == "player"
             else ("player", "table", "kp")
         )
-        results = MemoryRetriever(self.repo.connection).retrieve(
+        results = self.repo.retrieve_memories(
             query,
             campaign_id=campaign_id,
             pc_id=pc_id,
@@ -231,7 +229,7 @@ class WorldService:
         location: str | None = None,
         profession_hint: str | None = None,
     ) -> list[dict]:
-        results = NpcCandidateService(self.repo.connection).find_candidates(
+        results = self.repo.find_npc_candidates(
             campaign_id=campaign_id,
             action_text=action_text,
             location=location,
