@@ -26,6 +26,7 @@ import type {
   SkillCheck,
   TurnProposal
 } from "../api/types";
+import { useCredentials } from "../auth/credentials";
 import { ActionPanel } from "../features/actions/ActionPanel";
 import { CampaignPanel } from "../features/campaigns/CampaignPanel";
 import { CheckPanel } from "../features/checks/CheckPanel";
@@ -44,14 +45,10 @@ import { useWorkspaceRoute } from "./router";
 import {
   listStoredCampaignTokens,
   readActiveMapId,
-  readAdminToken,
   readCampaignToken,
-  readPlayerProfileToken,
   removeCampaignToken,
   writeActiveMapId,
-  writeAdminToken,
-  writeCampaignToken,
-  writePlayerProfileToken
+  writeCampaignToken
 } from "../session/session-storage";
 import "../styles.css";
 
@@ -108,13 +105,14 @@ function publicPcSummary(pc: PlayerCharacter): NonNullable<PlayerCharacter["publ
 }
 
 
-const initialAdminToken = readAdminToken();
-const initialPlayerProfileToken = readPlayerProfileToken();
-credentialBridge.admin(initialAdminToken);
-credentialBridge.player(initialPlayerProfileToken);
-
 export default function App() {
   const { activePage: activeNav, navigate, route: currentPage } = useWorkspaceRoute();
+  const {
+    adminToken,
+    persistAdminToken,
+    rememberPlayerToken,
+    setAdminToken
+  } = useCredentials();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [activeCampaign, setActiveCampaign] = useState<Campaign | null>(null);
   const [maps, setMaps] = useState<SavedMap[]>([]);
@@ -151,7 +149,6 @@ export default function App() {
 
   const [campaignTitle, setCampaignTitle] = useState("雾港 1928");
   const [campaignTime, setCampaignTime] = useState("1928-10-03 19:30");
-  const [adminToken, setAdminToken] = useState(initialAdminToken);
   const [mapTitle, setMapTitle] = useState("旧码头区域图");
   const [mapPrompt, setMapPrompt] = useState("旧码头、废弃仓库、报社、警局");
   const [locationsText, setLocationsText] = useState(defaultLocations);
@@ -236,9 +233,7 @@ export default function App() {
   }
 
   function applyAdminToken() {
-    const nextToken = adminToken.trim();
-    credentialBridge.admin(nextToken);
-    writeAdminToken(nextToken);
+    const nextToken = persistAdminToken();
     setLog(nextToken ? "管理员口令已仅保存在当前浏览器会话。" : "管理员口令已清除。");
   }
 
@@ -303,8 +298,7 @@ export default function App() {
   function rememberSession(bundle: SessionBundle) {
     activateCampaign(bundle.campaign);
     if (bundle.player_token) {
-      credentialBridge.player(bundle.player_token);
-      writePlayerProfileToken(bundle.player_token);
+      rememberPlayerToken(bundle.player_token);
     }
     credentialBridge.session(bundle.access_token, bundle.member.role, bundle.member.pc_id);
     writeCampaignToken(bundle.campaign.id, bundle.access_token);

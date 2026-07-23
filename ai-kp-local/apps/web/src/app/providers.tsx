@@ -1,2 +1,7 @@
-// Future composition of identity, API, realtime, ruleset UI, and error providers.
-// Intentionally exports nothing until the corresponding capability has real acceptance tests.
+import type { ReactNode } from "react";
+
+import { CredentialProvider } from "../auth/credentials";
+
+export function AppProviders({ children }: { children: ReactNode }) {
+  return <CredentialProvider>{children}</CredentialProvider>;
+}

@@ -17,6 +17,9 @@ The React workspace follows the same separation:
 
 - `apps/web/src/api` owns the HTTP client, credential bridge, and TypeScript API DTOs.
 - `apps/web/src/session` owns browser-session credential and active-map persistence. It stores only opaque tokens and selection IDs, never authoritative campaign data.
+- `apps/web/src/auth/credentials.tsx` initializes the API credential bridge and owns editable
+  administrator/player-profile credentials; `app/providers.tsx` is the single provider
+  composition entry.
 - `apps/web/src/realtime/provider.tsx` is the frontend provider boundary for WebSocket lifecycle, cursor replay, event-to-refresh routing, burst coalescing, full sync, and stale campaign/session guards.
 - `apps/web/src/features` contains the campaign, session, map, action, proposal, and capability-planning panels. `shared` contains presentation components reused by features.
 - `apps/web/src/app/router.tsx` is the single route registry and browser-history adapter.
