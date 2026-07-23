@@ -104,6 +104,38 @@ class TurnProposalTests(unittest.TestCase):
                 self.assertIn("潮湿的异味", event["summary"])
                 self.assertTrue(any(action["action_type"] == "overridden" for action in approved["actions"]))
 
+    def test_repository_cannot_bypass_unresolved_check_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "test.sqlite3"
+            with db_session(db_path) as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("未决检定边界")
+                proposal = repo.create_turn_proposal(
+                    campaign_id=campaign["id"],
+                    player_action="我搜索房间。",
+                    public_narration="进行侦查检定。",
+                    proposed_checks=[
+                        {
+                            "skill": "侦查",
+                            "difficulty": "regular",
+                            "reason": "寻找线索",
+                        }
+                    ],
+                    proposed_events=[
+                        {
+                            "event_type": "clue_found",
+                            "summary": "检定前就写入了线索。",
+                        }
+                    ],
+                )
+
+                with self.assertRaisesRegex(ValueError, "unresolved checks"):
+                    repo.approve_turn_proposal(proposal["id"], actor="human_kp")
+
+                restored = repo.get_turn_proposal(proposal["id"])
+                self.assertEqual(restored["status"], "draft")
+                self.assertEqual(count_events(repo, campaign["id"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

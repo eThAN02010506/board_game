@@ -177,6 +177,15 @@ In development, Vite proxies both HTTP and WebSocket `/api` traffic. `VITE_BACKE
 
 The player-action response does not embed the linked proposal, KP notes, secret context, or final prompt.
 
+Proposal approval is split into three boundaries. `platform/resolution/proposals.py` owns the
+ruleset-neutral invariant that unresolved checks cannot carry precommitted world effects.
+`application/play/proposal_approval.py` validates each requested check against the campaign's
+pinned ruleset and produces immutable check plans. The SQLite adapter claims the draft and applies
+narration, explicit events, memories, NPC updates and map moves through separate effect handlers
+inside one savepoint. The unresolved-check invariant is rechecked after the draft is claimed, so
+direct repository use cannot bypass the application policy; any handler failure restores the
+proposal and all affected world state.
+
 ## AI Turn Flow
 
 1. `ContextBuilder` reads campaign time, relevant memories, eligible old NPCs, recent events, and active module chunks.
@@ -192,6 +201,12 @@ For a real local-model test, first query the provider's OpenAI-compatible `/v1/m
 [`RULES_REFERENCE.md`](RULES_REFERENCE.md) identifies the user-provided CoC7 Keeper Rulebook by version and content hash, maps implementation areas to printed and PDF pages, and defines the required source labels and delivery checks. The PDF remains a local reference and is not committed or served by this project.
 
 Game mechanics must run in deterministic ruleset services rather than in model prose. The model may suggest a check and narrate a validated outcome, but it cannot authoritatively calculate or directly commit dice thresholds, damage, healing, sanity, growth, chase movement, or other rule-dependent state. A mechanical result stores its ruleset version, source reference, normalized inputs, raw dice, outcome, affected state version, and any audited KP override.
+
+The rule-object executor is a closed interpreter, not an `eval` surface. `runtime.py` owns field,
+operand, condition and effect primitives; `execution_strategies.py` owns lookup-table and
+condition/effect traversal; `engine.py` only validates required inputs and dispatches the declared
+execution kind. Missing targets, incompatible operands, reference-only rules and unmatched lookup
+rows fail closed with `RuleExecutionError`.
 
 The first implemented mechanics slice is documented in [`CHECK_RESOLUTION.md`](CHECK_RESOLUTION.md). Its pure resolver is separate from secure random generation and physical-dice input; both paths persist identical replay data. Check-only proposals cannot carry world effects before resolution.
 

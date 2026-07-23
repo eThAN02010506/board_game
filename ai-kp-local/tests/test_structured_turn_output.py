@@ -58,7 +58,7 @@ class StructuredTurnOutputTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StructuredApprovalTests(unittest.TestCase):
-    def test_approval_applies_all_validated_side_effects(self) -> None:
+    def test_approval_applies_all_validated_world_side_effects(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             with db_session(Path(tmpdir) / "test.sqlite3") as connection:
                 repo = Repository(connection)
@@ -84,14 +84,6 @@ class StructuredApprovalTests(unittest.TestCase):
                     player_action="我跟周怀民去仓库检查。",
                     public_narration="你们到达仓库门口。",
                     kp_notes="隐藏的 KP 备注。",
-                    proposed_checks=[
-                        {
-                            "skill": "侦查",
-                            "difficulty": "regular",
-                            "reason": "寻找门上的痕迹",
-                            "pc_id": pc["id"],
-                        }
-                    ],
                     proposed_events=[
                         {
                             "event_type": "clue_found",
@@ -142,7 +134,7 @@ class StructuredApprovalTests(unittest.TestCase):
                 self.assertEqual(npc_link["relationship_score"], 3)
                 self.assertEqual(
                     {row["event_type"] for row in event_rows},
-                    {"kp_turn", "check_requested", "clue_found", "npc_updated", "map_token_moved"},
+                    {"kp_turn", "clue_found", "npc_updated", "map_token_moved"},
                 )
                 kp_turn = next(row for row in event_rows if row["event_type"] == "kp_turn")
                 self.assertNotIn("kp_notes", json.loads(kp_turn["payload_json"]))

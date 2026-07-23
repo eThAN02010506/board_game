@@ -14,6 +14,9 @@ from ai_kp.director.turn_output import (
 )
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
+from ai_kp.platform.resolution.proposals import (
+    validate_proposal_resolution_boundary,
+)
 
 
 PROPOSAL_JSON_FIELDS = (
@@ -189,6 +192,9 @@ class TurnRepository(SQLiteRepository):
                     "Only draft proposals can be approved; "
                     f"current status is {proposal['status']}"
                 )
+            validate_proposal_resolution_boundary(
+                self.get_turn_proposal(proposal_id)
+            )
             result = self._apply_turn_proposal(
                 proposal_id,
                 actor=actor,
@@ -210,7 +216,38 @@ class TurnRepository(SQLiteRepository):
         override_public_narration: str | None,
     ) -> dict:
         proposal = self.get_turn_proposal(proposal_id)
-        public_narration = override_public_narration or proposal["public_narration"]
+        public_narration = self._apply_narration_override(
+            proposal,
+            actor=actor,
+            note=note,
+            override_public_narration=override_public_narration,
+        )
+        applied_event = self._append_turn_narration(
+            proposal,
+            actor=actor,
+            public_narration=public_narration,
+        )
+        self._apply_proposed_checks(proposal)
+        self._apply_proposed_events(proposal)
+        self._apply_proposed_memories(proposal, applied_event["id"])
+        self._apply_proposed_npc_updates(proposal)
+        self._apply_proposed_map_moves(proposal, actor=actor)
+        self._finalize_approved_proposal(
+            proposal,
+            actor=actor,
+            note=note,
+            applied_event_id=applied_event["id"],
+        )
+        return self.get_turn_proposal(proposal_id)
+
+    def _apply_narration_override(
+        self,
+        proposal: dict,
+        *,
+        actor: str,
+        note: str,
+        override_public_narration: str | None,
+    ) -> str:
         if override_public_narration:
             self.connection.execute(
                 """
@@ -218,28 +255,39 @@ class TurnRepository(SQLiteRepository):
                 SET public_narration = ?, status = 'overridden'
                 WHERE id = ?
                 """,
-                (override_public_narration, proposal_id),
+                (override_public_narration, proposal["id"]),
             )
             self.add_proposal_action(
-                proposal_id,
+                proposal["id"],
                 "overridden",
                 actor=actor,
                 note=note,
                 payload={"public_narration": override_public_narration},
             )
-        event_payload = {
-            "proposal_id": proposal_id,
-            "player_action": proposal["player_action"],
-        }
-        applied_event = self.append_event(
+            return override_public_narration
+        return str(proposal["public_narration"])
+
+    def _append_turn_narration(
+        self,
+        proposal: dict,
+        *,
+        actor: str,
+        public_narration: str,
+    ) -> dict:
+        return self.append_event(
             campaign_id=proposal["campaign_id"],
             actor_type="kp",
             actor_id=actor,
             visibility="table",
             event_type="kp_turn",
             summary=public_narration,
-            payload=event_payload,
+            payload={
+                "proposal_id": proposal["id"],
+                "player_action": proposal["player_action"],
+            },
         )
+
+    def _apply_proposed_checks(self, proposal: dict) -> None:
         for proposed_check in proposal["proposed_checks"]:
             check_pc_id = proposed_check.get("pc_id") or proposal["pc_id"]
             if check_pc_id:
@@ -256,6 +304,8 @@ class TurnRepository(SQLiteRepository):
                 ),
                 payload=proposed_check,
             )
+
+    def _apply_proposed_events(self, proposal: dict) -> None:
         for proposed_event in proposal["proposed_events"]:
             if proposed_event.get("actor_id") and proposed_event["actor_type"] == "pc":
                 self._require_pc_in_campaign(
@@ -275,6 +325,12 @@ class TurnRepository(SQLiteRepository):
                 summary=proposed_event.get("summary", ""),
                 payload=proposed_event.get("payload", {}),
             )
+
+    def _apply_proposed_memories(
+        self,
+        proposal: dict,
+        source_event_id: str,
+    ) -> None:
         for proposed_memory in proposal["proposed_memories"]:
             memory_pc_id = proposed_memory.get("pc_id") or proposal["pc_id"]
             if memory_pc_id:
@@ -292,8 +348,10 @@ class TurnRepository(SQLiteRepository):
                 importance=int(proposed_memory.get("importance", 1)),
                 visibility=proposed_memory.get("visibility", "table"),
                 happened_at=proposed_memory.get("happened_at"),
-                source_event_id=applied_event["id"],
+                source_event_id=source_event_id,
             )
+
+    def _apply_proposed_npc_updates(self, proposal: dict) -> None:
         for proposed_npc_update in proposal["proposed_npc_updates"]:
             self._apply_npc_update(proposal["campaign_id"], proposed_npc_update)
             self.append_event(
@@ -315,6 +373,8 @@ class TurnRepository(SQLiteRepository):
                     "last_seen_time": proposed_npc_update.get("last_seen_time"),
                 },
             )
+
+    def _apply_proposed_map_moves(self, proposal: dict, *, actor: str) -> None:
         for proposed_map_move in proposal["proposed_map_moves"]:
             token = self._require_token_in_campaign(
                 proposed_map_move["token_id"], proposal["campaign_id"]
@@ -323,7 +383,7 @@ class TurnRepository(SQLiteRepository):
                 token_id=proposed_map_move["token_id"],
                 to_location_name=proposed_map_move["to_location_name"],
                 moved_by=actor,
-                note=f"approved proposal {proposal_id}",
+                note=f"approved proposal {proposal['id']}",
                 require_route=proposed_map_move.get("require_route", True),
             )
             self.append_event(
@@ -343,24 +403,32 @@ class TurnRepository(SQLiteRepository):
                     "to_location": moved_token["location_name"],
                 },
             )
+
+    def _finalize_approved_proposal(
+        self,
+        proposal: dict,
+        *,
+        actor: str,
+        note: str,
+        applied_event_id: str,
+    ) -> None:
         self.connection.execute(
             """
             UPDATE turn_proposals
             SET status = 'approved', applied_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (proposal_id,),
+            (proposal["id"],),
         )
         self.add_proposal_action(
-            proposal_id,
+            proposal["id"],
             "approved",
             actor=actor,
             note=note,
-            payload={"applied_event_id": applied_event["id"]},
+            payload={"applied_event_id": applied_event_id},
         )
         if not proposal["proposed_checks"]:
-            self.resolve_player_action_for_proposal(proposal_id, "resolved")
-        return self.get_turn_proposal(proposal_id)
+            self.resolve_player_action_for_proposal(proposal["id"], "resolved")
 
     def _require_token_in_campaign(self, token_id: str, campaign_id: str) -> dict:
         row = self.connection.execute(
