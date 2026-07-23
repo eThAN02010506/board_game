@@ -8,3 +8,6 @@ class SQLiteRepository:
 
     def __init__(self, connection: sqlite3.Connection):
         self.connection = connection
+
+    def commit(self) -> None:
+        self.connection.commit()

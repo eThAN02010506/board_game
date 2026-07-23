@@ -4,26 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
 from pypdf import PdfReader
 
+from ai_kp.platform.knowledge.sources import ExtractedRulebook
 
 MAX_PDF_BYTES = 64 * 1024 * 1024
 MAX_CHUNK_CHARACTERS = 2600
 HEADING_PATTERN = re.compile(r"^(第[一二三四五六七八九十百]+章|\d+(?:\.\d+)+)\s*(.+)?$")
-
-
-@dataclass(frozen=True)
-class ExtractedRulebook:
-    source_hash: str
-    page_count: int
-    title: str
-    metadata: dict[str, Any]
-    chunks: list[dict[str, Any]]
-
 
 def _normalize_page_text(text: str) -> str:
     lines = []

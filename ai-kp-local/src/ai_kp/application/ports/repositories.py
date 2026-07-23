@@ -391,12 +391,117 @@ class WorldStore(RealtimeOutbox, Protocol):
     ) -> list[NpcCandidate]: ...
 
 
+class RulebookStore(Protocol):
+    def commit(self) -> None: ...
+
+    def create_rule_source(
+        self,
+        *,
+        ruleset_id: str,
+        title: str,
+        source_filename: str,
+        source_hash: str,
+        page_count: int,
+        metadata: dict[str, Any],
+    ) -> dict: ...
+
+    def get_rule_source(self, source_id: str) -> dict: ...
+
+    def find_rule_source(self, ruleset_id: str) -> dict: ...
+
+    def set_rule_source_status(self, source_id: str, status: str) -> None: ...
+
+    def create_ingestion_run(
+        self,
+        source_id: str,
+        *,
+        stage: str,
+        agent_model: str | None = None,
+        prompt_version: str | None = None,
+    ) -> dict: ...
+
+    def update_ingestion_run(self, run_id: str, **changes: Any) -> dict: ...
+
+    def replace_rule_chunks(
+        self,
+        source_id: str,
+        chunks: list[dict[str, Any]],
+    ) -> None: ...
+
+    def list_rule_chunks(
+        self,
+        source_id: str,
+        *,
+        extraction_status: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict]: ...
+
+    def get_rule_chunk(self, chunk_id: str) -> dict: ...
+
+    def mark_rule_chunk(
+        self,
+        chunk_id: str,
+        *,
+        extraction_status: str | None = None,
+        minirag_doc_id: str | None = None,
+    ) -> None: ...
+
+    def reset_failed_rule_chunks(self, source_id: str) -> int: ...
+
+    def store_rule_object(
+        self,
+        source_id: str,
+        payload: dict[str, Any],
+        *,
+        status: str,
+        validation: dict[str, Any],
+    ) -> dict: ...
+
+    def record_rule_validation_issue(
+        self,
+        source_id: str,
+        *,
+        validation_layer: str,
+        error_text: str,
+        chunk_id: str | None = None,
+        run_id: str | None = None,
+        candidate: Any = None,
+    ) -> dict: ...
+
+    def latest_validated_rule(self, source_id: str, rule_key: str) -> dict: ...
+
+    def search_validated_rules(
+        self,
+        source_id: str,
+        query: str,
+        *,
+        audience: str,
+        limit: int = 8,
+    ) -> list[dict]: ...
+
+    def lexical_rule_chunks(
+        self,
+        source_id: str,
+        query: str,
+        limit: int = 8,
+    ) -> list[dict]: ...
+
+    def list_rule_objects(
+        self,
+        source_id: str,
+        *,
+        status: str | None = None,
+        rule_key: str | None = None,
+    ) -> list[dict]: ...
+
+
 __all__ = [
     "CampaignStore",
     "CheckStore",
     "InvestigatorStore",
     "MapStore",
     "RealtimeOutbox",
+    "RulebookStore",
     "SessionStore",
     "WorldStore",
 ]

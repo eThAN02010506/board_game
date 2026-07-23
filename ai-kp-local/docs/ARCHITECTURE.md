@@ -53,7 +53,8 @@ Plain read-only or single-table use cases still pass through a service when a do
 
 ## Rulebook knowledge boundary
 
-`infrastructure/knowledge/` owns source PDF extraction and MiniRAG original-text indexing;
+`platform/knowledge/ports.py` defines source extraction and original-text index contracts.
+`infrastructure/knowledge/` implements them with PDF extraction and MiniRAG;
 `rule_authoring/` owns JSON rule validation and the closed deterministic execution DSL. SQLite
 source chunks and MiniRAG files are deliberately dual
 storage: the index can be rebuilt, while page evidence and validated objects remain authoritative.

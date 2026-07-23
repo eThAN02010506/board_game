@@ -5,10 +5,23 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Any, Protocol
 
-from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.rule_authoring.models import RuleObject, RuleStatus
+
+
+class RuleValidationStore(Protocol):
+    def get_rule_chunk(self, chunk_id: str) -> dict:
+        ...
+
+    def list_rule_objects(
+        self,
+        source_id: str,
+        *,
+        status: str | None = None,
+        rule_key: str | None = None,
+    ) -> list[dict]:
+        ...
 
 
 def _normalized(text: str) -> str:
@@ -18,7 +31,7 @@ def _normalized(text: str) -> str:
 class RuleValidator:
     """Three gates: schema, source citation, then conflict/consistency."""
 
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: RuleValidationStore):
         self.repo = repo
 
     def validate(self, source_id: str, candidate: dict[str, Any]) -> tuple[RuleObject, dict]:

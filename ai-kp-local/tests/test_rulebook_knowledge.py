@@ -11,6 +11,7 @@ from ai_kp.rulebook.engine import RuleExecutionError, execute_rule
 from ai_kp.rulebook.models import RuleObject
 from ai_kp.rulebook.pdf_ingestion import extract_rulebook_pdf
 from ai_kp.rulebook.validation import RuleValidator
+from ai_kp.infrastructure.knowledge.minirag import MiniRagOriginalIndex
 
 
 class _FakePage:
@@ -158,13 +159,18 @@ class RulebookKnowledgeTests(unittest.TestCase):
     def test_reimport_does_not_downgrade_ready_source(self) -> None:
         source, _chunks = self._source_and_chunks()
         self.repo.set_rule_source_status(source["id"], "ready")
-        service = RulebookService(self.repo, index_root=Path(self.tmpdir.name) / "rag")
-
-        with patch("ai_kp.application.rulebook_service.extract_rulebook_pdf") as extract:
-            with patch(
-                "ai_kp.infrastructure.knowledge.pdf_ingestion.PdfReader", _FakeReader
-            ):
-                extract.return_value = extract_rulebook_pdf(b"fake-pdf", "rules.pdf")
+        with patch("ai_kp.infrastructure.knowledge.pdf_ingestion.PdfReader", _FakeReader):
+            extracted = extract_rulebook_pdf(b"fake-pdf", "rules.pdf")
+        service = RulebookService(
+            self.repo,
+            extractor=lambda _data, _filename: extracted,
+            index_factory=lambda ruleset_id, source_id: MiniRagOriginalIndex(
+                Path(self.tmpdir.name) / "rag",
+                ruleset_id,
+                source_id,
+            ),
+        )
+        with patch("ai_kp.infrastructure.knowledge.pdf_ingestion.PdfReader", _FakeReader):
             repeated = service.ingest_pdf(
                 b"fake-pdf",
                 "rules.pdf",

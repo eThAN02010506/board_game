@@ -8,12 +8,12 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ai_kp.platform.knowledge.ports import OriginalTextIndexUnavailableError
 
 MARKER = "RULE_CHUNK_ID"
 
 
-class MiniRagUnavailableError(RuntimeError):
-    pass
+MiniRagUnavailableError = OriginalTextIndexUnavailableError
 
 
 def _safe_working_dir(root: Path, ruleset_id: str, source_id: str) -> Path:

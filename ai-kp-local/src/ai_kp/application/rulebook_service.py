@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.platform.ports.llm import LlmClient
-from ai_kp.infrastructure.knowledge.minirag import (
-    MiniRagOriginalIndex,
-    MiniRagUnavailableError,
+from ai_kp.application.ports.repositories import RulebookStore
+from ai_kp.platform.knowledge.ports import (
+    OriginalTextIndex,
+    OriginalTextIndexFactory,
+    OriginalTextIndexUnavailableError,
+    RulebookExtractor,
 )
-from ai_kp.infrastructure.knowledge.pdf_ingestion import extract_rulebook_pdf
+from ai_kp.platform.ports.llm import LlmClient
 from ai_kp.rule_authoring.agent import PROMPT_VERSION, RuleExtractionAgent
 from ai_kp.rule_authoring.engine import execute_rule
 from ai_kp.rule_authoring.models import RuleObject
@@ -19,14 +19,14 @@ from ai_kp.rule_authoring.validation import RuleValidator
 class RulebookService:
     def __init__(
         self,
-        repo: Repository,
+        repo: RulebookStore,
         *,
-        index_root: Path,
-        embedding_dimensions: int = 384,
+        extractor: RulebookExtractor,
+        index_factory: OriginalTextIndexFactory,
     ):
         self.repo = repo
-        self.index_root = index_root
-        self.embedding_dimensions = embedding_dimensions
+        self.extractor = extractor
+        self.index_factory = index_factory
 
     def ingest_pdf(
         self,
@@ -36,7 +36,7 @@ class RulebookService:
         ruleset_id: str,
         title: str | None = None,
     ) -> dict:
-        extracted = extract_rulebook_pdf(data, filename)
+        extracted = self.extractor(data, filename)
         source = self.repo.create_rule_source(
             ruleset_id=ruleset_id,
             title=title or extracted.title,
@@ -50,13 +50,8 @@ class RulebookService:
             self.repo.set_rule_source_status(source["id"], "extracted")
         return self.repo.get_rule_source(source["id"])
 
-    def _index(self, source: dict) -> MiniRagOriginalIndex:
-        return MiniRagOriginalIndex(
-            self.index_root,
-            source["ruleset_id"],
-            source["id"],
-            self.embedding_dimensions,
-        )
+    def _index(self, source: dict) -> OriginalTextIndex:
+        return self.index_factory(source["ruleset_id"], source["id"])
 
     async def index_source(self, source_id: str) -> dict:
         source = self.repo.get_rule_source(source_id)
@@ -154,7 +149,7 @@ class RulebookService:
                     accepted_count=accepted,
                     rejected_count=rejected,
                 )
-                self.repo.connection.commit()
+                self.repo.commit()
             return self.repo.update_ingestion_run(
                 run["id"],
                 status="completed",
@@ -181,7 +176,7 @@ class RulebookService:
         chunk_ids: list[str] = []
         try:
             chunk_ids = await self._index(source).retrieve(question, top_k)
-        except MiniRagUnavailableError:
+        except OriginalTextIndexUnavailableError:
             backend = "lexical_fallback"
         except Exception:
             backend = "lexical_fallback"

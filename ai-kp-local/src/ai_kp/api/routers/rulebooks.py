@@ -8,6 +8,8 @@ from ai_kp.api.schemas import RuleExecuteRequest, RuleQueryRequest
 from ai_kp.application.rulebook_service import RulebookService
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.knowledge.minirag import MiniRagOriginalIndex
+from ai_kp.infrastructure.knowledge.pdf_ingestion import extract_rulebook_pdf
 from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
@@ -21,8 +23,13 @@ def get_rulebook_service(
 ) -> RulebookService:
     return RulebookService(
         repo,
-        index_root=settings.rulebook_index_root,
-        embedding_dimensions=settings.rulebook_embedding_dimensions,
+        extractor=extract_rulebook_pdf,
+        index_factory=lambda ruleset_id, source_id: MiniRagOriginalIndex(
+            settings.rulebook_index_root,
+            ruleset_id,
+            source_id,
+            settings.rulebook_embedding_dimensions,
+        ),
     )
 
 
