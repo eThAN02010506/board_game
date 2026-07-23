@@ -5,14 +5,12 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   credentialBridge,
-  fetchCapabilities,
   requestJson,
   requestJsonWithAccessToken
 } from "../api/client";
 import type {
   AuthIdentity,
   Campaign,
-  Capability,
   CreateSkillCheckInput,
   ContextAssembly,
   MapToken,
@@ -36,6 +34,7 @@ import { MapStage } from "../features/maps/MapStage";
 import { ModelSettingsPage } from "../features/models/ModelSettingsPage";
 import { TokenPanel } from "../features/maps/TokenPanel";
 import { PlanningPanel } from "../features/planning/PlanningPanel";
+import { useCapabilities } from "../features/planning/useCapabilities";
 import { ProposalPanel } from "../features/proposals/ProposalPanel";
 import { RulebookPage } from "../features/rules/RulebookPage";
 import { SessionPanel } from "../features/sessions/SessionPanel";
@@ -113,6 +112,12 @@ export default function App() {
     rememberPlayerToken,
     setAdminToken
   } = useCredentials();
+  const {
+    capabilities,
+    error: capabilitiesError,
+    loading: capabilitiesLoading,
+    refresh: refreshCapabilities
+  } = useCapabilities();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [activeCampaign, setActiveCampaign] = useState<Campaign | null>(null);
   const [maps, setMaps] = useState<SavedMap[]>([]);
@@ -135,15 +140,11 @@ export default function App() {
   const [log, setLog] = useState("准备就绪。先连接后端，或直接创建一个测试团。");
   const [loading, setLoading] = useState(false);
   const [characterExpanded, setCharacterExpanded] = useState(false);
-  const [capabilities, setCapabilities] = useState<Capability[]>([]);
-  const [capabilitiesLoading, setCapabilitiesLoading] = useState(true);
-  const [capabilitiesError, setCapabilitiesError] = useState("");
   const activeCampaignIdRef = useRef("");
   const activeSessionIdRef = useRef("");
   const activeMapIdRef = useRef("");
   const campaignSelectionVersion = useRef(0);
   const campaignListRequestVersion = useRef(0);
-  const capabilityRequestVersion = useRef(0);
   const mapRequestVersion = useRef(0);
   const pendingRequestCount = useRef(0);
 
@@ -240,23 +241,6 @@ export default function App() {
   function navigateWorkspace(id: typeof activeNav) {
     navigate(id);
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  async function loadCapabilities() {
-    const requestVersion = ++capabilityRequestVersion.current;
-    setCapabilitiesLoading(true);
-    setCapabilitiesError("");
-    try {
-      const result = await fetchCapabilities();
-      if (capabilityRequestVersion.current !== requestVersion) return;
-      setCapabilities(result);
-    } catch {
-      if (capabilityRequestVersion.current !== requestVersion) return;
-      setCapabilities([]);
-      setCapabilitiesError("无法读取后端能力目录。请确认本地后端已启动，然后重试。");
-    } finally {
-      if (capabilityRequestVersion.current === requestVersion) setCapabilitiesLoading(false);
-    }
   }
 
   function activateCampaign(campaign: Campaign | null) {
@@ -1190,7 +1174,6 @@ export default function App() {
 
   useEffect(() => {
     void loadCampaigns();
-    void loadCapabilities();
     void loadRecoverableSeats(true);
   }, []);
 
@@ -1498,7 +1481,7 @@ export default function App() {
           capabilities={capabilities}
           error={capabilitiesError}
           loading={capabilitiesLoading}
-          onRetry={() => void loadCapabilities()}
+          onRetry={() => void refreshCapabilities()}
         />
     </AppLayout>
   );
