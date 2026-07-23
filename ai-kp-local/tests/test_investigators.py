@@ -12,6 +12,7 @@ from ai_kp.characters.xlsx_import import (
 )
 from ai_kp.core.config import Settings
 from ai_kp.rules.coc7_character import normalize_character_sheet
+from ai_kp.rules.coc7_recommendations import recommend_coc7_skill_points
 from ai_kp.rules.coc7_skills import list_coc7_skill_catalog
 
 
@@ -150,6 +151,89 @@ def test_manual_skill_budgets_and_creation_limits_are_validated() -> None:
     assert any("职业技能点超出预算 20 点" in warning for warning in warnings)
     assert any("兴趣技能点超出预算 31 点" in warning for warning in warnings)
     assert any("克苏鲁神话不能" in warning for warning in warnings)
+
+
+def test_local_skill_recommendation_fills_budgets_and_respects_era() -> None:
+    recommendation = recommend_coc7_skill_points(
+        occupation="调查记者",
+        era="1920s",
+        age=29,
+        occupation_point_formula="edu4",
+        characteristics={
+            "str": 50,
+            "con": 55,
+            "siz": 60,
+            "dex": 65,
+            "app": 55,
+            "int": 70,
+            "pow": 60,
+            "edu": 60,
+            "luck": 50,
+        },
+    )
+
+    assert recommendation["profile_id"] == "reporter"
+    assert recommendation["occupation_budget"] == 240
+    assert recommendation["occupation_spent"] == 240
+    assert recommendation["interest_budget"] == 140
+    assert recommendation["interest_spent"] == 140
+    allocated_keys = {
+        allocation["skill_key"] for allocation in recommendation["allocations"]
+    }
+    assert "coc7.cthulhu_mythos" not in allocated_keys
+    assert "coc7.computer_use" not in allocated_keys
+    assert "coc7.electronics" not in allocated_keys
+    assert set(
+        (
+            "coc7.art_craft_1",
+            "coc7.history",
+            "coc7.library_use",
+            "coc7.psychology",
+            "coc7.fast_talk",
+            "coc7.spot_hidden",
+            "coc7.credit_rating",
+        )
+    ).issubset(allocated_keys)
+    photography = next(
+        allocation
+        for allocation in recommendation["allocations"]
+        if allocation["skill_key"] == "coc7.art_craft_1"
+    )
+    assert photography["specialization"] == "摄影"
+
+
+def test_skill_recommendation_api_validates_basics_and_returns_plan(
+    tmp_path: Path,
+) -> None:
+    app = create_app(Settings(db_path=tmp_path / "recommendations.sqlite3"))
+    payload = {
+        "occupation": "医生",
+        "era": "现代",
+        "age": 42,
+        "occupation_point_formula": "edu2_pow2",
+        "characteristics": {
+            "str": 45,
+            "con": 60,
+            "siz": 55,
+            "dex": 50,
+            "app": 55,
+            "int": 65,
+            "pow": 70,
+            "edu": 75,
+            "luck": 50,
+        },
+    }
+
+    with TestClient(app) as client:
+        response = client.post("/investigator-skills/recommend", json=payload)
+        invalid = client.post(
+            "/investigator-skills/recommend", json={**payload, "age": 12}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["profile_id"] == "doctor"
+    assert response.json()["occupation_spent"] == 290
+    assert invalid.status_code == 422
 
 
 def test_excel_import_rejects_excessive_uncompressed_content() -> None:

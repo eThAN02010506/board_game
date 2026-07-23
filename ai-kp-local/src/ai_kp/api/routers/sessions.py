@@ -2,13 +2,32 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from ai_kp.application.session_service import SessionService
 from ai_kp.api.authz import is_local_admin, require_campaign_role
-from ai_kp.api.dependencies import get_identity, get_optional_identity, get_repo
-from ai_kp.api.schemas import SessionCreate, SessionJoin, SessionMemberPcAssign
-from ai_kp.core.repository import Repository
-from ai_kp.security.repository import AuthenticatedMember
+from ai_kp.api.dependencies import (
+    get_identity,
+    get_optional_identity,
+    get_optional_player_identity,
+    get_player_identity,
+    get_repo,
+)
+from ai_kp.api.schemas import (
+    SessionCreate,
+    SessionJoin,
+    SessionMemberPcAssign,
+    SessionSeatClaim,
+    SessionSeatCreate,
+    SessionSeatPcAssign,
+)
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.database.security import AuthenticatedMember
+from ai_kp.infrastructure.database.investigators import AuthenticatedPlayer
 
 
 router = APIRouter()
+
+
+def _require_session_kp(identity: AuthenticatedMember, session_id: str) -> None:
+    if identity.session_id != session_id or identity.role != "kp":
+        raise HTTPException(status_code=403, detail="KP access required for this session")
 
 
 @router.post("/campaigns/{campaign_id}/sessions")
@@ -121,3 +140,93 @@ def close_campaign_session(
     if not authorized_kp and not is_local_admin(request, x_ai_kp_admin_token):
         raise HTTPException(status_code=403, detail="KP or local administrator required")
     return SessionService(repo).close(session_id)
+
+
+@router.post("/sessions/{session_id}/seats")
+def create_session_seat(
+    session_id: str,
+    payload: SessionSeatCreate,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    _require_session_kp(identity, session_id)
+    return SessionService(repo).create_seat(
+        session_id,
+        label=payload.label,
+        kp_member_id=identity.member_id,
+        pc_id=payload.pc_id,
+    )
+
+
+@router.get("/sessions/{session_id}/seats")
+def list_session_seats(
+    session_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    _require_session_kp(identity, session_id)
+    return repo.list_session_seats(session_id)
+
+
+@router.post("/sessions/{session_id}/seats/{seat_id}/reissue")
+def reissue_session_seat_invitation(
+    session_id: str,
+    seat_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    _require_session_kp(identity, session_id)
+    return SessionService(repo).reissue_seat_invitation(session_id, seat_id)
+
+
+@router.post("/sessions/{session_id}/seats/{seat_id}/revoke")
+def revoke_session_seat(
+    session_id: str,
+    seat_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    _require_session_kp(identity, session_id)
+    return SessionService(repo).revoke_seat(session_id, seat_id)
+
+
+@router.patch("/sessions/{session_id}/seats/{seat_id}/pc")
+def assign_session_seat_pc(
+    session_id: str,
+    seat_id: str,
+    payload: SessionSeatPcAssign,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    _require_session_kp(identity, session_id)
+    return SessionService(repo).assign_seat_pc(session_id, seat_id, payload.pc_id)
+
+
+@router.post("/session-seats/claim")
+def claim_session_seat(
+    payload: SessionSeatClaim,
+    player: AuthenticatedPlayer | None = Depends(get_optional_player_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    return SessionService(repo).claim_seat(
+        payload.invitation_code,
+        display_name=payload.display_name,
+        player=player,
+    )
+
+
+@router.get("/player-profile/session-seats")
+def list_player_session_seats(
+    player: AuthenticatedPlayer = Depends(get_player_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    return SessionService(repo).list_player_seats(player)
+
+
+@router.post("/session-seats/{seat_id}/recover")
+def recover_session_seat(
+    seat_id: str,
+    player: AuthenticatedPlayer = Depends(get_player_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    return SessionService(repo).recover_seat(seat_id, player)

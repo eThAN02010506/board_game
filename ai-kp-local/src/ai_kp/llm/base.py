@@ -1,14 +1,3 @@
-from dataclasses import dataclass
-from typing import Protocol
+"""Compatibility imports for migrated model-provider ports."""
 
-
-@dataclass(frozen=True)
-class ChatMessage:
-    role: str
-    content: str
-
-
-class LlmClient(Protocol):
-    async def complete(self, messages: list[ChatMessage], temperature: float = 0.7) -> str:
-        raise NotImplementedError
-
+from ai_kp.infrastructure.llm.base import *  # noqa: F403

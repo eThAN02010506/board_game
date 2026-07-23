@@ -88,7 +88,7 @@ class RulebookKnowledgeTests(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def _source_and_chunks(self) -> tuple[dict, list[dict]]:
-        with patch("ai_kp.rulebook.pdf_ingestion.PdfReader", _FakeReader):
+        with patch("ai_kp.infrastructure.knowledge.pdf_ingestion.PdfReader", _FakeReader):
             extracted = extract_rulebook_pdf(b"fake-pdf", "rules.pdf")
         source = self.repo.create_rule_source(
             ruleset_id="coc7-keeper-cn-2002c",
@@ -102,7 +102,7 @@ class RulebookKnowledgeTests(unittest.TestCase):
         return self.repo.get_rule_source(source["id"]), extracted.chunks
 
     def test_pdf_extraction_preserves_page_provenance_and_stable_hash(self) -> None:
-        with patch("ai_kp.rulebook.pdf_ingestion.PdfReader", _FakeReader):
+        with patch("ai_kp.infrastructure.knowledge.pdf_ingestion.PdfReader", _FakeReader):
             first = extract_rulebook_pdf(b"fake-pdf", "rules.pdf")
             second = extract_rulebook_pdf(b"fake-pdf", "rules.pdf")
 
@@ -161,7 +161,9 @@ class RulebookKnowledgeTests(unittest.TestCase):
         service = RulebookService(self.repo, index_root=Path(self.tmpdir.name) / "rag")
 
         with patch("ai_kp.application.rulebook_service.extract_rulebook_pdf") as extract:
-            with patch("ai_kp.rulebook.pdf_ingestion.PdfReader", _FakeReader):
+            with patch(
+                "ai_kp.infrastructure.knowledge.pdf_ingestion.PdfReader", _FakeReader
+            ):
                 extract.return_value = extract_rulebook_pdf(b"fake-pdf", "rules.pdf")
             repeated = service.ingest_pdf(
                 b"fake-pdf",

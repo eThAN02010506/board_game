@@ -7,6 +7,7 @@ import {
   Save,
   Search,
   ShieldCheck,
+  Sparkles,
   UserRound,
   XCircle
 } from "lucide-react";
@@ -18,6 +19,7 @@ import type {
   CampaignInvestigator,
   CharacterSheet,
   CharacterSkillCatalogItem,
+  CharacterSkillRecommendation,
   Investigator,
   InvestigatorImportPreview,
   InvestigatorManualPreview,
@@ -341,6 +343,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
   const [showAllocatedSkillsOnly, setShowAllocatedSkillsOnly] = useState(false);
   const [preview, setPreview] = useState<InvestigatorImportPreview | null>(null);
   const [manualPreview, setManualPreview] = useState<InvestigatorManualPreview | null>(null);
+  const [skillRecommendation, setSkillRecommendation] = useState<CharacterSkillRecommendation | null>(null);
   const [targetInvestigatorId, setTargetInvestigatorId] = useState("");
   const [manualTargetId, setManualTargetId] = useState("");
   const [manual, setManual] = useState<ManualDraft>(() => createEmptyDraft());
@@ -355,6 +358,19 @@ export function InvestigatorPage({ campaign, identity }: Props) {
     () => [...(previewSheet?.skills ?? [])].sort((left, right) => right.current_value - left.current_value).slice(0, 8),
     [previewSheet]
   );
+  const previewBreakdown = useMemo(() => {
+    if (!previewSheet) return null;
+    const raw = previewSheet as CharacterSheet & {
+      combat?: { weapons?: unknown[] };
+      assets?: { items?: unknown[] };
+      background?: Record<string, unknown>;
+    };
+    return {
+      weapons: raw.combat?.weapons?.length ?? 0,
+      items: raw.assets?.items?.length ?? 0,
+      backgroundFields: Object.values(raw.background ?? {}).filter(Boolean).length
+    };
+  }, [previewSheet]);
   const occupationUsed = manual.skills.reduce((sum, skill) => sum + skill.occupationPoints, 0);
   const interestUsed = manual.skills.reduce((sum, skill) => sum + skill.interestPoints, 0);
   const currentOccupationBudget = occupationBudget(manual);
@@ -367,10 +383,64 @@ export function InvestigatorPage({ campaign, identity }: Props) {
       return matchesQuery && matchesAllocation;
     });
   }, [manual.skills, showAllocatedSkillsOnly, skillQuery]);
+  const displayedSkillColumns = useMemo(() => {
+    if (displayedSkills.length <= 12) return [displayedSkills];
+    const midpoint = Math.ceil(displayedSkills.length / 2);
+    return [displayedSkills.slice(0, midpoint), displayedSkills.slice(midpoint)];
+  }, [displayedSkills]);
+  const recommendationReady = Boolean(
+    manual.occupation.trim()
+    && manual.era.trim()
+    && number(manual.age) >= 15
+    && number(manual.age) <= 89
+    && attributeFields.every((key) => number(manual.attributes[key]) > 0)
+  );
 
   function patchManual(changes: Partial<ManualDraft>) {
     setManual((current) => ({ ...current, ...changes }));
     setManualPreview(null);
+    if (["occupation", "era", "age", "occupationFormula"].some((key) => key in changes)) {
+      setSkillRecommendation(null);
+    }
+  }
+
+  async function applySkillRecommendation() {
+    if (!recommendationReady) return;
+    setBusy(true);
+    try {
+      const result = await requestJson<CharacterSkillRecommendation>("/investigator-skills/recommend", {
+        method: "POST",
+        body: JSON.stringify({
+          occupation: manual.occupation.trim(),
+          era: manual.era.trim(),
+          age: number(manual.age),
+          occupation_point_formula: manual.occupationFormula,
+          characteristics: Object.fromEntries(
+            attributeFields.map((key) => [key, number(manual.attributes[key])])
+          )
+        })
+      });
+      const allocations = new Map(result.allocations.map((allocation) => [allocation.skill_key, allocation]));
+      setManual((current) => ({
+        ...current,
+        skills: current.skills.map((skill) => {
+          const allocation = allocations.get(skill.skill_key);
+          return {
+            ...skill,
+            occupationPoints: allocation?.occupation_points ?? 0,
+            interestPoints: allocation?.interest_points ?? 0,
+            specialization: allocation?.specialization || skill.specialization
+          };
+        })
+      }));
+      setSkillRecommendation(result);
+      setManualPreview(null);
+      setMessage(`已应用“${result.profile_name}”推荐方案；现在可以逐项手动调整并保存。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function patchSkill(skillKey: string, changes: Partial<ManualSkillDraft>) {
@@ -554,6 +624,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
       setMessage(`已保存 ${saved.name} 的第 ${saved.current_revision.revision_no} 版草稿。`);
       setManual(createEmptyDraft(skillCatalog));
       setManualPreview(null);
+      setSkillRecommendation(null);
       setManualTargetId("");
       await loadLibrary(true);
     } catch (error) {
@@ -567,6 +638,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
     setManual(manualFromSheet(investigator.current_revision.canonical_sheet, skillCatalog));
     setManualTargetId(investigator.id);
     setManualPreview(null);
+    setSkillRecommendation(null);
     setMessage(`已将 ${investigator.name} v${investigator.current_revision.revision_no} 载入编辑器；保存时会创建新版本。`);
   }
 
@@ -647,6 +719,16 @@ export function InvestigatorPage({ campaign, identity }: Props) {
 
   return (
     <div className="investigator-page" id="investigator-section">
+      <section className="investigator-hero">
+        <div>
+          <p className="eyebrow">玩家角色中心</p>
+          <h2>建立、导入并长期保存调查员</h2>
+          <p>{profile ? `${profile.display_name} 的角色卡保存在本机，可跨团复用并分别交给 KP 审核。` : "先建立本机玩家档案，再创建或导入你的第一名调查员。"}</p>
+        </div>
+        <div className="investigator-flow" aria-label="角色卡流程">
+          <span><b>01</b>导入或建卡</span><span><b>02</b>保存版本</span><span><b>03</b>提交 KP</span>
+        </div>
+      </section>
       {!profile ? (
         <section className="page-card investigator-profile-setup">
           <div className="page-intro"><div><p className="eyebrow">独立角色卡页面</p><h2>建立本机玩家档案</h2></div><UserRound size={24} /></div>
@@ -673,15 +755,33 @@ export function InvestigatorPage({ campaign, identity }: Props) {
           </section>
 
           <section className="page-card excel-import-card">
-            <div className="page-intro"><div><p className="eyebrow">参考 COC空白卡.xlsx</p><h2>导入 Excel 角色卡</h2></div><FileSpreadsheet size={24} /></div>
-            <label className="file-drop">选择 .xlsx 文件<input accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={busy} onChange={(event) => void previewExcel(event.target.files?.[0])} type="file" /><small>只读取允许字段，不运行公式、宏或外部链接。</small></label>
-            {previewSheet && preview && <div className="import-preview">
-              <div className="preview-heading"><div><strong>{previewSheet.identity.name || "未命名调查员"}</strong><span>{previewSheet.identity.occupation || "未填写职业"} · {previewSheet.identity.era || "时代未填"}</span></div><ShieldCheck size={20} /></div>
-              <div className="derived-grid"><span>HP <strong>{previewSheet.derived.max_hp}</strong></span><span>SAN <strong>{previewSheet.derived.initial_san}</strong></span><span>MP <strong>{previewSheet.derived.max_mp}</strong></span><span>MOV <strong>{previewSheet.derived.mov}</strong></span><span>DB <strong>{previewSheet.derived.damage_bonus}</strong></span><span>体格 <strong>{previewSheet.derived.build}</strong></span></div>
-              <div className="skill-preview">{strongestSkills.map((skill) => <span key={skill.skill_key}>{skill.display_name}{skill.specialization ? `（${skill.specialization}）` : ""} {skill.current_value}</span>)}</div>
-              {preview.warnings.length > 0 && <details open><summary>{preview.warnings.length} 项需要确认</summary><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
-              <label>保存方式<select value={targetInvestigatorId} onChange={(event) => setTargetInvestigatorId(event.target.value)}><option value="">保存为新调查员</option>{investigators.map((investigator) => <option key={investigator.id} value={investigator.id}>作为“{investigator.name}”的新版本</option>)}</select></label>
-              <button className="primary-button" disabled={busy || !previewSheet.identity.name} onClick={() => void savePreview()} type="button"><Save size={16} />保存不可变草稿版本</button>
+            <div className="page-intro"><div><p className="eyebrow">完整 Excel 导入</p><h2>导入 COC 角色卡</h2><p>安全读取身份、属性、技能、装备与背景，再由规则引擎重新计算关键数值。</p></div><span className="excel-heading-icon"><FileSpreadsheet size={27} /></span></div>
+            <div className={`excel-import-layout ${previewSheet ? "has-preview" : ""}`}>
+              <label className="file-drop">
+                <span className="file-drop-illustration"><FileSpreadsheet size={32} /></span>
+                <strong>{preview?.source_filename || "拖入或选择 .xlsx 文件"}</strong>
+                <span>支持项目内 COC 空白卡模板及其已填写副本</span>
+                <input accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={busy} onChange={(event) => void previewExcel(event.target.files?.[0])} type="file" />
+                <span className="file-drop-action">选择 Excel 文件</span>
+                <small>公式、宏和外部链接不会执行；所有派生值由后端重新计算。</small>
+              </label>
+              {!previewSheet && <aside className="excel-import-guide">
+                <strong>导入后完整预览</strong>
+                <div><span><CheckCircle2 size={15} />身份与九项属性</span><span><CheckCircle2 size={15} />全部技能与专攻</span><span><CheckCircle2 size={15} />武器、物品和背景</span><span><CheckCircle2 size={15} />HP、SAN、MOV 与 DB</span></div>
+                <p>只有在你确认预览后，角色卡才会保存成不可变草稿版本。</p>
+              </aside>}
+            </div>
+            {previewSheet && preview && <div className="import-preview excel-character-preview">
+              <div className="excel-preview-banner">
+                <div><span className="excel-preview-status"><ShieldCheck size={15} />解析完成</span><h3>{previewSheet.identity.name || "未命名调查员"}</h3><p>{previewSheet.identity.occupation || "未填写职业"} · {previewSheet.identity.era || "时代未填"}</p></div>
+                <div className="excel-import-stats"><span><strong>{previewSheet.skills.length}</strong>技能</span><span><strong>{previewBreakdown?.weapons ?? 0}</strong>武器</span><span><strong>{previewBreakdown?.items ?? 0}</strong>物品</span><span><strong>{preview.ignored_formula_cells}</strong>公式已忽略</span></div>
+              </div>
+              <section className="excel-preview-section"><div className="excel-section-heading"><strong>基础资料</strong><span>从工作簿读取</span></div><div className="excel-identity-grid"><span>玩家<strong>{previewSheet.identity.player_name || "—"}</strong></span><span>年龄<strong>{previewSheet.identity.age || "—"}</strong></span><span>性别<strong>{previewSheet.identity.gender || "—"}</strong></span><span>居住地<strong>{previewSheet.identity.residence || "—"}</strong></span><span>出生地<strong>{previewSheet.identity.birthplace || "—"}</strong></span><span>背景字段<strong>{previewBreakdown?.backgroundFields ?? 0} 项</strong></span></div></section>
+              <section className="excel-preview-section"><div className="excel-section-heading"><strong>九项属性</strong><span>原始数值</span></div><div className="excel-characteristics-grid">{attributeFields.map((key) => <span key={key}><b>{key.toUpperCase()}</b><strong>{previewSheet.characteristics[key] ?? "—"}</strong></span>)}</div></section>
+              <section className="excel-preview-section"><div className="excel-section-heading"><strong>派生数值</strong><span>规则引擎重算</span></div><div className="derived-grid excel-derived-grid"><span>HP <strong>{previewSheet.derived.max_hp}</strong></span><span>SAN <strong>{previewSheet.derived.initial_san}</strong></span><span>MP <strong>{previewSheet.derived.max_mp}</strong></span><span>MOV <strong>{previewSheet.derived.mov}</strong></span><span>DB <strong>{previewSheet.derived.damage_bonus}</strong></span><span>体格 <strong>{previewSheet.derived.build}</strong></span><span>闪避 <strong>{previewSheet.derived.dodge}</strong></span><span>最大 SAN <strong>{previewSheet.derived.max_san}</strong></span></div></section>
+              <section className="excel-preview-section"><div className="excel-section-heading"><strong>优势技能</strong><span>按当前值排序</span></div><div className="skill-preview excel-strongest-skills">{strongestSkills.map((skill) => <span key={skill.skill_key}>{skill.display_name}{skill.specialization ? `（${skill.specialization}）` : ""}<strong>{skill.current_value}</strong></span>)}</div><details className="excel-all-skills"><summary>查看已解析的全部 {previewSheet.skills.length} 项技能</summary><div>{previewSheet.skills.map((skill) => <span key={skill.skill_key}><b>{skill.display_name}{skill.specialization ? `（${skill.specialization}）` : ""}</b><strong>{skill.current_value}</strong><small>{skill.base_value}+{skill.occupation_points}+{skill.interest_points}+{skill.development_points}</small></span>)}</div></details></section>
+              {preview.warnings.length > 0 ? <details className="excel-warning-panel" open><summary>{preview.warnings.length} 项需要确认</summary><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : <p className="excel-clean-result"><CheckCircle2 size={16} />确定性规则检查未发现警告。</p>}
+              <div className="excel-save-bar"><label>保存方式<select value={targetInvestigatorId} onChange={(event) => setTargetInvestigatorId(event.target.value)}><option value="">保存为新调查员</option>{investigators.map((investigator) => <option key={investigator.id} value={investigator.id}>作为“{investigator.name}”的新版本</option>)}</select></label><button className="primary-button" disabled={busy || !previewSheet.identity.name} onClick={() => void savePreview()} type="button"><Save size={16} />确认并保存草稿版本</button></div>
             </div>}
           </section>
 
@@ -689,11 +789,24 @@ export function InvestigatorPage({ campaign, identity }: Props) {
             <div className="page-intro"><div><p className="eyebrow">完整手工建卡</p><h2>调查员编辑器</h2></div><UserRound size={24} /></div>
             <form onSubmit={saveManual}>
               <div className="form-grid compact-fields">
-                <label>姓名<input required value={manual.name} onChange={(event) => patchManual({ name: event.target.value })} /></label><label>玩家名<input value={manual.playerName} onChange={(event) => patchManual({ playerName: event.target.value })} /></label><label>职业<input value={manual.occupation} onChange={(event) => patchManual({ occupation: event.target.value })} /></label><label>时代<input value={manual.era} onChange={(event) => patchManual({ era: event.target.value })} /></label><label>年龄<input min="1" type="number" value={manual.age} onChange={(event) => patchManual({ age: event.target.value })} /></label><label>性别描述<input value={manual.gender} onChange={(event) => patchManual({ gender: event.target.value })} /></label><label>居住地<input value={manual.residence} onChange={(event) => patchManual({ residence: event.target.value })} /></label><label>出生地<input value={manual.birthplace} onChange={(event) => patchManual({ birthplace: event.target.value })} /></label>
+                <label>姓名<input required value={manual.name} onChange={(event) => patchManual({ name: event.target.value })} /></label><label>玩家名<input value={manual.playerName} onChange={(event) => patchManual({ playerName: event.target.value })} /></label><label>职业<input value={manual.occupation} onChange={(event) => patchManual({ occupation: event.target.value })} /></label><label>时代<input value={manual.era} onChange={(event) => patchManual({ era: event.target.value })} /></label><label>年龄<input max="89" min="15" type="number" value={manual.age} onChange={(event) => patchManual({ age: event.target.value })} /></label><label>性别描述<input value={manual.gender} onChange={(event) => patchManual({ gender: event.target.value })} /></label><label>居住地<input value={manual.residence} onChange={(event) => patchManual({ residence: event.target.value })} /></label><label>出生地<input value={manual.birthplace} onChange={(event) => patchManual({ birthplace: event.target.value })} /></label>
               </div>
-              <div className="attribute-entry-grid">{attributeFields.map((key) => <label key={key}>{key.toUpperCase()}<input min="0" type="number" value={manual.attributes[key]} onChange={(event) => { setManual((current) => ({ ...current, attributes: { ...current.attributes, [key]: event.target.value } })); setManualPreview(null); }} /></label>)}</div>
+              <div className="attribute-entry-grid">{attributeFields.map((key) => <label key={key}>{key.toUpperCase()}<input min="0" type="number" value={manual.attributes[key]} onChange={(event) => { setManual((current) => ({ ...current, attributes: { ...current.attributes, [key]: event.target.value } })); setManualPreview(null); setSkillRecommendation(null); }} /></label>)}</div>
               <label>职业点公式<select value={manual.occupationFormula} onChange={(event) => patchManual({ occupationFormula: event.target.value as ManualDraft["occupationFormula"] })}><option value="edu4">EDU×4</option><option value="edu2_app2">EDU×2 + APP×2</option><option value="edu2_dex2">EDU×2 + DEX×2</option><option value="edu2_pow2">EDU×2 + POW×2</option><option value="edu2_str2">EDU×2 + STR×2</option></select></label>
               <div className="derived-grid skill-budget-summary"><span className={occupationUsed > currentOccupationBudget ? "budget-over" : ""}>职业点 <strong>{occupationUsed}/{currentOccupationBudget}</strong></span><span className={occupationUsed > currentOccupationBudget ? "budget-over" : ""}>职业剩余 <strong>{currentOccupationBudget - occupationUsed}</strong></span><span className={interestUsed > interestBudget ? "budget-over" : ""}>兴趣点 <strong>{interestUsed}/{interestBudget}</strong></span><span className={interestUsed > interestBudget ? "budget-over" : ""}>兴趣剩余 <strong>{interestBudget - interestUsed}</strong></span></div>
+              <section className="skill-recommendation-panel">
+                <div>
+                  <p className="eyebrow">本地规则建议</p>
+                  <h3>推荐加点</h3>
+                  <small>{recommendationReady ? "将按职业、时代、年龄、属性和职业点公式生成完整方案。" : "先填写职业、时代、15–89 岁年龄及全部九项属性。"}</small>
+                </div>
+                <button className="recommend-skill-button" disabled={busy || !recommendationReady} onClick={() => void applySkillRecommendation()} type="button"><Sparkles size={17} />{skillRecommendation ? "重新生成并应用" : "生成并应用推荐加点"}</button>
+                <p className="permission-hint">应用时会替换当前职业点和兴趣点；应用后仍可逐项手动修改并正常保存。</p>
+                {skillRecommendation && <div className="recommendation-result">
+                  <div><strong>{skillRecommendation.profile_name}</strong><span>职业点 {skillRecommendation.occupation_spent}/{skillRecommendation.occupation_budget} · 兴趣点 {skillRecommendation.interest_spent}/{skillRecommendation.interest_budget}</span></div>
+                  <ul>{skillRecommendation.rationale.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+                </div>}
+              </section>
               <section className="skill-allocation-editor">
                 <div className="skill-allocation-heading">
                   <div><p className="eyebrow">参考 COC空白卡.xlsx</p><h3>完整技能与加点</h3><small>共 {manual.skills.length} 项。基础值、普通/困难/极限成功率会自动计算。</small></div>
@@ -702,10 +815,11 @@ export function InvestigatorPage({ campaign, identity }: Props) {
                     <label className="skill-allocation-toggle"><input checked={showAllocatedSkillsOnly} onChange={(event) => setShowAllocatedSkillsOnly(event.target.checked)} type="checkbox" />只看已加点</label>
                   </div>
                 </div>
-                <div className="skill-table-scroll">
+                <div className="skill-table-layout">
+                  {displayedSkillColumns.map((skillColumn, columnIndex) => <div className="skill-table-panel" key={skillColumn[0]?.skill_key || `empty-${columnIndex}`}>
                   <table className="skill-allocation-table">
                     <thead><tr><th>技能</th><th>专攻</th><th>基础</th><th>职业点</th><th>兴趣点</th><th>普通</th><th>困难</th><th>极限</th></tr></thead>
-                    <tbody>{displayedSkills.map((skill) => {
+                    <tbody>{skillColumn.map((skill) => {
                       const currentValue = skillCurrentValue(skill, manual.attributes);
                       const baseValue = resolvedSkillBase(skill, manual.attributes);
                       return <tr className={!skill.creation_points_allowed ? "skill-points-locked" : currentValue > 75 ? "skill-over-75" : ""} key={skill.skill_key}>
@@ -718,8 +832,9 @@ export function InvestigatorPage({ campaign, identity }: Props) {
                       </tr>;
                     })}</tbody>
                   </table>
-                  {!displayedSkills.length && <p className="empty-copy skill-empty-copy">没有符合当前筛选的技能。</p>}
+                  </div>)}
                 </div>
+                {!displayedSkills.length && <p className="empty-copy skill-empty-copy">没有符合当前筛选的技能。</p>}
                 <p className="permission-hint">技能超过 75 会标色并交由 KP 确认；克苏鲁神话在创建角色时不允许分配职业点或兴趣点。</p>
               </section>
               <label>武器（每行：名称|技能|伤害|射程|每轮次数|弹药|故障值）<textarea rows={4} value={manual.weaponsText} onChange={(event) => patchManual({ weaponsText: event.target.value })} /></label>

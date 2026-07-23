@@ -12,6 +12,10 @@ async def conflict_handler(_request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
+async def forbidden_handler(_request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+
 async def integrity_conflict_handler(_request: Request, _exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=409, content={"detail": "Conflicting resource state"})
 
@@ -19,4 +23,5 @@ async def integrity_conflict_handler(_request: Request, _exc: Exception) -> JSON
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(KeyError, not_found_handler)
     app.add_exception_handler(ValueError, conflict_handler)
+    app.add_exception_handler(PermissionError, forbidden_handler)
     app.add_exception_handler(sqlite3.IntegrityError, integrity_conflict_handler)

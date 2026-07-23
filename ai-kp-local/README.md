@@ -16,17 +16,21 @@
 - NPC 跨本再出现的候选判断
 - 玩家角色主要事件与支线事件记忆
 - OpenAI-compatible LLM 适配层
+- 独立模型设置页；可运行时切换 OpenAI-compatible 地址、发现真实模型 ID，或提交本机 MLX 模型目录并启动/停止本地服务
 - React/Vite 前端工作台；启动时自动恢复当前浏览器会话及该 `campaign + role` 上次打开的地图
 - 独立调查员页面；本地长期玩家档案、安全 Excel 导入预览、规则重算与不可变草稿版本
-- 参考 `COC空白卡.xlsx` 的 67 项完整技能表；支持逐项职业/兴趣加点、专攻、搜索、预算和成功率即时计算，技能名悬停 3 秒显示简介
+- 参考 `COC空白卡.xlsx` 的 67 项完整技能表；支持本地职业模板推荐加点、手动微调、保存、专攻、搜索、预算和成功率即时计算，技能名悬停 3 秒显示简介
 - 玩家提交调查员、KP 退回修改/批准、批准版本绑定玩家席位与团内 HP/SAN/MP/幸运状态
 - 规则书双存储：SQLite 页码原文 + MiniRAG 本地索引；JSON 规则对象通过 Schema、引用、冲突三层校验后才可由确定性 DSL 执行
 - 分页式产品导航；游玩页同时呈现本人角色卡、队友公开摘要、中央地图和右侧滚动行动区
-- 团会话、共享加入码、KP/玩家服务端权限校验
+- 团会话、逐席单次邀请、稳定玩家身份与 KP/玩家服务端权限校验（共享加入码仅保留兼容）
+- 可重放的 CoC7 普通/困难/极难检定；支持数字骰、实体骰、奖惩骰、暗骰、孤注一掷和有理由的 KP 覆盖
+- 显式规则系统注册表；当前只安装 CoC7，未知系统和单纯上传的规则书不会被误当作可执行规则
 - 短期单次实时票据、同源 WebSocket、SQLite outbox、角色可见性过滤和断线重连
 - 玩家行动队列与 `submitted -> reviewed -> resolved/rejected` 生命周期
 - 地图 `draft -> published` 发布边界
 - API 合同、应用服务、权限、数据库迁移、实时同步与核心域的自动测试
+- 后端根路径 Debug 调试台；集中查看模型、SQLite、路由、请求、日志，并提供 API、Excel 与 WebSocket 探针
 
 ## 快速开始
 
@@ -54,6 +58,12 @@ pnpm install
 pnpm run dev
 ```
 
+需要直接从本机 MLX 模型目录启动服务时，额外安装：
+
+```bash
+python -m pip install -e ".[local-model]"
+```
+
 前端统一使用 `pnpm`，依赖版本由 `apps/web/pnpm-lock.yaml` 锁定。请不要在仓库中生成 `package-lock.json` 或 Yarn lockfile。
 
 Vite 默认把 HTTP 与 WebSocket 的 `/api` 请求代理到 `http://localhost:8000`。需要连接另一台测试后端时，在启动前指定目标；浏览器仍只连接当前前端源：
@@ -62,42 +72,61 @@ Vite 默认把 HTTP 与 WebSocket 的 `/api` 请求代理到 `http://localhost:8
 VITE_BACKEND_TARGET=http://127.0.0.1:8000 pnpm run dev
 ```
 
+如果像当前开发环境一样把后端运行在 `8002`，需要在启动 Vite 时明确指定代理目标：
+
+```bash
+uvicorn ai_kp.api.main:app --host 127.0.0.1 --port 8002
+cd apps/web
+VITE_BACKEND_TARGET=http://127.0.0.1:8002 pnpm run dev
+```
+
+访问后端根地址（例如 `http://127.0.0.1:8002/`）会打开本机 Debug 调试台，而不是返回 JSON 404。调试台只允许本机管理员访问，数据库预览会隐藏令牌、哈希、密码和 API Key；详细说明见 [`docs/DEBUG_CONSOLE.md`](docs/DEBUG_CONSOLE.md)。
+
 默认配置只适合在运行后端的同一台机器上开发。浏览器打开前端后，可以按下面的真实流程验收：
 
 1. 点击“连接后端”，创建测试团；前端会随即开启该团的 KP 会话。已有有效会话时，重载页面会自动恢复身份和该角色上次打开的地图。
-2. 用另一个浏览器会话输入加入码和玩家显示名，再在独立的“调查员”页面建立本机长期档案。玩家可导入支持的 Excel 角色卡，也可在 67 项完整技能表中手工分配职业点和兴趣点；闪避、母语和成功率由程序重算。
+2. KP 为每个玩家创建单独席位（可预留角色），只分享该席的一次性邀请码。玩家首次认领时建立本机长期身份，以后可从“我的历史席位”恢复活动团。
 3. 玩家保存不可变草稿版本并提交给当前团 KP。KP 可退回并留下修改意见，或批准当前版本后绑定到玩家席位；新版本审核期间不会覆盖已批准版本。
 4. KP 生成地图并放置绑定角色的棋子。新地图默认是草稿；发布后，玩家页面会自动显示地图，后续棋子移动也会自动同步，无需手动刷新。
 5. 玩家只能移动自己角色的棋子，并可在“玩家行动”中提交行动。行动会自动出现在 KP 队列；KP 选中后创建手工草稿或调用本地 AI。
 6. 行动被草稿认领后进入 `reviewed`；KP 批准草稿后变为 `resolved`，拒绝则变为 `rejected`，双方页面会自动同步状态。草稿未批准前不会写入正式事件与长期记忆。
 7. KP 可以轮换加入码、撤销玩家凭证或关闭会话。撤销或关闭会让相关 Bearer 令牌与现有实时连接立即失效，页面进入未连接状态。
+8. KP 或已批准的 AI 草稿发布待检定；玩家在游玩页使用数字骰或录入实体骰。结果保留原始个位/十位骰、难度、规则版本和书内页码，可在重启后重放校验。
 
-会话令牌和管理员口令只保存在浏览器 `sessionStorage`，关闭对应标签页/浏览器会话后不会作为长期登录状态保留；它们不会写进 URL。
+会话令牌和管理员口令只保存在浏览器 `sessionStorage`。玩家长期身份令牌单独保存在 `localStorage`，仅用于管理调查员和恢复自己的席位，不能替代团会话 Bearer 权限；任何令牌都不会写进 URL。
 
 ## 项目结构
 
 ```text
 ai-kp-local/
 ├── src/ai_kp/
-│   ├── api/                    # ASGI 装配、依赖/鉴权/错误与分域 routers
-│   ├── application/            # Campaign/World/Session/Map/Turn 用例服务
-│   ├── storage/                # SQLite 基类、行解码、分域 repositories 与版本迁移
-│   ├── core/                   # 配置、schema、ID 与兼容 Repository facade
+│   ├── bootstrap/              # 配置、依赖装配与进程生命周期
+│   ├── api/                    # HTTP/WebSocket 传输、鉴权、错误与分域 routers
+│   ├── application/            # 用例编排；不依赖 FastAPI 或具体数据库
+│   ├── platform/               # 通用记忆、模组、场景与规则无关领域结构
+│   ├── director/               # AI KP 上下文、提示词、提案编排与结构化输出
+│   ├── rule_authoring/         # 规则对象提取、三层校验与确定性执行
+│   ├── infrastructure/         # SQLite、MiniRAG、LLM、权限和实时适配器
 │   ├── planning/               # 可机读的唯一能力目录
-│   ├── kp/  maps/  memory/     # KP 回合、地图与记忆域
-│   └── modules/ llm/ security/ realtime/ rules/ rulebook/ human_kp/
+│   ├── rulesets/               # 应用层规则端口、显式注册表与当前 CoC7 适配器
+│   └── core/及旧包             # ID 与兼容导出；新代码不再依赖旧实现路径
 ├── apps/web/src/
+│   ├── app/                    # 应用入口、布局与后续路由组合
 │   ├── api/                    # 请求客户端与 TypeScript DTO
+│   ├── auth/                   # 身份与权限边界
 │   ├── session/                # sessionStorage 凭据与地图选择
-│   ├── hooks/                  # 前端 Provider 式实时连接与同步边界
+│   ├── realtime/               # WebSocket 生命周期与同步边界
 │   ├── features/               # 独立调查员页，以及会话、地图、行动、草稿和规划功能
+│   ├── ruleset-ui/             # 经过批准的规则系统专用渲染器
 │   └── shared/                 # 跨 feature 的纯展示组件
 ├── tests/                           # API/服务/存储/权限/实时回归测试
 └── docs/                            # 架构、能力规划与记忆验证文档
 ```
 
-`ai_kp.api.main:app` 继续是稳定启动入口，实际应用装配在 `api/app.py`。详细的分层边界和事务规则见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。调查员字段、Excel 导入、不可变版本、按团审批和跨团状态边界见 [`docs/CHARACTER_SHEET_MODEL.md`](docs/CHARACTER_SHEET_MODEL.md)。
+`ai_kp.api.main:app` 继续是稳定启动入口，实际应用装配在 `bootstrap/composition.py`。详细的分层边界和事务规则见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。调查员字段、Excel 导入、不可变版本、按团审批和跨团状态边界见 [`docs/CHARACTER_SHEET_MODEL.md`](docs/CHARACTER_SHEET_MODEL.md)。
+目标目录骨架、当前实现与迁移位置的对应关系，以及占位文件启用条件见 [`docs/ARCHITECTURE_SKELETON.md`](docs/ARCHITECTURE_SKELETON.md)。
 规则书 PDF 摄取、MiniRAG 隔离索引、三层校验、权限和真实验收见 [`docs/RULEBOOK_KNOWLEDGE.md`](docs/RULEBOOK_KNOWLEDGE.md)。
+当前仅支持 CoC、上传规则书与可执行插件的区别，以及未来第二规则系统的接入条件见 [`docs/RULESET_BOUNDARY.md`](docs/RULESET_BOUNDARY.md)。
 
 ## 开发自检
 
@@ -147,7 +176,7 @@ GET /capabilities?include_available=false
 
 ## 本地模型接口
 
-只要模型服务提供 OpenAI-compatible `/v1/chat/completions` 接口即可。不要根据本地模型文件名猜测接口里的 model ID；real-case 测试应先请求模型列表：
+顶部“模型设置”页面可以直接完成下列配置；也可继续通过环境变量启动。只要模型服务提供 OpenAI-compatible `/v1/chat/completions` 接口即可。远程模式不要根据本地模型文件名猜测接口里的 model ID；应先检测模型列表：
 
 ```bash
 curl http://<模型服务地址>:8001/v1/models
@@ -162,6 +191,8 @@ AI_KP_LLM_MODEL=<从 /v1/models 响应取得的 id>
 ```
 
 若模型服务要求鉴权，请在 `/v1/models` 请求和 `AI_KP_LLM_API_KEY` 中使用它要求的密钥。模型列表、`/v1/chat/completions` 和一次完整 KP 回合均成功后，才算该模型的 real-case 通过；仅知道主机、端口或 `.gguf` 文件名不算验证成功。
+
+本地目录模式目前面向 Apple Silicon 上的 MLX 格式目录。后端会校验 `config.json`、`tokenizer_config.json` 和 Safetensors 权重，并使用参数数组启动 `mlx_lm.server`；不执行用户提供的命令。保存的路径属于运行 FastAPI 的机器，本地模型子进程只绑定回环地址。完整行为和权限边界见 [`docs/MODEL_CONFIGURATION.md`](docs/MODEL_CONFIGURATION.md)。
 
 ## 设计原则
 
@@ -210,9 +241,9 @@ GET /map-tokens/{token_id}/moves
 
 ## 团会话与权限
 
-每个团同一时间最多有一个活动会话。创建会话会产生一个 KP 成员、一个 KP Bearer 访问令牌和一个共享玩家加入码；玩家用加入码加入后会获得自己的 Bearer 访问令牌。访问令牌绑定 `session + campaign + role + member + pc`，跨团引用会被拒绝，玩家也不能读取 KP 草稿、KP notes、AI 上下文快照或未发布地图。
+每个团同一时间最多有一个活动会话。KP 为玩家创建命名席位，每个席位有独立的一次性邀请和可选的预留角色。认领后邀请立即失效，玩家获得绑定 `session + campaign + role + member + pc + player_profile + seat` 的 Bearer 会话令牌。
 
-SQLite 只保存加入码和访问令牌的用途隔离 SHA-256 哈希，不保存它们的明文。明文只在创建、加入、主动轮换或撤销后自动轮换的响应中返回；恢复页面时只能使用当前浏览器 `sessionStorage` 中已有的访问令牌。加入码不能当 Bearer 令牌使用，访问令牌也不能当加入码使用。
+SQLite 只保存邀请码、稳定玩家令牌和会话访问令牌的用途隔离 SHA-256 哈希，不保存明文。席位邀请明文只在创建或重新签发的响应中出现一次。
 
 主要接口：
 
@@ -225,9 +256,17 @@ POST /sessions/{session_id}/members/{member_id}/assign-pc
 POST /sessions/{session_id}/members/{member_id}/revoke
 POST /sessions/{session_id}/rotate-join-code
 POST /sessions/{session_id}/close
+POST /sessions/{session_id}/seats
+GET  /sessions/{session_id}/seats
+POST /sessions/{session_id}/seats/{seat_id}/reissue
+POST /sessions/{session_id}/seats/{seat_id}/revoke
+PATCH /sessions/{session_id}/seats/{seat_id}/pc
+POST /session-seats/claim
+GET  /player-profile/session-seats
+POST /session-seats/{seat_id}/recover
 ```
 
-撤销玩家会立即让该成员令牌失效，并自动轮换共享加入码，使旧加入码失效。这里必须注意：当前没有用户账号或稳定身份系统，因此这不等于“封禁某个人”；拿到新加入码的人仍能以新成员身份加入。若需要强封禁、审计到人或公开部署，应增加账号体系、逐席邀请和管理员审核。
+撤销一个席位只会让该席的邀请和成员会话令牌失效，不影响其他玩家，也不删除该玩家的长期档案、调查员或历史。强封禁、密码/多因素登录和公网账号恢复仍不在当前范围。
 
 ## 实时同步
 
@@ -293,7 +332,7 @@ AI_KP_CORS_ORIGINS=https://你的前端域名
 
 管理员操作使用 `X-AI-KP-Admin-Token` 请求头。前端提供管理员口令输入框，并同样只存于 `sessionStorage`。
 
-必须在反向代理层启用 HTTPS；当前应用自身不提供 TLS。Bearer 令牌、共享加入码和管理员口令在纯 HTTP 的局域网中都可能被旁路监听。当前版本也没有登录账号、单人邀请、令牌有效期、登录/加入限流、暴力尝试锁定或持久封禁能力，因此不应直接暴露到公网。生产化前还需要可信代理配置、请求大小/速率限制、安全日志以及对未来导入或 AI 生成 SVG 的清洗与 CSP。
+必须在反向代理层启用 HTTPS；当前应用自身不提供 TLS。Bearer 令牌、席位邀请码和管理员口令在纯 HTTP 的局域网中都可能被旁路监听。当前版本没有令牌有效期、加入限流、暴力尝试锁定、密码登录或持久封禁能力，因此不应直接暴露到公网。生产化前还需要可信代理配置、请求大小/速率限制、安全日志以及对未来导入或 AI 生成 SVG 的清洗与 CSP。
 
 ## 模组文本格式
 

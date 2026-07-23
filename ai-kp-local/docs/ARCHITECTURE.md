@@ -2,24 +2,30 @@
 
 ## Runtime Shape
 
-The backend has three explicit delivery layers plus domain components:
+The backend has explicit composition, transport, application, domain, ruleset, and adapter layers:
 
-- `src/ai_kp/api/app.py` is the composition root. It initializes the database once, installs CORS and error handlers, and mounts the domain routers. `api/main.py` remains the stable compatibility entry point for `ai_kp.api.main:app` and `create_app`.
+- `src/ai_kp/bootstrap/composition.py` is the composition root. It initializes the database once, installs CORS and error handlers, and mounts the domain routers. `bootstrap/settings.py` owns runtime settings. `api/main.py` remains the stable compatibility ASGI entry point.
 - `src/ai_kp/api/routers/{system,campaigns,sessions,world,maps,turns,realtime}.py` owns HTTP/WebSocket transport only. `dependencies.py`, `authz.py`, `errors.py`, and `schemas.py` centralize per-request repository lifetime, authentication, authorization, error mapping, and transport DTOs.
 - `src/ai_kp/application/{campaign,world,session,map,turn}_service.py` owns use cases that coordinate validation, domain components, multiple writes, the transactional realtime outbox, and the local-model boundary. It has no FastAPI dependency.
-- `src/ai_kp/storage/sqlite.py` and `rows.py` provide shared SQLite mechanics. `storage/repositories/world.py` and `turns.py` contain domain-specific SQL, while the existing map, context, security, and realtime repositories remain beside their domains. `storage/migrations/` contains ordered schema migrations.
-- `src/ai_kp/core/repository.py` is a compatibility facade that composes the feature repositories over one SQLite connection. It is an intentional transaction boundary for existing services and tests, not an aggregate repository waiting to be split again. `core/db.py` remains the schema/bootstrap boundary; `core/config.py` and `core/ids.py` contain configuration and ID generation.
+- `src/ai_kp/platform/` owns ruleset-neutral memory, module, and scene logic. `director/` owns AI KP context and proposal orchestration. `rule_authoring/` owns extracted rule objects and deterministic validation/execution.
+- `src/ai_kp/infrastructure/database/` owns SQLite mechanics, schema, ordered migrations, and feature repositories. Its `Repository` facade intentionally supplies one shared transaction boundary to current application services.
+- `src/ai_kp/infrastructure/{knowledge,llm,realtime,security}/` owns external and persistence adapters. These layers may depend inward on domain contracts; domain packages do not depend on these adapters.
 - `src/ai_kp/planning/capabilities.py` is the only product capability catalogue. It records available, partial, and planned capabilities together with dependencies and acceptance criteria.
-- `src/ai_kp/kp`, `maps`, `memory`, `modules`, `llm`, `security`, and `realtime` contain the working domain components. `rules` and `human_kp` contain foundations that are only exposed when their catalogue entries say they are ready; their presence alone is not a completed feature claim.
+- `rulesets` is the application-facing executable-system boundary and currently registers only CoC7. Former `kp`, `maps`, `memory`, `modules`, `llm`, `security`, `realtime`, `rulebook`, `rules`, `characters`, `storage`, and selected `core` modules are compatibility paths only.
 
 The React workspace follows the same separation:
 
 - `apps/web/src/api` owns the HTTP client, credential bridge, and TypeScript API DTOs.
 - `apps/web/src/session` owns browser-session credential and active-map persistence. It stores only opaque tokens and selection IDs, never authoritative campaign data.
-- `apps/web/src/hooks/useWorkspaceRealtime.ts` is the frontend provider boundary for WebSocket lifecycle, cursor replay, event-to-refresh routing, burst coalescing, full sync, and stale campaign/session guards.
+- `apps/web/src/realtime/provider.tsx` is the frontend provider boundary for WebSocket lifecycle, cursor replay, event-to-refresh routing, burst coalescing, full sync, and stale campaign/session guards.
 - `apps/web/src/features` contains the campaign, session, map, action, proposal, and capability-planning panels. `shared` contains presentation components reused by features.
-- `apps/web/src/App.tsx` composes workspace state and feature callbacks; transport, session persistence, realtime-provider logic, and feature rendering are kept in their dedicated modules.
+- `apps/web/src/app/App.tsx` currently composes workspace state and feature callbacks. Further feature extraction must preserve current behavior and gain focused acceptance tests; the former root path is only a compatibility export.
 - Top-level product areas use distinct history-backed paths (`/play`, `/campaigns`, `/investigators`, `/maps`, `/memory`, `/npcs`, `/rules`, and `/planning`). `/play` is the intentional composite exception: it places the controlled investigator and public party summaries beside the central map, with a separately scrollable action/chat column.
+
+The documented target packages now exist as comment/docstring-only scaffolding. Their activation
+and incremental migration rules are tracked in
+[`ARCHITECTURE_SKELETON.md`](ARCHITECTURE_SKELETON.md); scaffold presence is never capability
+evidence.
 
 ## Router-Service-Repository Boundary
 
@@ -34,18 +40,25 @@ Plain read-only or single-table use cases still pass through a service when a do
 
 ## SQLite Lifecycle and Migrations
 
-`api/app.py` runs `init_db()` at application construction. Request dependencies call `connect()` but do not rerun schema initialization. File-backed databases use foreign keys, a 5-second busy timeout, WAL journal mode, and `synchronous=NORMAL`; in-memory test databases skip WAL.
+`bootstrap/composition.py` runs `init_db()` at application construction. Request dependencies call `connect()` but do not rerun schema initialization. File-backed databases use foreign keys, a 5-second busy timeout, WAL journal mode, and `synchronous=NORMAL`; in-memory test databases skip WAL.
 
-`core/db.py:SCHEMA` creates the current schema for a new database. Existing databases are advanced by the numbered, ordered migrations under `storage/migrations/`. Applied versions and names are recorded in `schema_migrations`; migration names are checked, future database versions fail closed, and each migration runs inside its own savepoint. Running `init_db()` again is idempotent. The additive migration helpers are compatibility code for real pre-migration SQLite files and must not be removed as apparent duplication.
+`infrastructure/database/schema.py:SCHEMA` creates the current schema for a new database. Existing databases are advanced by the numbered, ordered migrations under `infrastructure/database/migrations/`. Applied versions and names are recorded in `schema_migrations`; migration names are checked, future database versions fail closed, and each migration runs inside its own savepoint. Running `init_db()` again is idempotent.
 
 ## Rulebook knowledge boundary
 
-`rulebook/` owns source PDF extraction, MiniRAG original-text indexing, JSON rule validation and the
-closed deterministic execution DSL. SQLite source chunks and MiniRAG files are deliberately dual
+`infrastructure/knowledge/` owns source PDF extraction and MiniRAG original-text indexing;
+`rule_authoring/` owns JSON rule validation and the closed deterministic execution DSL. SQLite
+source chunks and MiniRAG files are deliberately dual
 storage: the index can be rebuilt, while page evidence and validated objects remain authoritative.
 The model can create candidates only. Schema, exact source citation and conflict checks determine
 status, and only `validated` objects reach the executor. This namespace must not contain campaign
 memory, module spoilers, NPC state or character history. See `docs/RULEBOOK_KNOWLEDGE.md`.
+
+Rulebook knowledge is not an executable ruleset. `GET /rulesets` lists the explicit local
+allow-list of deterministic engines. Campaign and investigator services resolve that registry;
+application, API, and storage layers must not import concrete `rules` modules directly. The
+incremental boundary and requirements for a future second system are documented in
+[`RULESET_BOUNDARY.md`](RULESET_BOUNDARY.md).
 
 The request transaction is committed only after the router and service finish. Any Python, SQLite, authorization, model-output, or domain validation exception triggers rollback. This includes business changes and their realtime outbox records, so a browser cannot receive an event for state that did not commit.
 
@@ -67,6 +80,9 @@ This catalogue is the single source of truth for delivery status, phase, depende
 - `map_tokens` and `map_token_moves` store offline-table style piece placement and movement history. `map_tokens.version` provides optimistic concurrency control so a stale client cannot overwrite a newer move.
 - `campaign_sessions` stores one active/closed play session per campaign and only the hash of its shared join code.
 - `session_members` stores the server-authoritative `kp`/`player` role, optional controlled PC, revocation time, and only the hash of each Bearer access token.
+- `session_seats` is the durable bridge between one campaign session, one stable `player_profile`, one current session member, and an optional reserved PC. Revoking it never deletes the profile or its investigators.
+- `seat_invitations` stores only purpose-separated hashes. Each plaintext code belongs to exactly one seat and transitions once from `active` to `consumed` or `revoked`.
+- `skill_checks` stores requested and resolved checks, raw percentile digits, selected result, difficulty threshold, precise ruleset/source identity, character state version and any original pre-override result. Replays dispatch by that stored identity rather than a current UI choice. `skill_check_actions` is its append-only transition audit.
 - `player_actions` stores a player's queued action and the server-derived session/member/PC/map/location context. Its lifecycle is `submitted -> reviewed -> resolved/rejected`.
 - `turn_proposals` stores validated narration, checks, events, memories, NPC updates, and map-move candidates; `proposal_actions` stores approval/rejection/override audit records.
 - `context_assemblies` stores the exact prompt, included/excluded sources, visibility scope, and estimated token cost for an AI proposal.
@@ -83,21 +99,21 @@ The current campaign-bound `player_characters` table remains a compatibility pla
 
 ## Session and Authorization Flow
 
-1. A local administrator or existing KP creates a campaign session. The service creates the KP member and returns the KP access token plus shared join code once.
-2. A player exchanges the active join code for an independent player member and access token, optionally claiming an unassigned PC. The KP can later bind or rebind that member to a campaign PC.
-3. Clients send the access token as `Authorization: Bearer ...`. API dependencies authenticate its hash against an active, non-revoked member in an active session.
-4. Resource endpoints derive the campaign from the stored map/token/proposal/action and compare it with the authenticated campaign. Client-supplied view, actor, PC, campaign, location, and movement metadata never grant authority.
-5. KP-only operations include module import, secret/KP memory, NPC candidate retrieval, map generation/publication, token placement, proposal/context inspection, AI turns, approvals, member management, and the full player-action queue.
-6. Players can read their campaign's player-safe material and published maps, search their own character memory, move/inspect only their bound PC token, and submit/read only their own actions.
-7. Revoking a player invalidates that token immediately and rotates the shared join code. Closing the session invalidates every member token because authentication requires an active session.
+1. A local administrator or existing KP creates a campaign session. The service creates the KP member and retains the shared join code only as a legacy compatibility path.
+2. The KP creates named seats, optionally reserves a campaign PC, and shares each one-time plaintext invitation only with its intended player.
+3. A player claims the seat with an existing local player-profile token or creates a stable profile on first claim. Claiming consumes the invitation atomically and returns a session-scoped Bearer token.
+4. A returning player uses the stable profile token to list owned seats and rotate/recover the Bearer token for an active claimed seat. The stable token is not itself session authorization.
+5. Clients send the access token as `Authorization: Bearer ...`. API dependencies authenticate its hash against an active, non-revoked member in an active session.
+6. Resource endpoints derive authority from server state; client-supplied view, actor, PC, campaign, location, and movement metadata never grant authority.
+7. Revoking one seat invalidates only its member and invitation. Other players and codes are unaffected; closing the session invalidates every member token.
 
 Join codes and access tokens use different domain-separated SHA-256 hashes, so the two credential types are not interchangeable. The server never returns stored hashes through public repository responses. Plaintext credentials exist only in create/join and explicit or revoke-triggered rotate responses; the browser keeps the active values in `sessionStorage`, never in a URL.
 
-Revocation is credential revocation, not identity banning. Because the MVP has one shared join code and no user accounts, a revoked person who obtains the newly rotated code can join again as a new member. Per-seat invitations or accounts are required for durable identity-level bans.
+Seat revocation is session access revocation, not deletion of the stable player profile. It intentionally preserves that player's investigators and history. Durable bans and public-internet account recovery remain separate future security work.
 
 ## Browser Restore Flow
 
-1. On startup the browser reads campaign-scoped access tokens from `sessionStorage`, validates one with `/auth/me`, and reloads the active session from the API.
+1. On startup the browser reads campaign-scoped access tokens from `sessionStorage`, validates one with `/auth/me`, and reloads the active session from the API. The opaque stable player-profile token is kept separately in `localStorage` so a closed tab can still recover owned active seats.
 2. Saved map contents always come from SQLite through the API; the browser does not treat an in-memory React object or stored SVG as authoritative.
 3. The browser stores only the last selected map ID under a `campaign + role` key. After identity restoration it lists maps through the corresponding KP/player view and reopens that ID only if the current role can still see it.
 4. If the map was unpublished, the credential revoked, or the session closed, restore fails safely and stale UI state is cleared.
@@ -147,6 +163,8 @@ For a real local-model test, first query the provider's OpenAI-compatible `/v1/m
 [`RULES_REFERENCE.md`](RULES_REFERENCE.md) identifies the user-provided CoC7 Keeper Rulebook by version and content hash, maps implementation areas to printed and PDF pages, and defines the required source labels and delivery checks. The PDF remains a local reference and is not committed or served by this project.
 
 Game mechanics must run in deterministic ruleset services rather than in model prose. The model may suggest a check and narrate a validated outcome, but it cannot authoritatively calculate or directly commit dice thresholds, damage, healing, sanity, growth, chase movement, or other rule-dependent state. A mechanical result stores its ruleset version, source reference, normalized inputs, raw dice, outcome, affected state version, and any audited KP override.
+
+The first implemented mechanics slice is documented in [`CHECK_RESOLUTION.md`](CHECK_RESOLUTION.md). Its pure resolver is separate from secure random generation and physical-dice input; both paths persist identical replay data. Check-only proposals cannot carry world effects before resolution.
 
 Core rules, book-optional rules, campaign house rules, one-off Keeper rulings, and platform workflow policies are distinct sources. Optional and house rules require explicit campaign configuration. Product policies such as character-sheet review must not be presented as though they came from the rulebook.
 

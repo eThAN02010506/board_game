@@ -7,11 +7,27 @@ from ai_kp.core.config import Settings
 
 
 EXPECTED_HTTP_ROUTES = {
+    ("GET", "/"),
     ("GET", "/health"),
+    ("GET", "/rulesets"),
     ("GET", "/capabilities"),
+    ("GET", "/debug/diagnostics"),
+    ("GET", "/debug/requests"),
+    ("GET", "/debug/database/tables/{table_name}"),
+    ("GET", "/debug/database/check"),
+    ("GET", "/debug/model/probe"),
+    ("GET", "/debug/logs"),
+    ("POST", "/debug/xlsx/preview"),
     ("POST", "/player-profiles"),
     ("GET", "/player-profile"),
     ("GET", "/investigator-skills/catalog"),
+    ("POST", "/investigator-skills/recommend"),
+    ("GET", "/model-settings"),
+    ("PUT", "/model-settings"),
+    ("POST", "/model-settings/discover"),
+    ("GET", "/model-runtime"),
+    ("POST", "/model-runtime/start"),
+    ("POST", "/model-runtime/stop"),
     ("POST", "/investigator-imports/preview"),
     ("POST", "/investigators"),
     ("GET", "/investigators"),
@@ -45,6 +61,22 @@ EXPECTED_HTTP_ROUTES = {
     ("POST", "/sessions/{session_id}/members/{member_id}/assign-investigator"),
     ("POST", "/sessions/{session_id}/rotate-join-code"),
     ("POST", "/sessions/{session_id}/close"),
+    ("POST", "/sessions/{session_id}/seats"),
+    ("GET", "/sessions/{session_id}/seats"),
+    ("POST", "/sessions/{session_id}/seats/{seat_id}/reissue"),
+    ("POST", "/sessions/{session_id}/seats/{seat_id}/revoke"),
+    ("PATCH", "/sessions/{session_id}/seats/{seat_id}/pc"),
+    ("POST", "/session-seats/claim"),
+    ("GET", "/player-profile/session-seats"),
+    ("POST", "/session-seats/{seat_id}/recover"),
+    ("POST", "/campaigns/{campaign_id}/checks"),
+    ("GET", "/campaigns/{campaign_id}/checks"),
+    ("GET", "/checks/{check_id}"),
+    ("POST", "/checks/{check_id}/resolve"),
+    ("POST", "/checks/{check_id}/replay"),
+    ("POST", "/checks/{check_id}/override"),
+    ("POST", "/checks/{check_id}/cancel"),
+    ("POST", "/checks/{check_id}/push"),
     ("POST", "/campaigns/{campaign_id}/pcs"),
     ("GET", "/campaigns/{campaign_id}/pcs"),
     ("POST", "/campaigns/{campaign_id}/events"),
@@ -93,7 +125,12 @@ class ApiContractTests(unittest.TestCase):
         actual = set(actual_routes)
         self.assertEqual(EXPECTED_HTTP_ROUTES, actual)
         self.assertEqual(len(EXPECTED_HTTP_ROUTES), len(actual_routes), "duplicate HTTP route")
-        self.assertEqual(1, sum(route.path == "/ws" for route in app.routes))
+        websocket_paths = {
+            route.path
+            for route in app.routes
+            if route.__class__.__name__ == "APIWebSocketRoute"
+        }
+        self.assertEqual({"/ws", "/debug/ws"}, websocket_paths)
 
 
 if __name__ == "__main__":

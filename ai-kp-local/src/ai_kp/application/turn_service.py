@@ -3,11 +3,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from ai_kp.application.errors import KpSessionEndedError
-from ai_kp.core.config import Settings
-from ai_kp.core.repository import Repository
-from ai_kp.kp.orchestrator import KpOrchestrator
-from ai_kp.llm.base import LlmClient
-from ai_kp.security.repository import AuthenticatedMember
+from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.director.orchestrator import KpOrchestrator
+from ai_kp.infrastructure.llm.base import LlmClient
+from ai_kp.rulesets import get_ruleset
+from ai_kp.infrastructure.database.security import AuthenticatedMember
 
 
 LlmFactory = Callable[[Settings], LlmClient]
@@ -69,6 +70,13 @@ class TurnService:
         identity: AuthenticatedMember,
         command: ManualProposalCommand,
     ) -> dict:
+        self._validate_unresolved_check_boundary(
+            command.proposed_checks,
+            command.proposed_events,
+            command.proposed_memories,
+            command.proposed_npc_updates,
+            command.proposed_map_moves,
+        )
         queued_action = self._queued_action(
             command.player_action_id,
             campaign_id,
@@ -176,12 +184,44 @@ class TurnService:
         note: str = "",
         override_public_narration: str | None = None,
     ) -> dict:
+        pending = self.repo.get_turn_proposal(proposal_id)
+        self._validate_unresolved_check_boundary(
+            pending["proposed_checks"],
+            pending["proposed_events"],
+            pending["proposed_memories"],
+            pending["proposed_npc_updates"],
+            pending["proposed_map_moves"],
+        )
+        campaign = self.repo.get_campaign(campaign_id)
+        ruleset = get_ruleset(str(campaign["system"]))
+        for proposed_check in pending["proposed_checks"]:
+            ruleset.validate_check(
+                target=None,
+                difficulty=proposed_check["difficulty"],
+                bonus_dice=0,
+            )
         proposal = self.repo.approve_turn_proposal(
             proposal_id,
             actor=f"kp:{identity.member_id}",
             note=note,
             override_public_narration=override_public_narration,
         )
+        player_action_id = self.repo.player_action_id_for_proposal(proposal_id)
+        for proposed_check in pending["proposed_checks"]:
+            self.repo.create_skill_check(
+                campaign_id=campaign_id,
+                session_id=identity.session_id,
+                requested_by_member_id=identity.member_id,
+                skill_name=proposed_check["skill"],
+                difficulty=proposed_check["difficulty"],
+                ruleset_id=ruleset.manifest.ruleset_id,
+                ruleset_version=ruleset.manifest.version,
+                source_reference=dict(ruleset.manifest.source_reference),
+                hidden=bool(proposed_check.get("hidden")),
+                pc_id=proposed_check.get("pc_id") or pending.get("pc_id"),
+                proposal_id=proposal_id,
+                player_action_id=player_action_id,
+            )
         self.repo.append_realtime_event(
             session_id=identity.session_id,
             campaign_id=campaign_id,
@@ -200,6 +240,26 @@ class TurnService:
             resource_id=campaign_id,
         )
         return proposal
+
+    @staticmethod
+    def _validate_unresolved_check_boundary(
+        proposed_checks: Sequence[Any],
+        proposed_events: Sequence[Any],
+        proposed_memories: Sequence[Any],
+        proposed_npc_updates: Sequence[Any],
+        proposed_map_moves: Sequence[Any],
+    ) -> None:
+        if proposed_checks and any(
+            (
+                proposed_events,
+                proposed_memories,
+                proposed_npc_updates,
+                proposed_map_moves,
+            )
+        ):
+            raise ValueError(
+                "A proposal requesting unresolved checks cannot also commit world effects"
+            )
 
     def reject(
         self,

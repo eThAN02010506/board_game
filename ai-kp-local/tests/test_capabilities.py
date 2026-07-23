@@ -28,7 +28,6 @@ class CapabilityPlaceholderTests(unittest.TestCase):
             item["id"]: item["status"] for item in list_capabilities(include_available=False)
         }
         expected = {
-            "seat_invitations",
             "module_library",
             "module_document_import",
             "party_route_planning",
@@ -41,7 +40,6 @@ class CapabilityPlaceholderTests(unittest.TestCase):
             "map_asset_revisions",
             "map_reveal_editor",
             "image_map_generation",
-            "model_management",
             "model_quantization_profiles",
             "campaign_backup_restore",
             "human_kp_modes",

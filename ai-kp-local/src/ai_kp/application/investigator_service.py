@@ -1,9 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from ai_kp.characters.xlsx_import import import_coc_character_xlsx
-from ai_kp.core.repository import Repository
-from ai_kp.rules.coc7_character import normalize_character_sheet
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.rulesets import DEFAULT_RULESET_ID, get_ruleset
 
 
 @dataclass(frozen=True)
@@ -18,8 +17,9 @@ class CreateInvestigatorCommand:
 
 
 class InvestigatorService:
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: Repository, ruleset_id: str = DEFAULT_RULESET_ID):
         self.repo = repo
+        self.ruleset = get_ruleset(ruleset_id)
 
     def create_profile(self, display_name: str) -> dict:
         name = display_name.strip()
@@ -28,10 +28,13 @@ class InvestigatorService:
         return self.repo.create_player_profile(name)
 
     def preview_excel(self, data: bytes, filename: str) -> dict:
-        return import_coc_character_xlsx(data, filename)
+        return self.ruleset.import_character_xlsx(data, filename)
 
     def preview_manual(self, canonical_sheet: dict[str, Any]) -> dict:
-        canonical, warnings = normalize_character_sheet(canonical_sheet)
+        ruleset = get_ruleset(
+            canonical_sheet.get("ruleset_id") or self.ruleset.manifest.ruleset_id
+        )
+        canonical, warnings = ruleset.normalize_character_sheet(canonical_sheet)
         return {"canonical_sheet": canonical, "warnings": warnings}
 
     def create_investigator(
@@ -39,7 +42,12 @@ class InvestigatorService:
         owner_profile_id: str,
         command: CreateInvestigatorCommand,
     ) -> dict:
-        canonical, rule_warnings = normalize_character_sheet(command.canonical_sheet)
+        ruleset = get_ruleset(
+            command.canonical_sheet.get("ruleset_id") or self.ruleset.manifest.ruleset_id
+        )
+        canonical, rule_warnings = ruleset.normalize_character_sheet(
+            command.canonical_sheet
+        )
         warnings = list(dict.fromkeys([*command.warnings, *rule_warnings]))
         return self.repo.create_investigator(
             owner_profile_id,
@@ -64,7 +72,12 @@ class InvestigatorService:
         investigator_id: str,
         command: CreateInvestigatorCommand,
     ) -> dict:
-        canonical, rule_warnings = normalize_character_sheet(command.canonical_sheet)
+        ruleset = get_ruleset(
+            command.canonical_sheet.get("ruleset_id") or self.ruleset.manifest.ruleset_id
+        )
+        canonical, rule_warnings = ruleset.normalize_character_sheet(
+            command.canonical_sheet
+        )
         warnings = list(dict.fromkeys([*command.warnings, *rule_warnings]))
         return self.repo.add_investigator_revision(
             investigator_id,

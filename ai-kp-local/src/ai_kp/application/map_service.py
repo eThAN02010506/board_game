@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-from ai_kp.core.repository import Repository
-from ai_kp.maps.generation import generate_map
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.platform.scenes.map_generation import generate_map
 
 
 @dataclass(frozen=True)

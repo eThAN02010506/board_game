@@ -1,16 +1,4 @@
-import sqlite3
+"""Compatibility import for the migrated schema migration."""
+from ai_kp.infrastructure.database.migrations.v0005_proposal_npc_updates import NAME, VERSION, migrate
 
-from ai_kp.storage.migrations.helpers import ensure_column
-
-
-VERSION = 5
-NAME = "add_proposed_npc_updates_to_turn_proposals"
-
-
-def migrate(connection: sqlite3.Connection) -> None:
-    ensure_column(
-        connection,
-        "turn_proposals",
-        "proposed_npc_updates_json",
-        "TEXT NOT NULL DEFAULT '[]'",
-    )
+__all__ = ["NAME", "VERSION", "migrate"]

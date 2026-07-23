@@ -1,11 +1,4 @@
-import sqlite3
+"""Compatibility import for the migrated schema migration."""
+from ai_kp.infrastructure.database.migrations.v0004_map_token_version import NAME, VERSION, migrate
 
-from ai_kp.storage.migrations.helpers import ensure_column
-
-
-VERSION = 4
-NAME = "add_map_token_version"
-
-
-def migrate(connection: sqlite3.Connection) -> None:
-    ensure_column(connection, "map_tokens", "version", "INTEGER NOT NULL DEFAULT 0")
+__all__ = ["NAME", "VERSION", "migrate"]

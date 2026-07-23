@@ -16,15 +16,7 @@ class FakeStructuredLlm:
             {
                 "public_narration": "仓库门上有一道新鲜刮痕。",
                 "kp_notes": "刮痕来自柜子。",
-                "proposed_checks": [
-                    {
-                        "skill": "侦查",
-                        "difficulty": "regular",
-                        "reason": "分辨刮痕方向",
-                        "pc_id": None,
-                        "hidden": False,
-                    }
-                ],
+                "proposed_checks": [],
                 "proposed_events": [
                     {
                         "event_type": "clue_seen",
@@ -101,7 +93,7 @@ class KpApiTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(draft_response.status_code, 200)
                     draft = draft_response.json()
                     self.assertEqual(draft["status"], "draft")
-                    self.assertEqual(draft["proposed_checks"][0]["skill"], "侦查")
+                    self.assertEqual(draft["proposed_checks"], [])
                     self.assertEqual(draft["proposed_memories"][0]["scope"], "clue")
 
                     context = (

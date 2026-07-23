@@ -1,10 +1,10 @@
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from ai_kp.core.repository import Repository
-from ai_kp.memory.npc_candidates import NpcCandidateService
-from ai_kp.memory.retrieval import MemoryRetriever
-from ai_kp.modules.ingestion import chunk_plaintext_module
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.platform.memory.npc_candidates import NpcCandidateService
+from ai_kp.platform.memory.retrieval import MemoryRetriever
+from ai_kp.platform.modules.ingestion import chunk_plaintext_module
 
 
 WorldView = Literal["player", "kp"]

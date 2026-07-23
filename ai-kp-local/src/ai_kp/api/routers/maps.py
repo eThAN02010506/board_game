@@ -11,8 +11,8 @@ from ai_kp.application.map_service import (
 from ai_kp.api.authz import campaign_for_map, campaign_for_token, require_campaign_role
 from ai_kp.api.dependencies import get_identity, get_repo
 from ai_kp.api.schemas import MapGenerateRequest, MapTokenCreate, MapTokenMove
-from ai_kp.core.repository import Repository
-from ai_kp.security.repository import AuthenticatedMember
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.database.security import AuthenticatedMember
 
 
 router = APIRouter()

@@ -21,8 +21,8 @@ from ai_kp.application.world_service import (
     LinkNpcCommand,
     WorldService,
 )
-from ai_kp.core.repository import Repository
-from ai_kp.security.repository import AuthenticatedMember
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.database.security import AuthenticatedMember
 
 
 router = APIRouter()

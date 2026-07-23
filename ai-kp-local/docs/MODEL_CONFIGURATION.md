@@ -1,0 +1,44 @@
+# 模型配置与本地目录运行
+
+## 两种来源
+
+`/models` 是独立模型设置页，配置保存在 SQLite 的单行 `model_configuration` 中。保存后应用实例会替换当前 `llm_base_url`、`llm_api_key` 与 `llm_model`，因此后续新发起的 AI KP 回合和规则抽取立即使用新配置；已经在执行中的请求不会被中途切换。
+
+### OpenAI-compatible 服务
+
+- 输入 HTTP(S) 地址；缺少 `/v1` 时由后端补齐。
+- `POST /model-settings/discover` 请求服务的 `/v1/models`，前端展示服务实际返回的 ID。
+- API Key 只写入本地 SQLite；读取配置时只返回 `api_key_configured`，不回传密钥。
+- 地址可以是本机、局域网或其他由本地管理员信任的服务。
+
+### 本地 MLX 模型目录
+
+- 路径是 FastAPI 后端所在机器的目录，不是浏览器上传文件。
+- 后端要求目录含 `config.json`、`tokenizer_config.json` 及至少一个 `.safetensors` 权重。
+- 安装 `.[local-model]` 后，`POST /model-runtime/start` 使用当前 Python 解释器运行 `mlx_lm.server`。
+- 模型路径作为参数传递，不经过 Shell；工作目录设为模型目录的父目录，以相对目录名交给 MLX-LM。
+- 托管服务默认向聊天模板传入 `enable_thinking=false`，避免推理模型只返回隐藏思考而没有 AI KP 所需的结构化正文。
+- 托管端口由管理员选择，实际 AI KP 基地址固定为 `http://127.0.0.1:<port>/v1`。
+- 后端关闭时会终止由它启动的本地模型子进程；模型不会在服务重启后未经确认自动加载。
+- 运行日志默认写在数据库同目录的 `model-runtime.log`。
+
+## 权限与接口
+
+模型地址、密钥和本机进程属于实例级管理功能，所有接口都要求本地管理员权限：
+
+- `GET/PUT /model-settings`
+- `POST /model-settings/discover`
+- `GET /model-runtime`
+- `POST /model-runtime/start`
+- `POST /model-runtime/stop`
+
+默认开发配置允许回环地址访问；关闭 `local_admin_enabled` 后必须提供 `X-AI-KP-Admin-Token`。
+
+## 验收顺序
+
+1. 远程模式输入地址并检测，选择 `/v1/models` 实际返回的 ID。
+2. 保存后重读页面，确认地址与模型恢复，API Key 只显示“已配置”。
+3. 本地模式检查目录，确认解析出的绝对路径、权重数量和大小。
+4. 保存并启动，等待进程状态为运行中；再次检测，直到 `/v1/models` 返回模型。
+5. 发起一次完整 AI KP 草稿，确认 `source_model` 是当前模型且草稿仍需 KP 审批。
+6. 停止本地模型，确认进程退出；再次发起请求时应明确失败而不是静默切回远程服务。

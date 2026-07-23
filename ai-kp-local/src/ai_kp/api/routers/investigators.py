@@ -1,6 +1,6 @@
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
 from ai_kp.api.authz import require_campaign_role
 from ai_kp.api.dependencies import get_identity, get_player_identity, get_repo
@@ -9,6 +9,7 @@ from ai_kp.api.schemas import (
     InvestigatorCampaignStateUpdate,
     InvestigatorCreate,
     InvestigatorReview,
+    InvestigatorSkillRecommendationRequest,
     InvestigatorSubmit,
     PlayerProfileCreate,
 )
@@ -16,18 +17,28 @@ from ai_kp.application.investigator_service import (
     CreateInvestigatorCommand,
     InvestigatorService,
 )
-from ai_kp.core.repository import Repository
-from ai_kp.rules.coc7_skills import list_coc7_skill_catalog
-from ai_kp.security.repository import AuthenticatedMember
-from ai_kp.storage.repositories.investigators import AuthenticatedPlayer
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.rulesets import DEFAULT_RULESET_ID, get_ruleset
+from ai_kp.infrastructure.database.security import AuthenticatedMember
+from ai_kp.infrastructure.database.investigators import AuthenticatedPlayer
 
 
 router = APIRouter()
 
 
 @router.get("/investigator-skills/catalog")
-def get_investigator_skill_catalog() -> list[dict]:
-    return list_coc7_skill_catalog()
+def get_investigator_skill_catalog(
+    ruleset_id: str = Query(default=DEFAULT_RULESET_ID, max_length=120),
+) -> list[dict]:
+    return get_ruleset(ruleset_id).list_skill_catalog()
+
+
+@router.post("/investigator-skills/recommend")
+def recommend_investigator_skills(
+    payload: InvestigatorSkillRecommendationRequest,
+    ruleset_id: str = Query(default=DEFAULT_RULESET_ID, max_length=120),
+) -> dict:
+    return get_ruleset(ruleset_id).recommend_skill_points(**payload.model_dump())
 
 
 @router.post("/player-profiles")
@@ -50,12 +61,13 @@ def get_player_profile(
 async def preview_investigator_excel(
     request: Request,
     x_file_name: str | None = Header(default=None),
+    x_ruleset_id: str = Header(default=DEFAULT_RULESET_ID),
     _player: AuthenticatedPlayer = Depends(get_player_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
     filename = unquote(x_file_name or "character.xlsx")
     data = await request.body()
-    return InvestigatorService(repo).preview_excel(data, filename)
+    return InvestigatorService(repo, x_ruleset_id).preview_excel(data, filename)
 
 
 @router.post("/investigators/preview")

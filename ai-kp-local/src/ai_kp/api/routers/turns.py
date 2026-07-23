@@ -12,11 +12,11 @@ from ai_kp.api.schemas import (
     ProposalDecision,
     TurnProposalCreate,
 )
-from ai_kp.core.config import Settings
-from ai_kp.core.repository import Repository
-from ai_kp.kp.turn_output import StructuredOutputError
-from ai_kp.llm.openai_compatible import OpenAICompatibleClient
-from ai_kp.security.repository import AuthenticatedMember
+from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.director.turn_output import StructuredOutputError
+from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
+from ai_kp.infrastructure.database.security import AuthenticatedMember
 
 
 router = APIRouter()

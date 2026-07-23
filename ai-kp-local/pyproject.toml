@@ -32,6 +32,9 @@ rulebook = [
   "tiktoken>=0.9.0",
   "xxhash>=3.5.0"
 ]
+local-model = [
+  "mlx-lm>=0.30.6"
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

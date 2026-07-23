@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
-from ai_kp.core.repository import Repository
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.rulesets import get_ruleset
 
 
 @dataclass(frozen=True)
@@ -17,9 +18,10 @@ class CampaignService:
         self.repo = repo
 
     def create(self, command: CreateCampaignCommand) -> dict:
+        ruleset = get_ruleset(command.system)
         return self.repo.create_campaign(
             command.title,
-            command.system,
+            ruleset.manifest.slug,
             command.current_time,
         )
 

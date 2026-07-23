@@ -3,14 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ai_kp.core.repository import Repository
-from ai_kp.llm.base import LlmClient
-from ai_kp.rulebook.agent import PROMPT_VERSION, RuleExtractionAgent
-from ai_kp.rulebook.engine import execute_rule
-from ai_kp.rulebook.minirag_adapter import MiniRagOriginalIndex, MiniRagUnavailableError
-from ai_kp.rulebook.models import RuleObject
-from ai_kp.rulebook.pdf_ingestion import extract_rulebook_pdf
-from ai_kp.rulebook.validation import RuleValidator
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.llm.base import LlmClient
+from ai_kp.infrastructure.knowledge.minirag import (
+    MiniRagOriginalIndex,
+    MiniRagUnavailableError,
+)
+from ai_kp.infrastructure.knowledge.pdf_ingestion import extract_rulebook_pdf
+from ai_kp.rule_authoring.agent import PROMPT_VERSION, RuleExtractionAgent
+from ai_kp.rule_authoring.engine import execute_rule
+from ai_kp.rule_authoring.models import RuleObject
+from ai_kp.rule_authoring.validation import RuleValidator
 
 
 class RulebookService:

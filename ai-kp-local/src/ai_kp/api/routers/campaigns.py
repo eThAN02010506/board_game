@@ -4,8 +4,8 @@ from ai_kp.api.authz import is_local_admin, require_local_admin
 from ai_kp.api.dependencies import get_optional_identity, get_repo
 from ai_kp.api.schemas import CampaignCreate
 from ai_kp.application.campaign_service import CampaignService, CreateCampaignCommand
-from ai_kp.core.repository import Repository
-from ai_kp.security.repository import AuthenticatedMember
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.database.security import AuthenticatedMember
 
 
 router = APIRouter()

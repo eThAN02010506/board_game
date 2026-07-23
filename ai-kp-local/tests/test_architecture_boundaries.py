@@ -7,19 +7,22 @@ from fastapi.testclient import TestClient
 
 from ai_kp.api import main as compatibility_main
 from ai_kp.application.world_service import WorldService
-from ai_kp.core.config import Settings
-from ai_kp.core.db import connect
-from ai_kp.core.repository import Repository
-from ai_kp.kp.context_repository import ContextAssemblyRepository
-from ai_kp.maps.repository import MapRepository
-from ai_kp.realtime.repository import RealtimeRepository
-from ai_kp.security.repository import SecurityRepository
-from ai_kp.storage.repositories.turns import TurnRepository
-from ai_kp.storage.repositories.investigators import InvestigatorRepository
-from ai_kp.storage.repositories.rulebooks import RulebookRepository
-from ai_kp.storage.repositories.world import WorldRepository
-from ai_kp.storage.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
-from ai_kp.storage.sqlite import SQLiteRepository
+from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.database.checks import SkillCheckRepository
+from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
+from ai_kp.infrastructure.database.investigators import InvestigatorRepository
+from ai_kp.infrastructure.database.maps import MapRepository
+from ai_kp.infrastructure.database.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
+from ai_kp.infrastructure.database.model_configuration import ModelConfigurationRepository
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.database.rulebooks import RulebookRepository
+from ai_kp.infrastructure.database.schema import connect
+from ai_kp.infrastructure.database.security import SecurityRepository
+from ai_kp.infrastructure.database.session_seats import SessionSeatRepository
+from ai_kp.infrastructure.database.sqlite import SQLiteRepository
+from ai_kp.infrastructure.database.turns import TurnRepository
+from ai_kp.infrastructure.database.world import WorldRepository
+from ai_kp.infrastructure.realtime.outbox import RealtimeRepository
 
 
 PROJECT_ROOT = Path(__file__).parents[1]
@@ -110,7 +113,7 @@ def _service_method_calls(path: Path) -> set[tuple[str, str]]:
 
 
 def test_legacy_api_entrypoint_remains_an_identity_alias() -> None:
-    composition = importlib.import_module("ai_kp.api.app")
+    composition = importlib.import_module("ai_kp.bootstrap.composition")
 
     assert compatibility_main.create_app is composition.create_app
     assert compatibility_main.app is composition.app
@@ -141,6 +144,78 @@ def test_application_layer_does_not_depend_on_fastapi_or_http_adapters() -> None
     assert violations == {}
 
 
+def test_generic_layers_do_not_import_ruleset_implementations_directly() -> None:
+    violations: dict[str, list[str]] = {}
+    for relative_dir in ("application", "api", "storage"):
+        root = PROJECT_ROOT / "src" / "ai_kp" / relative_dir
+        for path in sorted(root.rglob("*.py")):
+            forbidden = sorted(
+                name
+                for name in _imports(path)
+                if name == "ai_kp.rules" or name.startswith("ai_kp.rules.")
+            )
+            if forbidden:
+                violations[str(path.relative_to(PROJECT_ROOT))] = forbidden
+
+    assert violations == {}
+
+
+def test_active_layers_do_not_depend_on_migrated_compatibility_packages() -> None:
+    legacy_prefixes = (
+        "ai_kp.characters",
+        "ai_kp.kp",
+        "ai_kp.llm",
+        "ai_kp.maps",
+        "ai_kp.memory",
+        "ai_kp.modules",
+        "ai_kp.realtime",
+        "ai_kp.rulebook",
+        "ai_kp.rules",
+        "ai_kp.security",
+        "ai_kp.storage",
+    )
+    violations: dict[str, list[str]] = {}
+    for relative_dir in (
+        "api",
+        "application",
+        "bootstrap",
+        "director",
+        "infrastructure",
+        "platform",
+        "rule_authoring",
+        "rulesets",
+    ):
+        root = PROJECT_ROOT / "src" / "ai_kp" / relative_dir
+        for path in sorted(root.rglob("*.py")):
+            forbidden = sorted(
+                name
+                for name in _imports(path)
+                if any(
+                    name == prefix or name.startswith(f"{prefix}.")
+                    for prefix in legacy_prefixes
+                )
+            )
+            if forbidden:
+                violations[str(path.relative_to(PROJECT_ROOT))] = forbidden
+
+    assert violations == {}
+
+
+def test_coc7_plugin_uses_canonical_ruleset_modules_not_compatibility_shims() -> None:
+    imports = _imports(
+        PROJECT_ROOT / "src" / "ai_kp" / "rulesets" / "coc7" / "plugin.py"
+    )
+
+    assert not {
+        name
+        for name in imports
+        if name == "ai_kp.rules"
+        or name.startswith("ai_kp.rules.")
+        or name == "ai_kp.characters"
+        or name.startswith("ai_kp.characters.")
+    }
+
+
 def test_mutating_http_routes_delegate_to_application_services() -> None:
     routers_dir = PROJECT_ROOT / "src" / "ai_kp" / "api" / "routers"
     expected = {
@@ -154,6 +229,19 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
             ("SessionService", "assign_member_pc"),
             ("SessionService", "rotate_join_code"),
             ("SessionService", "close"),
+            ("SessionService", "create_seat"),
+            ("SessionService", "claim_seat"),
+            ("SessionService", "recover_seat"),
+            ("SessionService", "reissue_seat_invitation"),
+            ("SessionService", "revoke_seat"),
+            ("SessionService", "assign_seat_pc"),
+        },
+        "checks.py": {
+            ("CheckService", "create"),
+            ("CheckService", "resolve"),
+            ("CheckService", "override"),
+            ("CheckService", "cancel"),
+            ("CheckService", "push"),
         },
         "world.py": {
             ("WorldService", "create_pc"),
@@ -210,7 +298,10 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         SecurityRepository,
         RealtimeRepository,
         InvestigatorRepository,
+        SessionSeatRepository,
+        SkillCheckRepository,
         RulebookRepository,
+        ModelConfigurationRepository,
     )
     assert Repository.__mro__.count(SQLiteRepository) == 1
     assert Repository.create_campaign is WorldRepository.create_campaign
@@ -220,11 +311,17 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     assert Repository.create_campaign_session is SecurityRepository.create_campaign_session
     assert Repository.append_realtime_event is RealtimeRepository.append_realtime_event
     assert Repository.create_investigator is InvestigatorRepository.create_investigator
+    assert Repository.create_session_seat is SessionSeatRepository.create_session_seat
+    assert Repository.create_skill_check is SkillCheckRepository.create_skill_check
     assert Repository.create_rule_source is RulebookRepository.create_rule_source
+    assert (
+        Repository.save_model_configuration
+        is ModelConfigurationRepository.save_model_configuration
+    )
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 8
+    assert LATEST_SCHEMA_VERSION == 11
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -234,6 +331,9 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (6, "add_player_owned_investigator_library"),
         (7, "add_rulebook_dual_storage"),
         (8, "add_campaign_investigator_review_and_runtime_state"),
+        (9, "add_model_configuration"),
+        (10, "add_per_seat_invitations"),
+        (11, "add_replayable_skill_checks"),
     ]
 
 

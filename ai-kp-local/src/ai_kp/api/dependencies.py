@@ -4,11 +4,11 @@ from typing import cast
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from ai_kp.core.config import Settings
-from ai_kp.core.db import connect
-from ai_kp.core.repository import Repository
-from ai_kp.security.repository import AuthenticatedMember
-from ai_kp.storage.repositories.investigators import AuthenticatedPlayer
+from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.database.schema import connect
+from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.database.security import AuthenticatedMember
+from ai_kp.infrastructure.database.investigators import AuthenticatedPlayer
 
 
 bearer = HTTPBearer(auto_error=False)
@@ -52,13 +52,21 @@ def get_identity(
     return identity
 
 
-def get_player_identity(
+def get_optional_player_identity(
     x_ai_kp_player_token: str | None = Header(default=None),
     repo: Repository = Depends(get_repo),
-) -> AuthenticatedPlayer:
+) -> AuthenticatedPlayer | None:
     if not x_ai_kp_player_token:
-        raise HTTPException(status_code=401, detail="Player profile token required")
+        return None
     identity = repo.authenticate_player_token(x_ai_kp_player_token)
     if identity is None:
         raise HTTPException(status_code=401, detail="Invalid player profile token")
+    return identity
+
+
+def get_player_identity(
+    identity: AuthenticatedPlayer | None = Depends(get_optional_player_identity),
+) -> AuthenticatedPlayer:
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Player profile token required")
     return identity

@@ -2,7 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from ai_kp.kp.turn_output import (
+from ai_kp.director.turn_output import (
     CheckCandidate,
     EventCandidate,
     MapMoveCandidate,
@@ -32,6 +32,51 @@ class SessionMemberPcAssign(BaseModel):
     pc_id: str
 
 
+class SessionSeatCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=80)
+    pc_id: str | None = None
+
+
+class SessionSeatClaim(BaseModel):
+    invitation_code: str = Field(min_length=12, max_length=20)
+    display_name: str = Field(min_length=1, max_length=80)
+
+
+class SessionSeatPcAssign(BaseModel):
+    pc_id: str | None = None
+
+
+class SkillCheckCreate(BaseModel):
+    skill_name: str = Field(min_length=1, max_length=100)
+    difficulty: Literal["regular", "hard", "extreme"] = "regular"
+    bonus_dice: int = Field(default=0, ge=-2, le=2)
+    hidden: bool = False
+    allow_push: bool = True
+    roller_member_id: str | None = None
+    pc_id: str | None = None
+    target: int | None = Field(default=None, ge=0, le=100)
+    proposal_id: str | None = None
+    player_action_id: str | None = None
+
+
+class SkillCheckResolve(BaseModel):
+    input_method: Literal["digital", "physical"] = "digital"
+    ones_digit: int | None = Field(default=None, ge=0, le=9)
+    tens_digits: list[int] = Field(default_factory=list, max_length=3)
+
+
+class SkillCheckOverride(BaseModel):
+    success_level: Literal[
+        "fumble", "failure", "regular", "hard", "extreme", "critical"
+    ]
+    passed: bool
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class SkillCheckDecision(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class PlayerActionCreate(BaseModel):
     action_text: str = Field(min_length=1, max_length=4000)
     token_id: str | None = None
@@ -56,6 +101,29 @@ class InvestigatorCreate(BaseModel):
     template_id: str | None = Field(default=None, max_length=120)
     parser_version: str | None = Field(default=None, max_length=40)
     warnings: list[str] = Field(default_factory=list, max_length=100)
+
+
+class InvestigatorSkillRecommendationRequest(BaseModel):
+    occupation: str = Field(min_length=1, max_length=120)
+    era: str = Field(min_length=1, max_length=80)
+    age: int = Field(ge=15, le=89)
+    occupation_point_formula: Literal[
+        "edu4",
+        "edu2_app2",
+        "edu2_dex2",
+        "edu2_pow2",
+        "edu2_str2",
+    ] = "edu4"
+    characteristics: dict[str, int] = Field(default_factory=dict)
+
+
+class ModelConfigurationUpdate(BaseModel):
+    provider_type: Literal["openai_compatible", "local_mlx"]
+    base_url: str | None = Field(default=None, max_length=500)
+    api_key: str | None = Field(default=None, max_length=1000)
+    model: str = Field(default="", max_length=300)
+    local_model_path: str | None = Field(default=None, max_length=2000)
+    local_port: int = Field(default=8011, ge=1024, le=65535)
 
 
 class InvestigatorSubmit(BaseModel):

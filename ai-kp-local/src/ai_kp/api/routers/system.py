@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query
 
 from ai_kp.planning.capabilities import list_capabilities
+from ai_kp.rulesets import list_rulesets
 
 
 router = APIRouter()
@@ -9,6 +10,13 @@ router = APIRouter()
 @router.get("/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@router.get("/rulesets")
+def installed_rulesets() -> list[dict]:
+    """List executable rule engines; uploaded books alone never appear here."""
+
+    return list_rulesets()
 
 
 @router.get("/capabilities")

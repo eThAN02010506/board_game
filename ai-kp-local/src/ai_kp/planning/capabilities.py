@@ -101,10 +101,13 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="seat_invitations",
         label="逐席邀请与稳定玩家身份",
-        status="planned",
+        status="available",
         phase="F1",
-        audience="kp",
-        summary="以单次、可撤销、可绑定角色的邀请替代共享加入码，并为长期角色建立稳定玩家身份。",
+        audience="all",
+        summary=(
+            "KP 可创建单次、可单独撤销、可预留角色的席位邀请；"
+            "玩家使用本地长期身份跨团次认领和恢复自己的席位。"
+        ),
         dependencies=("session_roles",),
         acceptance=(
             "撤销某一席位不会影响其他玩家，旧邀请不能被再次使用。",
@@ -144,10 +147,14 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="check_resolution",
         label="待检定与掷骰状态机",
-        status="planned",
+        status="partial",
         phase="F1",
         audience="all",
-        summary="按本地 CoC7 规则来源处理玩家掷骰、实体骰录入、暗骰、KP 覆盖和检定后结果草稿。",
+        summary=(
+            "已按本地 CoC7 规则来源实现普通/困难/极难检定、数字骰、实体骰、"
+            "奖惩骰、暗骰、孤注一掷、KP 覆盖和重放审计；"
+            "尚缺对抗检定与检定结果驱动的 AI 二阶段草稿。"
+        ),
         dependencies=("proposal_approval", "character_sheets"),
         acceptance=(
             "掷骰前不得写入只有成功时才成立的事件或记忆。",
@@ -162,8 +169,9 @@ CAPABILITIES: tuple[Capability, ...] = (
         phase="F3",
         audience="all",
         summary=(
-            "已有可追溯 PDF 原文块、MiniRAG 本地召回、JSON 规则候选、三层校验和封闭 DSL 执行器；"
-            "尚未完成全部 CoC7 规则对象、检定状态机和其他系统插件。"
+            "已有显式规则注册表和 CoC7 应用端口，并具备可追溯 PDF 原文块、MiniRAG 本地召回、"
+            "JSON 规则候选、三层校验和封闭 DSL 执行器；当前仅注册 CoC7，"
+            "尚未完成全部 CoC7 规则对象或任何第二系统插件。"
         ),
         dependencies=("check_resolution",),
         acceptance=(
@@ -245,12 +253,19 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="model_management",
         label="本地模型发现与配置 UI",
-        status="planned",
+        status="available",
         phase="F4",
         audience="kp",
-        summary="在页面中检测 /v1/models、选择真实 model ID、测试连接并保存本地配置。",
+        summary=(
+            "在独立页面中检测 /v1/models、选择真实 model ID、保存运行时配置，"
+            "或提交本机 MLX 模型目录并管理本地服务进程。"
+        ),
         dependencies=("model_adapter",),
-        acceptance=("不猜测模型文件名，只使用提供者实际暴露的 model ID。",),
+        acceptance=(
+            "远程模式不猜测模型文件名，只使用提供者实际暴露的 model ID。",
+            "本地目录经过结构校验，启动参数不经过 Shell，服务只监听 127.0.0.1。",
+            "API Key 不回传前端，配置在重启后恢复并立即用于新的 AI 请求。",
+        ),
     ),
     Capability(
         id="model_quantization_profiles",

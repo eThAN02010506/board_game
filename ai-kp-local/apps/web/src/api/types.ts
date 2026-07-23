@@ -36,7 +36,26 @@ export type SessionMember = {
   role: Role;
   display_name: string;
   pc_id: string | null;
+  player_profile_id?: string | null;
   revoked_at: string | null;
+};
+
+export type SessionSeat = {
+  id: string;
+  session_id: string;
+  campaign_id: string;
+  label: string;
+  status: "open" | "claimed" | "revoked";
+  assigned_pc_id: string | null;
+  player_profile_id: string | null;
+  claimed_member_id: string | null;
+  profile_display_name: string | null;
+  member_display_name: string | null;
+  pc_name: string | null;
+  has_active_invitation: boolean;
+  session_title?: string;
+  session_status?: string;
+  campaign_title?: string;
 };
 
 export type SessionBundle = {
@@ -45,6 +64,9 @@ export type SessionBundle = {
   campaign: Campaign;
   access_token: string;
   join_code?: string;
+  seat?: SessionSeat;
+  profile?: PlayerProfile;
+  player_token?: string;
 };
 
 export type AuthIdentity = {
@@ -54,6 +76,73 @@ export type AuthIdentity = {
   role: Role;
   display_name: string;
   pc_id: string | null;
+  player_profile_id?: string | null;
+  seat_id?: string | null;
+};
+
+export type SkillCheck = {
+  id: string;
+  campaign_id: string;
+  session_id: string;
+  proposal_id: string | null;
+  player_action_id: string | null;
+  requested_by_member_id: string;
+  roller_member_id: string | null;
+  pc_id: string | null;
+  investigator_id: string | null;
+  skill_key: string;
+  skill_name: string;
+  target: number;
+  target_source: string;
+  difficulty: "regular" | "hard" | "extreme";
+  bonus_dice: number;
+  hidden: boolean;
+  allow_push: boolean;
+  pushed_from_check_id: string | null;
+  status: "requested" | "resolved" | "overridden" | "cancelled";
+  input_method: "digital" | "physical" | null;
+  raw_dice: {
+    ones_digit: number;
+    tens_digits: number[];
+    candidates: number[];
+  } | null;
+  selected_roll: number | null;
+  threshold: number | null;
+  success_level: "fumble" | "failure" | "regular" | "hard" | "extreme" | "critical" | null;
+  passed: boolean | null;
+  ruleset_id: string;
+  ruleset_version: string;
+  source_reference: {
+    source_id: string;
+    chapter: string;
+    page_start: number;
+    page_end: number;
+    sections: string[];
+  };
+  investigator_state_version: number | null;
+  override_reason: string | null;
+  original_result: Record<string, unknown> | null;
+  created_at: string;
+  resolved_at: string | null;
+  actions: Array<{
+    id: string;
+    action_type: string;
+    actor_member_id: string;
+    reason: string;
+    payload: Record<string, unknown>;
+    created_at: string;
+  }>;
+};
+
+export type CreateSkillCheckInput = {
+  skill_name: string;
+  difficulty: SkillCheck["difficulty"];
+  bonus_dice: number;
+  hidden: boolean;
+  allow_push: boolean;
+  roller_member_id: string | null;
+  pc_id: string | null;
+  target: number | null;
 };
 
 export type PlayerCharacter = {
@@ -131,6 +220,22 @@ export type CharacterSkillCatalogItem = {
   creation_points_allowed: boolean;
   description: string;
   order: number;
+};
+
+export type CharacterSkillRecommendation = {
+  profile_id: string;
+  profile_name: string;
+  occupation_budget: number;
+  occupation_spent: number;
+  interest_budget: number;
+  interest_spent: number;
+  allocations: Array<{
+    skill_key: string;
+    occupation_points: number;
+    interest_points: number;
+    specialization: string | null;
+  }>;
+  rationale: string[];
 };
 
 export type InvestigatorRevision = {
