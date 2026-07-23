@@ -257,9 +257,26 @@ export type Investigator = {
   current_revision: InvestigatorRevision;
 };
 
+export type CharacterValidationIssue = {
+  layer: "structure" | "ruleset" | "review_policy";
+  code: string;
+  message: string;
+  path: string;
+  severity: "warning" | "error";
+  requires_kp_review: boolean;
+};
+
+export type CharacterValidationReport = {
+  issues: CharacterValidationIssue[];
+  counts: Record<CharacterValidationIssue["layer"], number>;
+  has_errors: boolean;
+  requires_kp_review: boolean;
+};
+
 export type InvestigatorImportPreview = {
   canonical_sheet: CharacterSheet;
   warnings: string[];
+  validation: CharacterValidationReport;
   source_hash: string;
   source_filename: string;
   template_id: string;
@@ -270,6 +287,7 @@ export type InvestigatorImportPreview = {
 export type InvestigatorManualPreview = {
   canonical_sheet: CharacterSheet;
   warnings: string[];
+  validation: CharacterValidationReport;
 };
 
 export type CharacterReview = {

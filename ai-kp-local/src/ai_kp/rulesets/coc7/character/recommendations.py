@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ai_kp.rulesets.coc7.character.creation_rules import OCCUPATION_POINT_FORMULAS
 from ai_kp.rulesets.coc7.character.skills import COC7_SKILL_CATALOG
-from ai_kp.rulesets.coc7.character.validator import OCCUPATION_POINT_FORMULAS
 
 
 PHYSICAL_SKILLS = {

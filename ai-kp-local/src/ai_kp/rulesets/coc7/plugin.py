@@ -4,7 +4,10 @@ from typing import Any, Mapping
 
 from ai_kp.rulesets.coc7.character.recommendations import recommend_coc7_skill_points
 from ai_kp.rulesets.coc7.character.skills import list_coc7_skill_catalog
-from ai_kp.rulesets.coc7.character.validator import normalize_character_sheet
+from ai_kp.rulesets.coc7.character.pipeline import (
+    normalize_character_sheet,
+    validate_character_sheet,
+)
 from ai_kp.rulesets.coc7.character.xlsx_import import import_coc_character_xlsx
 from ai_kp.rulesets.coc7.mechanics.skill_check import (
     RULESET_ID,
@@ -14,6 +17,7 @@ from ai_kp.rulesets.coc7.mechanics.skill_check import (
     secure_d100_dice,
 )
 from ai_kp.rulesets.base import RulesetManifest
+from ai_kp.rulesets.sdk.characters import CharacterSheetValidation
 
 
 class Coc7Ruleset:
@@ -40,6 +44,11 @@ class Coc7Ruleset:
         self, sheet: dict[str, Any]
     ) -> tuple[dict[str, Any], list[str]]:
         return normalize_character_sheet(sheet)
+
+    def validate_character_sheet(
+        self, sheet: dict[str, Any]
+    ) -> CharacterSheetValidation:
+        return validate_character_sheet(sheet)
 
     def import_character_xlsx(self, data: bytes, filename: str) -> dict[str, Any]:
         return import_coc_character_xlsx(data, filename)

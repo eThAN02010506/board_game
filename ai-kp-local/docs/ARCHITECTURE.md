@@ -111,6 +111,14 @@ The uploaded `COC空白卡.xlsx` is the field and interaction reference for inve
 
 The target model separates global player-owned `investigators`, immutable `investigator_revisions`, per-campaign `campaign_investigators`, and mutable `investigator_campaign_state`. Excel imports read allow-listed player inputs and retain provenance, but never execute formulas or macros. Derived values are recomputed by deterministic ruleset services. A campaign and its AI context use only that campaign's `approved_revision_id`; live HP, SAN, MP, temporary conditions, and inventory deltas do not mutate the approved revision.
 
+Character preparation uses three explicit validation layers. `structure` reports malformed or
+missing canonical inputs, `ruleset` applies deterministic creation budgets and prohibited
+allocations, and `review_policy` identifies unusual but KP-reviewable choices. Every issue has a
+stable code, path, severity and review flag. The API also derives the legacy `warnings` list from
+that report so existing clients remain compatible. Pure normalization and derived-value
+calculation do not make approval decisions; the application layer separately validates the KP's
+approve/change-request command before the SQLite adapter persists it.
+
 The current campaign-bound `player_characters` table remains a compatibility placeholder until the staged migration is implemented and verified. It must not be extended into the permanent cross-campaign identity model.
 
 ## Session and Authorization Flow

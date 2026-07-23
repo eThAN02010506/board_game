@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ai_kp.application.investigators.review_policy import validate_review_decision
 from ai_kp.application.ports.repositories import InvestigatorStore
 from ai_kp.rulesets import DEFAULT_RULESET_ID, get_ruleset
+from ai_kp.rulesets.sdk.characters import CharacterSheetValidation
 
 
 @dataclass(frozen=True)
@@ -31,27 +33,20 @@ class InvestigatorService:
         return self.ruleset.import_character_xlsx(data, filename)
 
     def preview_manual(self, canonical_sheet: dict[str, Any]) -> dict:
-        ruleset = get_ruleset(
-            canonical_sheet.get("ruleset_id") or self.ruleset.manifest.ruleset_id
-        )
-        canonical, warnings = ruleset.normalize_character_sheet(canonical_sheet)
-        return {"canonical_sheet": canonical, "warnings": warnings}
+        return self._validate_sheet(canonical_sheet).as_preview()
 
     def create_investigator(
         self,
         owner_profile_id: str,
         command: CreateInvestigatorCommand,
     ) -> dict:
-        ruleset = get_ruleset(
-            command.canonical_sheet.get("ruleset_id") or self.ruleset.manifest.ruleset_id
+        validation = self._validate_sheet(command.canonical_sheet)
+        warnings = list(
+            dict.fromkeys([*command.warnings, *validation.report.warnings])
         )
-        canonical, rule_warnings = ruleset.normalize_character_sheet(
-            command.canonical_sheet
-        )
-        warnings = list(dict.fromkeys([*command.warnings, *rule_warnings]))
         return self.repo.create_investigator(
             owner_profile_id,
-            canonical,
+            validation.canonical_sheet,
             source_type=command.source_type,
             source_hash=command.source_hash,
             source_filename=command.source_filename,
@@ -72,17 +67,14 @@ class InvestigatorService:
         investigator_id: str,
         command: CreateInvestigatorCommand,
     ) -> dict:
-        ruleset = get_ruleset(
-            command.canonical_sheet.get("ruleset_id") or self.ruleset.manifest.ruleset_id
+        validation = self._validate_sheet(command.canonical_sheet)
+        warnings = list(
+            dict.fromkeys([*command.warnings, *validation.report.warnings])
         )
-        canonical, rule_warnings = ruleset.normalize_character_sheet(
-            command.canonical_sheet
-        )
-        warnings = list(dict.fromkeys([*command.warnings, *rule_warnings]))
         return self.repo.add_investigator_revision(
             investigator_id,
             owner_profile_id,
-            canonical,
+            validation.canonical_sheet,
             source_type=command.source_type,
             source_hash=command.source_hash,
             source_filename=command.source_filename,
@@ -142,15 +134,24 @@ class InvestigatorService:
         kp_member_id: str,
         session_id: str,
     ) -> dict:
+        normalized_comment = validate_review_decision(action, comment)
         result = self.repo.review_campaign_investigator(
             campaign_id=campaign_id,
             investigator_id=investigator_id,
             action=action,
-            comment=comment,
+            comment=normalized_comment,
             kp_member_id=kp_member_id,
             session_id=session_id,
         )
         return self._with_diff(result)
+
+    def _validate_sheet(
+        self, canonical_sheet: dict[str, Any]
+    ) -> CharacterSheetValidation:
+        ruleset = get_ruleset(
+            canonical_sheet.get("ruleset_id") or self.ruleset.manifest.ruleset_id
+        )
+        return ruleset.validate_character_sheet(canonical_sheet)
 
     def assign(
         self, *, session_id: str, member_id: str, investigator_id: str

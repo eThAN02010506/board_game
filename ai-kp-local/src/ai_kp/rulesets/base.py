@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Protocol
 
+from ai_kp.rulesets.sdk.characters import CharacterSheetValidation
+
 
 @dataclass(frozen=True)
 class RulesetManifest:
@@ -37,6 +39,10 @@ class Ruleset(Protocol):
     def normalize_character_sheet(
         self, sheet: dict[str, Any]
     ) -> tuple[dict[str, Any], list[str]]: ...
+
+    def validate_character_sheet(
+        self, sheet: dict[str, Any]
+    ) -> CharacterSheetValidation: ...
 
     def import_character_xlsx(self, data: bytes, filename: str) -> dict[str, Any]: ...
 

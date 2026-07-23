@@ -11,7 +11,7 @@ from urllib.parse import unquote
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
-from ai_kp.rulesets.coc7.character.validator import normalize_character_sheet
+from ai_kp.rulesets.coc7.character.pipeline import validate_character_sheet
 
 
 MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -239,12 +239,13 @@ def import_coc_character_xlsx(data: bytes, filename: str = "character.xlsx") -> 
             "ignored_formula_cells": len(formulas),
         },
     }
-    canonical, warnings = normalize_character_sheet(sheet)
-    if not canonical["identity"].get("name"):
-        warnings.insert(0, "调查员姓名尚未填写")
+    validation = validate_character_sheet(sheet)
+    canonical = validation.canonical_sheet
+    warnings = validation.report.warnings
     return {
         "canonical_sheet": canonical,
         "warnings": list(dict.fromkeys(warnings)),
+        "validation": validation.report.as_dict(),
         "source_hash": hashlib.sha256(data).hexdigest(),
         "source_filename": filename,
         "template_id": "coc-character-sheet-cn-people-card-v1",
