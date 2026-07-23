@@ -1,1 +1,1 @@
-"""Future ruleset-neutral multi-stage adjudication workflow boundary."""
+"""Ruleset-neutral proposal and resolution safety policies."""

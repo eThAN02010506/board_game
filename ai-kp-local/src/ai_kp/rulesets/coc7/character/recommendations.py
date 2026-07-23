@@ -294,6 +294,77 @@ def _eligible_keys(keys: tuple[str, ...], modern_era: bool) -> list[str]:
     )
 
 
+def _recommended_target(key: str, index: int, age: int) -> int:
+    targets = (70, 65, 60, 60, 55, 55, 50, 50, 45, 45, 40, 40)
+    target = targets[min(index, len(targets) - 1)]
+    if age >= 50 and key in PHYSICAL_SKILLS:
+        return max(40, target - min(20, ((age - 40) // 10) * 5))
+    return target
+
+
+def _seed_focus_skills(
+    *,
+    remaining: int,
+    focus_keys: list[str],
+    current_values: dict[str, int],
+    allocations: dict[str, int],
+    age: int,
+) -> tuple[int, dict[str, int]]:
+    focus_targets: dict[str, int] = {}
+    for index, key in enumerate(focus_keys):
+        target = _recommended_target(key, index, age)
+        focus_targets[key] = target
+        baseline = min(target, 30 if age >= 50 and key in PHYSICAL_SKILLS else 35)
+        granted = min(remaining, max(0, baseline - current_values.get(key, 0)))
+        allocations[key] += granted
+        current_values[key] = current_values.get(key, 0) + granted
+        remaining -= granted
+        if remaining <= 0:
+            break
+    return remaining, focus_targets
+
+
+def _raise_focus_skills(
+    *,
+    remaining: int,
+    focus_keys: list[str],
+    focus_targets: dict[str, int],
+    current_values: dict[str, int],
+    allocations: dict[str, int],
+) -> int:
+    while remaining > 0:
+        eligible = [
+            key
+            for key in focus_keys
+            if current_values.get(key, 0) < focus_targets.get(key, 0)
+        ]
+        if not eligible:
+            break
+        for key in eligible:
+            allocations[key] += 1
+            current_values[key] = current_values.get(key, 0) + 1
+            remaining -= 1
+            if remaining <= 0:
+                break
+    return remaining
+
+
+def _fill_to_creation_cap(
+    *,
+    remaining: int,
+    preferred_keys: list[str],
+    current_values: dict[str, int],
+    allocations: dict[str, int],
+) -> None:
+    for key in preferred_keys:
+        granted = min(remaining, max(0, 75 - current_values.get(key, 0)))
+        allocations[key] += granted
+        current_values[key] = current_values.get(key, 0) + granted
+        remaining -= granted
+        if remaining <= 0:
+            break
+
+
 def _allocate(
     budget: int,
     preferred_keys: list[str],
@@ -304,44 +375,28 @@ def _allocate(
 ) -> dict[str, int]:
     allocations = {key: 0 for key in preferred_keys}
     remaining = max(0, budget)
-    targets = (70, 65, 60, 60, 55, 55, 50, 50, 45, 45, 40, 40)
     focus_keys = preferred_keys[: max(1, focus_count)]
-    focus_targets: dict[str, int] = {}
-    for index, key in enumerate(focus_keys):
-        target = targets[min(index, len(targets) - 1)]
-        if age >= 50 and key in PHYSICAL_SKILLS:
-            target = max(40, target - min(20, ((age - 40) // 10) * 5))
-        focus_targets[key] = target
-        baseline = min(target, 30 if age >= 50 and key in PHYSICAL_SKILLS else 35)
-        available = max(0, baseline - current_values.get(key, 0))
-        granted = min(remaining, available)
-        allocations[key] += granted
-        current_values[key] = current_values.get(key, 0) + granted
-        remaining -= granted
-        if remaining <= 0:
-            break
-    while remaining > 0:
-        progressed = False
-        for key in focus_keys:
-            if current_values.get(key, 0) >= focus_targets[key]:
-                continue
-            allocations[key] += 1
-            current_values[key] = current_values.get(key, 0) + 1
-            remaining -= 1
-            progressed = True
-            if remaining <= 0:
-                break
-        if not progressed:
-            break
+    remaining, focus_targets = _seed_focus_skills(
+        remaining=remaining,
+        focus_keys=focus_keys,
+        current_values=current_values,
+        allocations=allocations,
+        age=age,
+    )
+    remaining = _raise_focus_skills(
+        remaining=remaining,
+        focus_keys=focus_keys,
+        focus_targets=focus_targets,
+        current_values=current_values,
+        allocations=allocations,
+    )
     if remaining > 0:
-        for key in preferred_keys:
-            available = max(0, 75 - current_values.get(key, 0))
-            granted = min(remaining, available)
-            allocations[key] += granted
-            current_values[key] = current_values.get(key, 0) + granted
-            remaining -= granted
-            if remaining <= 0:
-                break
+        _fill_to_creation_cap(
+            remaining=remaining,
+            preferred_keys=preferred_keys,
+            current_values=current_values,
+            allocations=allocations,
+        )
     return {key: value for key, value in allocations.items() if value > 0}
 
 

@@ -1,1 +1,1 @@
-"""Future capability-oriented ruleset SDK; the current base.py protocol remains active."""
+"""Ruleset-neutral data contracts shared by installed ruleset plugins."""

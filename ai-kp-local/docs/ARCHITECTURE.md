@@ -37,10 +37,10 @@ The React workspace follows the same separation:
   root path is only a compatibility export.
 - Top-level product areas use distinct history-backed paths (`/play`, `/campaigns`, `/investigators`, `/maps`, `/memory`, `/npcs`, `/rules`, and `/planning`). `/play` is the intentional composite exception: it places the controlled investigator and public party summaries beside the central map, with a separately scrollable action/chat column.
 
-The documented target packages now exist as comment/docstring-only scaffolding. Their activation
-and incremental migration rules are tracked in
-[`ARCHITECTURE_SKELETON.md`](ARCHITECTURE_SKELETON.md); scaffold presence is never capability
-evidence.
+Future package boundaries are documented without pre-creating comment-only source files. Their
+activation and incremental migration rules are tracked in
+[`ARCHITECTURE_SKELETON.md`](ARCHITECTURE_SKELETON.md). A source module is created only with a
+real vertical slice and focused tests; planned capability status lives in the capability catalogue.
 
 ## Router-Service-Repository Boundary
 

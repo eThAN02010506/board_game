@@ -1,4 +1,4 @@
-"""Product capability catalog used to expose honest implementation placeholders."""
+"""Product capability catalogue used to expose honest implementation status."""
 
 from ai_kp.planning.capabilities import CAPABILITIES, list_capabilities
 

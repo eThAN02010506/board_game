@@ -72,6 +72,70 @@ def _imports(path: Path) -> set[str]:
     return imported
 
 
+def test_source_tree_has_no_comment_only_leaf_placeholders() -> None:
+    python_placeholders: list[str] = []
+    for path in sorted((PROJECT_ROOT / "src" / "ai_kp").rglob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if (
+            len(tree.body) == 1
+            and isinstance(tree.body[0], ast.Expr)
+            and isinstance(tree.body[0].value, ast.Constant)
+            and isinstance(tree.body[0].value.value, str)
+        ):
+            python_placeholders.append(str(path.relative_to(PROJECT_ROOT)))
+
+    frontend_placeholders: list[str] = []
+    frontend_root = PROJECT_ROOT / "apps" / "web" / "src"
+    for path in sorted((*frontend_root.rglob("*.ts"), *frontend_root.rglob("*.tsx"))):
+        lines = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        if lines and all(line.startswith("//") for line in lines):
+            frontend_placeholders.append(str(path.relative_to(PROJECT_ROOT)))
+
+    assert python_placeholders == []
+    assert frontend_placeholders == []
+
+
+def test_legacy_compatibility_paths_contain_no_second_implementation() -> None:
+    legacy_roots = (
+        "characters",
+        "kp",
+        "llm",
+        "maps",
+        "memory",
+        "modules",
+        "realtime",
+        "rulebook",
+        "rules",
+        "security",
+        "storage",
+    )
+    paths = [
+        path
+        for root_name in legacy_roots
+        for path in (PROJECT_ROOT / "src" / "ai_kp" / root_name).rglob("*.py")
+    ]
+    paths.extend(
+        PROJECT_ROOT / "src" / "ai_kp" / "core" / filename
+        for filename in ("config.py", "db.py", "repository.py")
+    )
+    implementations: list[str] = []
+    for path in sorted(paths):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            for node in ast.walk(tree)
+        ):
+            implementations.append(str(path.relative_to(PROJECT_ROOT)))
+
+    assert implementations == []
+
+
 def _service_method_calls(path: Path) -> set[tuple[str, str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     service_variables: dict[str, str] = {}

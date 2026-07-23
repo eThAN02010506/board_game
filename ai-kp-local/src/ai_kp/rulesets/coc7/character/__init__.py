@@ -1,1 +1,1 @@
-"""Future home of CoC7 character implementation after incremental migration."""
+"""Canonical CoC7 character import, normalization, validation, and recommendation."""

@@ -1,1 +1,1 @@
-"""Future complete player-action to committed-consequence vertical-slice use cases."""
+"""Player-action proposal and resolution application policies."""

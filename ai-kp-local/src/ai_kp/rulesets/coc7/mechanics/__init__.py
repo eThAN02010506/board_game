@@ -1,1 +1,1 @@
-"""Future home of pure, deterministic CoC7 mechanics."""
+"""Pure deterministic CoC7 mechanics currently implemented by skill checks."""

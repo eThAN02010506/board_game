@@ -15,6 +15,7 @@ MAX_PDF_BYTES = 64 * 1024 * 1024
 MAX_CHUNK_CHARACTERS = 2600
 HEADING_PATTERN = re.compile(r"^(第[一二三四五六七八九十百]+章|\d+(?:\.\d+)+)\s*(.+)?$")
 
+
 def _normalize_page_text(text: str) -> str:
     lines = []
     for raw in text.replace("\u00a0", " ").splitlines():
@@ -43,6 +44,58 @@ def _split_page(text: str) -> list[str]:
     return blocks
 
 
+def _page_blocks(page: Any, page_number: int) -> list[str]:
+    try:
+        return _split_page(_normalize_page_text(page.extract_text() or ""))
+    except Exception as error:
+        raise ValueError(f"第 {page_number} 页文本提取失败") from error
+
+
+def _heading_scope(
+    block: str,
+    chapter: str | None,
+    section: str | None,
+) -> tuple[str | None, str | None]:
+    for line in block.splitlines():
+        heading = HEADING_PATTERN.match(line)
+        if not heading:
+            continue
+        label = line[:160]
+        return (label, section) if label.startswith("第") and "章" in label else (
+            chapter,
+            label,
+        )
+    return chapter, section
+
+
+def _extract_chunks(reader: PdfReader, source_hash: str) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    chapter: str | None = None
+    section: str | None = None
+    for page_number, page in enumerate(reader.pages, start=1):
+        for block in _page_blocks(page, page_number):
+            chapter, section = _heading_scope(block, chapter, section)
+            order_index = len(chunks)
+            chunks.append(
+                {
+                    "id": (
+                        f"rulechunk_{source_hash[:12]}_"
+                        f"{page_number:04d}_{order_index:05d}"
+                    ),
+                    "page_start": page_number,
+                    "page_end": page_number,
+                    "order_index": order_index,
+                    "chapter": chapter,
+                    "section": section,
+                    "content_kind": "text",
+                    "audience": "all",
+                    "text": block,
+                    "text_hash": hashlib.sha256(block.encode("utf-8")).hexdigest(),
+                }
+            )
+    return chunks
+
+
 def extract_rulebook_pdf(data: bytes, filename: str) -> ExtractedRulebook:
     if not data or len(data) > MAX_PDF_BYTES:
         raise ValueError("规则书 PDF 为空或超过 64 MiB 限制")
@@ -60,42 +113,7 @@ def extract_rulebook_pdf(data: bytes, filename: str) -> ExtractedRulebook:
         if value is not None
     }
     title = metadata.get("Title") or filename.rsplit(".", 1)[0]
-    chunks: list[dict[str, Any]] = []
-    chapter: str | None = None
-    section: str | None = None
-    order_index = 0
-    for page_number, page in enumerate(reader.pages, start=1):
-        try:
-            page_text = _normalize_page_text(page.extract_text() or "")
-        except Exception as exc:
-            raise ValueError(f"第 {page_number} 页文本提取失败") from exc
-        for block in _split_page(page_text):
-            for line in block.splitlines():
-                heading = HEADING_PATTERN.match(line)
-                if heading:
-                    label = line[:160]
-                    if label.startswith("第") and "章" in label:
-                        chapter = label
-                    else:
-                        section = label
-                    break
-            text_hash = hashlib.sha256(block.encode("utf-8")).hexdigest()
-            chunk_id = f"rulechunk_{source_hash[:12]}_{page_number:04d}_{order_index:05d}"
-            chunks.append(
-                {
-                    "id": chunk_id,
-                    "page_start": page_number,
-                    "page_end": page_number,
-                    "order_index": order_index,
-                    "chapter": chapter,
-                    "section": section,
-                    "content_kind": "text",
-                    "audience": "all",
-                    "text": block,
-                    "text_hash": text_hash,
-                }
-            )
-            order_index += 1
+    chunks = _extract_chunks(reader, source_hash)
     if not chunks:
         raise ValueError("规则书没有可提取的文本层；需要先执行 OCR")
     return ExtractedRulebook(

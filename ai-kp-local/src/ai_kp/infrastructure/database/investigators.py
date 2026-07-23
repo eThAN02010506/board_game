@@ -642,7 +642,38 @@ class InvestigatorRepository(SQLiteRepository):
         approved = record.get("approved_revision")
         if state is None or approved is None:
             raise ValueError("Investigator has no approved campaign state")
-        canonical = approved["canonical_sheet"]
+        assignments, params = self._campaign_state_assignments(
+            approved["canonical_sheet"], changes
+        )
+        if not assignments:
+            return state
+        assignments.extend(
+            ["state_version = state_version + 1", "updated_at = CURRENT_TIMESTAMP"]
+        )
+        params.extend([campaign_id, investigator_id, expected_version])
+        updated = self.connection.execute(
+            f"""
+            UPDATE investigator_campaign_state SET {', '.join(assignments)}
+            WHERE campaign_id = ? AND investigator_id = ? AND state_version = ?
+            """,
+            params,
+        )
+        if updated.rowcount != 1:
+            raise ValueError("Investigator campaign state changed; refresh and retry")
+        row = self.connection.execute(
+            """
+            SELECT * FROM investigator_campaign_state
+            WHERE campaign_id = ? AND investigator_id = ?
+            """,
+            (campaign_id, investigator_id),
+        ).fetchone()
+        return self._decode_campaign_state(row)
+
+    @staticmethod
+    def _campaign_state_assignments(
+        canonical: dict[str, Any],
+        changes: dict[str, Any],
+    ) -> tuple[list[str], list[Any]]:
         derived = canonical.get("derived") or {}
         limits = {
             "current_hp": max(0, int(derived.get("max_hp") or 0)),
@@ -673,26 +704,4 @@ class InvestigatorRepository(SQLiteRepository):
         if "current_game_time" in changes and changes["current_game_time"] is not None:
             assignments.append("current_game_time = ?")
             params.append(str(changes["current_game_time"]))
-        if not assignments:
-            return state
-        assignments.extend(
-            ["state_version = state_version + 1", "updated_at = CURRENT_TIMESTAMP"]
-        )
-        params.extend([campaign_id, investigator_id, expected_version])
-        updated = self.connection.execute(
-            f"""
-            UPDATE investigator_campaign_state SET {', '.join(assignments)}
-            WHERE campaign_id = ? AND investigator_id = ? AND state_version = ?
-            """,
-            params,
-        )
-        if updated.rowcount != 1:
-            raise ValueError("Investigator campaign state changed; refresh and retry")
-        row = self.connection.execute(
-            """
-            SELECT * FROM investigator_campaign_state
-            WHERE campaign_id = ? AND investigator_id = ?
-            """,
-            (campaign_id, investigator_id),
-        ).fetchone()
-        return self._decode_campaign_state(row)
+        return assignments, params

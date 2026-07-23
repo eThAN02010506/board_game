@@ -35,16 +35,58 @@ class SkillCheckRepository(SQLiteRepository):
         player_action_id: str | None = None,
         pushed_from_check_id: str | None = None,
     ) -> dict[str, Any]:
-        session = self.get_campaign_session(session_id)
-        if session["campaign_id"] != campaign_id or session["status"] != "active":
-            raise ValueError("Check requires the campaign's active session")
-        requester = self.get_session_member(requested_by_member_id)
-        if requester["session_id"] != session_id or requester["revoked_at"] is not None:
-            raise ValueError("Check requester must be active in this session")
+        self._validate_check_scope(campaign_id, session_id, requested_by_member_id)
         normalized_skill = skill_name.strip()
         if not normalized_skill:
             raise ValueError("Skill name is required")
-        roller = None
+        roller_member_id, pc_id = self._resolve_check_roller(
+            session_id, roller_member_id, pc_id
+        )
+        target_values = self._check_target_values(
+            campaign_id, pc_id, normalized_skill, target
+        )
+        check_id = new_id("check")
+        self.connection.execute(
+            """
+            INSERT INTO skill_checks
+              (id, campaign_id, session_id, proposal_id, player_action_id,
+               requested_by_member_id, roller_member_id, pc_id, investigator_id,
+               skill_key, skill_name, target, target_source, difficulty, bonus_dice,
+               hidden, allow_push, pushed_from_check_id, ruleset_id, ruleset_version,
+               source_reference_json, investigator_state_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                check_id, campaign_id, session_id, proposal_id, player_action_id,
+                requested_by_member_id, roller_member_id, pc_id,
+                target_values["investigator_id"], target_values["skill_key"],
+                normalized_skill, target_values["target"], target_values["target_source"],
+                difficulty, bonus_dice, int(hidden), int(allow_push),
+                pushed_from_check_id, ruleset_id, ruleset_version,
+                json.dumps(source_reference, ensure_ascii=False),
+                target_values["state_version"],
+            ),
+        )
+        self._add_check_action(check_id, "requested", requested_by_member_id)
+        self._append_check_realtime(check_id, "check.requested")
+        return self.get_skill_check(check_id)
+
+    def _validate_check_scope(
+        self, campaign_id: str, session_id: str, requester_id: str
+    ) -> None:
+        session = self.get_campaign_session(session_id)
+        if session["campaign_id"] != campaign_id or session["status"] != "active":
+            raise ValueError("Check requires the campaign's active session")
+        requester = self.get_session_member(requester_id)
+        if requester["session_id"] != session_id or requester["revoked_at"] is not None:
+            raise ValueError("Check requester must be active in this session")
+
+    def _resolve_check_roller(
+        self,
+        session_id: str,
+        roller_member_id: str | None,
+        pc_id: str | None,
+    ) -> tuple[str | None, str | None]:
         if roller_member_id:
             roller = self.get_session_member(roller_member_id)
             if (
@@ -67,68 +109,36 @@ class SkillCheckRepository(SQLiteRepository):
                 (session_id, pc_id),
             ).fetchone()
             roller_member_id = str(row["id"]) if row is not None else None
+        return roller_member_id, pc_id
 
+    def _check_target_values(
+        self,
+        campaign_id: str,
+        pc_id: str | None,
+        normalized_skill: str,
+        target: int | None,
+    ) -> dict[str, Any]:
         target_details = self._resolve_check_target(campaign_id, pc_id, normalized_skill)
         if target is None:
             if target_details is None:
                 raise ValueError("No approved character skill target was found; KP must set one")
-            resolved_target = int(target_details["target"])
-            target_source = str(target_details["target_source"])
-            investigator_id = target_details.get("investigator_id")
-            state_version = target_details.get("state_version")
-            skill_key = str(target_details.get("skill_key") or normalized_skill)
-        else:
-            if not 0 <= target <= 100:
-                raise ValueError("Check target must be between 0 and 100")
-            resolved_target = target
-            target_source = "kp_manual"
-            investigator_id = target_details.get("investigator_id") if target_details else None
-            state_version = target_details.get("state_version") if target_details else None
-            skill_key = (
-                str(target_details.get("skill_key"))
-                if target_details and target_details.get("skill_key")
-                else normalized_skill
-            )
-
-        check_id = new_id("check")
-        self.connection.execute(
-            """
-            INSERT INTO skill_checks
-              (id, campaign_id, session_id, proposal_id, player_action_id,
-               requested_by_member_id, roller_member_id, pc_id, investigator_id,
-               skill_key, skill_name, target, target_source, difficulty, bonus_dice,
-               hidden, allow_push, pushed_from_check_id, ruleset_id, ruleset_version,
-               source_reference_json, investigator_state_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                check_id,
-                campaign_id,
-                session_id,
-                proposal_id,
-                player_action_id,
-                requested_by_member_id,
-                roller_member_id,
-                pc_id,
-                investigator_id,
-                skill_key,
-                normalized_skill,
-                resolved_target,
-                target_source,
-                difficulty,
-                bonus_dice,
-                int(hidden),
-                int(allow_push),
-                pushed_from_check_id,
-                ruleset_id,
-                ruleset_version,
-                json.dumps(source_reference, ensure_ascii=False),
-                state_version,
-            ),
-        )
-        self._add_check_action(check_id, "requested", requested_by_member_id)
-        self._append_check_realtime(check_id, "check.requested")
-        return self.get_skill_check(check_id)
+            return {
+                "target": int(target_details["target"]),
+                "target_source": str(target_details["target_source"]),
+                "investigator_id": target_details.get("investigator_id"),
+                "state_version": target_details.get("state_version"),
+                "skill_key": str(target_details.get("skill_key") or normalized_skill),
+            }
+        if not 0 <= target <= 100:
+            raise ValueError("Check target must be between 0 and 100")
+        details = target_details or {}
+        return {
+            "target": target,
+            "target_source": "kp_manual",
+            "investigator_id": details.get("investigator_id"),
+            "state_version": details.get("state_version"),
+            "skill_key": str(details.get("skill_key") or normalized_skill),
+        }
 
     def get_skill_check(self, check_id: str) -> dict[str, Any]:
         row = self.connection.execute(
