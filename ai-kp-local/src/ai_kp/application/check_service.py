@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.application.ports.repositories import CheckStore
 from ai_kp.rulesets import get_ruleset
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
@@ -29,7 +29,7 @@ class ResolveCheckCommand:
 class CheckService:
     """Authorize checks while delegating mechanics to the campaign ruleset."""
 
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: CheckStore):
         self.repo = repo
 
     def create(

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.application.ports.repositories import CampaignStore
 from ai_kp.rulesets import get_ruleset
 
 
@@ -14,7 +14,7 @@ class CreateCampaignCommand:
 class CampaignService:
     """Campaign catalogue use cases, independent from the HTTP transport."""
 
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: CampaignStore):
         self.repo = repo
 
     def create(self, command: CreateCampaignCommand) -> dict:

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.application.ports.repositories import MapStore
 from ai_kp.platform.scenes.map_generation import generate_map
 
 
@@ -38,7 +38,7 @@ class MoveTokenCommand:
 class MapService:
     """Coordinate persistent map changes and their realtime outbox records."""
 
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: MapStore):
         self.repo = repo
 
     def generate_and_save(
