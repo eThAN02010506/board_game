@@ -126,20 +126,44 @@ def test_legacy_api_entrypoint_remains_an_identity_alias() -> None:
     assert compatibility_main.OpenAICompatibleClient is not None
 
 
-def test_application_layer_does_not_depend_on_fastapi_or_http_adapters() -> None:
+def test_application_layer_depends_on_ports_not_delivery_or_infrastructure() -> None:
     application_dir = PROJECT_ROOT / "src" / "ai_kp" / "application"
     violations: dict[str, list[str]] = {}
-    for path in sorted(application_dir.glob("*.py")):
+    forbidden_prefixes = (
+        "ai_kp.api",
+        "ai_kp.bootstrap",
+        "ai_kp.infrastructure",
+    )
+    for path in sorted(application_dir.rglob("*.py")):
         forbidden = sorted(
             name
             for name in _imports(path)
             if name == "fastapi"
             or name.startswith("fastapi.")
-            or name == "ai_kp.api"
-            or name.startswith("ai_kp.api.")
+            or any(
+                name == prefix or name.startswith(f"{prefix}.")
+                for prefix in forbidden_prefixes
+            )
         )
         if forbidden:
-            violations[path.name] = forbidden
+            violations[str(path.relative_to(application_dir))] = forbidden
+
+    assert violations == {}
+
+
+def test_director_and_rule_authoring_do_not_import_infrastructure() -> None:
+    violations: dict[str, list[str]] = {}
+    for relative_dir in ("director", "rule_authoring"):
+        root = PROJECT_ROOT / "src" / "ai_kp" / relative_dir
+        for path in sorted(root.rglob("*.py")):
+            forbidden = sorted(
+                name
+                for name in _imports(path)
+                if name == "ai_kp.infrastructure"
+                or name.startswith("ai_kp.infrastructure.")
+            )
+            if forbidden:
+                violations[str(path.relative_to(PROJECT_ROOT))] = forbidden
 
     assert violations == {}
 

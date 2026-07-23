@@ -11,3 +11,7 @@ class SQLiteRepository:
 
     def commit(self) -> None:
         self.connection.commit()
+
+    def begin_immediate(self) -> None:
+        if not self.connection.in_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")

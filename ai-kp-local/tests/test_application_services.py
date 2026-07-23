@@ -12,9 +12,9 @@ from ai_kp.application.map_service import (
 )
 from ai_kp.application.session_service import SessionService
 from ai_kp.application.turn_service import KpTurnCommand, ManualProposalCommand, TurnService
-from ai_kp.core.config import Settings
 from ai_kp.core.db import db_session
 from ai_kp.core.repository import Repository
+from ai_kp.director.orchestrator import KpOrchestrator
 
 
 class ApplicationServiceTests(unittest.TestCase):
@@ -172,7 +172,6 @@ class AiTurnServiceTests(unittest.IsolatedAsyncioTestCase):
                             }
                         )
 
-                settings = Settings(db_path=db_path, llm_model="closing-fake")
                 with self.assertRaises(KpSessionEndedError):
                     await TurnService(repo).create_ai_proposal(
                         KpTurnCommand(
@@ -180,8 +179,8 @@ class AiTurnServiceTests(unittest.IsolatedAsyncioTestCase):
                             player_action="I open the door.",
                         ),
                         identity,
-                        settings,
-                        lambda _settings: ClosingLlm(),
+                        KpOrchestrator(repo.connection, ClosingLlm()),
+                        source_model="closing-fake",
                     )
                 proposal_count = connection.execute(
                     "SELECT COUNT(*) AS total FROM turn_proposals"

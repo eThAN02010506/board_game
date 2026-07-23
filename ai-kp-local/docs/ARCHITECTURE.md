@@ -7,6 +7,9 @@ The backend has explicit composition, transport, application, domain, ruleset, a
 - `src/ai_kp/bootstrap/composition.py` is the composition root. It initializes the database once, installs CORS and error handlers, and mounts the domain routers. `bootstrap/settings.py` owns runtime settings. `api/main.py` remains the stable compatibility ASGI entry point.
 - `src/ai_kp/api/routers/{system,campaigns,sessions,world,maps,turns,realtime}.py` owns HTTP/WebSocket transport only. `dependencies.py`, `authz.py`, `errors.py`, and `schemas.py` centralize per-request repository lifetime, authentication, authorization, error mapping, and transport DTOs.
 - `src/ai_kp/application/{campaign,world,session,map,turn}_service.py` owns use cases that coordinate validation, domain components, multiple writes, the transactional realtime outbox, and the local-model boundary. It has no FastAPI dependency.
+- `src/ai_kp/application/ports/` defines the narrow persistence and AI-director contracts used by
+  each service. Application code must not import `api`, `bootstrap`, or `infrastructure`;
+  concrete adapters are supplied at the composition/delivery boundary.
 - `src/ai_kp/platform/` owns ruleset-neutral memory, module, and scene logic. `director/` owns AI KP context and proposal orchestration. `rule_authoring/` owns extracted rule objects and deterministic validation/execution.
 - `src/ai_kp/infrastructure/database/` owns SQLite mechanics, schema, ordered migrations, and feature repositories. Its `Repository` facade intentionally supplies one shared transaction boundary to current application services.
 - `src/ai_kp/infrastructure/{knowledge,llm,realtime,security}/` owns external and persistence adapters. These layers may depend inward on domain contracts; domain packages do not depend on these adapters.

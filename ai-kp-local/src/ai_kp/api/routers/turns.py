@@ -14,6 +14,7 @@ from ai_kp.api.schemas import (
 )
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.director.orchestrator import KpOrchestrator
 from ai_kp.director.turn_output import StructuredOutputError
 from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.platform.sessions.models import AuthenticatedMember
@@ -190,8 +191,8 @@ async def kp_turn(
                 active_spoiler_tags=tuple(payload.active_spoiler_tags),
             ),
             identity,
-            settings,
-            _create_llm_client,
+            KpOrchestrator(repo.connection, _create_llm_client(settings)),
+            source_model=settings.llm_model,
         )
     except StructuredOutputError as exc:
         raise HTTPException(

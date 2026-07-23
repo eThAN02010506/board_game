@@ -495,6 +495,61 @@ class RulebookStore(Protocol):
     ) -> list[dict]: ...
 
 
+class TurnStore(CheckStore, RealtimeOutbox, Protocol):
+    def begin_immediate(self) -> None: ...
+
+    def create_player_action(
+        self,
+        identity: Any,
+        *,
+        action_text: str,
+        map_id: str | None = None,
+        token_id: str | None = None,
+        client_action_id: str | None = None,
+    ) -> dict: ...
+
+    def create_turn_proposal(self, **values: Any) -> dict: ...
+
+    def link_player_action_to_proposal(
+        self,
+        action_id: str,
+        proposal_id: str,
+        campaign_id: str,
+    ) -> dict: ...
+
+    def create_context_assembly(self, **values: Any) -> dict: ...
+
+    def is_session_member_active(self, member_id: str, session_id: str) -> bool: ...
+
+    def get_turn_proposal(self, proposal_id: str) -> dict: ...
+
+    def approve_turn_proposal(
+        self,
+        proposal_id: str,
+        *,
+        actor: str,
+        note: str = "",
+        override_public_narration: str | None = None,
+    ) -> dict: ...
+
+    def player_action_id_for_proposal(self, proposal_id: str) -> str | None: ...
+
+    def reject_turn_proposal(
+        self,
+        proposal_id: str,
+        *,
+        actor: str,
+        note: str = "",
+    ) -> dict: ...
+
+    def require_submitted_player_action(
+        self,
+        action_id: str,
+        campaign_id: str,
+        session_id: str,
+    ) -> dict: ...
+
+
 __all__ = [
     "CampaignStore",
     "CheckStore",
@@ -503,5 +558,6 @@ __all__ = [
     "RealtimeOutbox",
     "RulebookStore",
     "SessionStore",
+    "TurnStore",
     "WorldStore",
 ]

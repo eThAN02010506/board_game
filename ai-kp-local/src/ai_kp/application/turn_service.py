@@ -1,17 +1,12 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from ai_kp.application.errors import KpSessionEndedError
-from ai_kp.bootstrap.settings import Settings
-from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.director.orchestrator import KpOrchestrator
-from ai_kp.platform.ports.llm import LlmClient
+from ai_kp.application.ports.director import KpDirector
+from ai_kp.application.ports.repositories import TurnStore
 from ai_kp.rulesets import get_ruleset
 from ai_kp.platform.sessions.models import AuthenticatedMember
-
-
-LlmFactory = Callable[[Settings], LlmClient]
 
 
 @dataclass(frozen=True)
@@ -44,7 +39,7 @@ class KpTurnCommand:
 class TurnService:
     """Coordinate player actions, KP drafts, context audit, and approval outbox."""
 
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: TurnStore):
         self.repo = repo
 
     def submit_player_action(
@@ -110,8 +105,9 @@ class TurnService:
         self,
         command: KpTurnCommand,
         identity: AuthenticatedMember,
-        settings: Settings,
-        llm_factory: LlmFactory,
+        director: KpDirector,
+        *,
+        source_model: str,
     ) -> dict:
         queued_action = self._queued_action(
             command.player_action_id,
@@ -123,10 +119,7 @@ class TurnService:
         location = queued_action["location"] if queued_action else command.location
         map_id = queued_action["map_id"] if queued_action else command.map_id
 
-        result = await KpOrchestrator(
-            self.repo.connection,
-            llm_factory(settings),
-        ).handle_player_action(
+        result = await director.handle_player_action(
             campaign_id=command.campaign_id,
             player_action=player_action,
             pc_id=pc_id,
@@ -138,8 +131,7 @@ class TurnService:
 
         # The model call intentionally runs outside the write transaction. Claim
         # the database only for the short revalidation-and-persist phase.
-        if not self.repo.connection.in_transaction:
-            self.repo.connection.execute("BEGIN IMMEDIATE")
+        self.repo.begin_immediate()
         if not self.repo.is_session_member_active(identity.member_id, identity.session_id):
             raise KpSessionEndedError("KP session ended while the model was running")
 
@@ -155,7 +147,7 @@ class TurnService:
             proposed_memories=output.proposed_memories,
             proposed_npc_updates=output.proposed_npc_updates,
             proposed_map_moves=output.proposed_map_moves,
-            source_model=settings.llm_model,
+            source_model=source_model,
         )
         self.repo.create_context_assembly(
             proposal_id=proposal["id"],
