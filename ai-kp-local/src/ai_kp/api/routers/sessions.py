@@ -18,8 +18,7 @@ from ai_kp.api.schemas import (
     SessionSeatPcAssign,
 )
 from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.infrastructure.database.security import AuthenticatedMember
-from ai_kp.infrastructure.database.investigators import AuthenticatedPlayer
+from ai_kp.platform.sessions.models import AuthenticatedMember, AuthenticatedPlayer
 
 
 router = APIRouter()

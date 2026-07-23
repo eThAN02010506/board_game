@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.infrastructure.llm.base import LlmClient
+from ai_kp.platform.ports.llm import LlmClient
 from ai_kp.infrastructure.knowledge.minirag import (
     MiniRagOriginalIndex,
     MiniRagUnavailableError,

@@ -1,19 +1,13 @@
 """SQLite adapter for player-owned investigators, revisions, reviews, and runtime state."""
 
 import json
-from dataclasses import dataclass
 from typing import Any
 
 from ai_kp.core.ids import new_id
 from ai_kp.infrastructure.security.tokens import generate_player_token, hash_player_token
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
-
-
-@dataclass(frozen=True)
-class AuthenticatedPlayer:
-    profile_id: str
-    display_name: str
+from ai_kp.platform.sessions.models import AuthenticatedPlayer
 
 
 class InvestigatorRepository(SQLiteRepository):

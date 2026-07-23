@@ -6,9 +6,9 @@ from ai_kp.application.errors import KpSessionEndedError
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.director.orchestrator import KpOrchestrator
-from ai_kp.infrastructure.llm.base import LlmClient
+from ai_kp.platform.ports.llm import LlmClient
 from ai_kp.rulesets import get_ruleset
-from ai_kp.infrastructure.database.security import AuthenticatedMember
+from ai_kp.platform.sessions.models import AuthenticatedMember
 
 
 LlmFactory = Callable[[Settings], LlmClient]

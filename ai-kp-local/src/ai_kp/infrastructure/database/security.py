@@ -1,7 +1,6 @@
 """SQLite adapter for sessions, members, authentication, and revocation state."""
 
 import sqlite3
-from dataclasses import dataclass
 
 from ai_kp.core.ids import new_id
 from ai_kp.infrastructure.security.tokens import (
@@ -10,18 +9,7 @@ from ai_kp.infrastructure.security.tokens import (
     hash_access_token,
     hash_join_code,
 )
-
-
-@dataclass(frozen=True)
-class AuthenticatedMember:
-    member_id: str
-    session_id: str
-    campaign_id: str
-    role: str
-    display_name: str
-    pc_id: str | None
-    player_profile_id: str | None = None
-    seat_id: str | None = None
+from ai_kp.platform.sessions.models import AuthenticatedMember
 
 
 def _public_row(row: sqlite3.Row, *hidden: str) -> dict:

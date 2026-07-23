@@ -2,7 +2,7 @@
 
 import httpx
 
-from ai_kp.infrastructure.llm.base import ChatMessage
+from ai_kp.platform.ports.llm import ChatMessage
 
 
 class OpenAICompatibleClient:

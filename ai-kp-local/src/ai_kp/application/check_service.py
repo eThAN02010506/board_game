@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.rulesets import get_ruleset
-from ai_kp.infrastructure.database.security import AuthenticatedMember
+from ai_kp.platform.sessions.models import AuthenticatedMember
 
 
 @dataclass(frozen=True)

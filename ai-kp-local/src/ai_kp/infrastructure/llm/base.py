@@ -1,15 +1,5 @@
-"""Canonical model-provider port types used by application and director code."""
+"""Compatibility export for the model port now owned by the platform layer."""
 
-from dataclasses import dataclass
-from typing import Protocol
+from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
-
-@dataclass(frozen=True)
-class ChatMessage:
-    role: str
-    content: str
-
-
-class LlmClient(Protocol):
-    async def complete(self, messages: list[ChatMessage], temperature: float = 0.7) -> str:
-        raise NotImplementedError
+__all__ = ["ChatMessage", "LlmClient"]

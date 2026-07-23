@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 
-from ai_kp.infrastructure.llm.base import ChatMessage, LlmClient
+from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
 
 PROMPT_VERSION = "coc7-rule-extractor-v2-compact"

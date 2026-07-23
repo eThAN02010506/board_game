@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 
 from ai_kp.director.context_builder import ContextAssembly, ContextBuilder, estimate_tokens
 from ai_kp.director.turn_output import KpTurnOutput, StructuredOutputError, parse_kp_turn_output
-from ai_kp.infrastructure.llm.base import ChatMessage, LlmClient
+from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
 
 @dataclass(frozen=True)

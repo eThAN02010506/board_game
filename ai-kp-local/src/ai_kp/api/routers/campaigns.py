@@ -5,7 +5,7 @@ from ai_kp.api.dependencies import get_optional_identity, get_repo
 from ai_kp.api.schemas import CampaignCreate
 from ai_kp.application.campaign_service import CampaignService, CreateCampaignCommand
 from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.infrastructure.database.security import AuthenticatedMember
+from ai_kp.platform.sessions.models import AuthenticatedMember
 
 
 router = APIRouter()

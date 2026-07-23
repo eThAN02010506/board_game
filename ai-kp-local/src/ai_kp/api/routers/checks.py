@@ -13,7 +13,7 @@ from ai_kp.api.schemas import (
     SkillCheckResolve,
 )
 from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.infrastructure.database.security import AuthenticatedMember
+from ai_kp.platform.sessions.models import AuthenticatedMember
 
 
 router = APIRouter()

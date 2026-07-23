@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Response, WebSocket
 
 from ai_kp.api.dependencies import get_identity, get_repo
 from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.infrastructure.database.security import AuthenticatedMember
+from ai_kp.platform.sessions.models import AuthenticatedMember
 from ai_kp.infrastructure.realtime.websocket import handle_realtime_websocket
 
 

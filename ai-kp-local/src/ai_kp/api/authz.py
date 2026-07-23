@@ -5,7 +5,7 @@ from fastapi import Header, HTTPException, Request
 
 from ai_kp.api.dependencies import get_app_settings
 from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.infrastructure.database.security import AuthenticatedMember
+from ai_kp.platform.sessions.models import AuthenticatedMember
 
 
 def is_local_admin(request: Request, supplied_admin_token: str | None) -> bool:

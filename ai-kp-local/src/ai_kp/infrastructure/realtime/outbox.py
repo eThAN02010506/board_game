@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from ai_kp.core.ids import new_id
-from ai_kp.infrastructure.database.security import AuthenticatedMember
+from ai_kp.platform.sessions.models import AuthenticatedMember
 from ai_kp.infrastructure.security.tokens import generate_realtime_ticket, hash_realtime_ticket
 
 
