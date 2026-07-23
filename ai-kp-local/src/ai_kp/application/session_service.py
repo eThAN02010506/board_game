@@ -1,11 +1,11 @@
-from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.application.ports.repositories import SessionStore
 from ai_kp.platform.sessions.models import AuthenticatedPlayer
 
 
 class SessionService:
     """Coordinate session lifecycle operations on one repository transaction."""
 
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: SessionStore):
         self.repo = repo
 
     def create(

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.application.ports.repositories import InvestigatorStore
 from ai_kp.rulesets import DEFAULT_RULESET_ID, get_ruleset
 
 
@@ -17,7 +17,7 @@ class CreateInvestigatorCommand:
 
 
 class InvestigatorService:
-    def __init__(self, repo: Repository, ruleset_id: str = DEFAULT_RULESET_ID):
+    def __init__(self, repo: InvestigatorStore, ruleset_id: str = DEFAULT_RULESET_ID):
         self.repo = repo
         self.ruleset = get_ruleset(ruleset_id)
 
