@@ -1,1 +1,1 @@
-"""Future cryptographic and sandbox adapters; authorization policy remains in the domain."""
+"""Credential hashing and future sandbox adapters; authorization policy stays outside."""

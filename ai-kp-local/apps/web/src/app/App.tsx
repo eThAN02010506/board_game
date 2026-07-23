@@ -1,17 +1,6 @@
 import {
   AlertCircle,
-  Brain,
-  CircleDot,
-  Cpu,
-  Dice5,
-  LayoutDashboard,
-  ListChecks,
-  Map,
-  RefreshCw,
-  Users,
-  UserRound,
-  Wifi,
-  WifiOff
+  Brain
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -50,6 +39,8 @@ import { ProposalPanel } from "../features/proposals/ProposalPanel";
 import { RulebookPage } from "../features/rules/RulebookPage";
 import { SessionPanel } from "../features/sessions/SessionPanel";
 import { useWorkspaceRealtime } from "../realtime/provider";
+import { AppLayout } from "./layout/AppLayout";
+import { useWorkspaceRoute } from "./router";
 import {
   listStoredCampaignTokens,
   readActiveMapId,
@@ -63,24 +54,6 @@ import {
   writePlayerProfileToken
 } from "../session/session-storage";
 import "../styles.css";
-
-const navItems = [
-  { id: "play", label: "游玩桌面", icon: LayoutDashboard, path: "/play", planned: false },
-  { id: "campaigns", label: "团与权限", icon: Users, path: "/campaigns", planned: false },
-  { id: "investigators", label: "调查员", icon: UserRound, path: "/investigators", planned: false },
-  { id: "maps", label: "地图棋子", icon: Map, path: "/maps", planned: false },
-  { id: "memory", label: "角色记忆", icon: Brain, path: "/memory", planned: false },
-  { id: "npcs", label: "NPC", icon: Users, path: "/npcs", planned: true },
-  { id: "rules", label: "规则知识", icon: Dice5, path: "/rules", planned: false },
-  { id: "models", label: "模型设置", icon: Cpu, path: "/models", planned: false },
-  { id: "planning", label: "功能规划", icon: ListChecks, path: "/planning", planned: true }
-] as const;
-
-type PageId = (typeof navItems)[number]["id"];
-
-function pageFromPath(pathname: string): PageId {
-  return navItems.find((item) => item.path === pathname)?.id ?? "play";
-}
 
 const defaultLocations = "旧码头, 废弃仓库, 报社, 警局";
 const defaultRoutes = "旧码头>废弃仓库\n旧码头>报社\n报社>警局";
@@ -141,6 +114,7 @@ credentialBridge.admin(initialAdminToken);
 credentialBridge.player(initialPlayerProfileToken);
 
 export default function App() {
+  const { activePage: activeNav, navigate, route: currentPage } = useWorkspaceRoute();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [activeCampaign, setActiveCampaign] = useState<Campaign | null>(null);
   const [maps, setMaps] = useState<SavedMap[]>([]);
@@ -162,7 +136,6 @@ export default function App() {
   const [selectedTokenId, setSelectedTokenId] = useState("");
   const [log, setLog] = useState("准备就绪。先连接后端，或直接创建一个测试团。");
   const [loading, setLoading] = useState(false);
-  const [activeNav, setActiveNav] = useState<PageId>(() => pageFromPath(window.location.pathname));
   const [characterExpanded, setCharacterExpanded] = useState(false);
   const [capabilities, setCapabilities] = useState<Capability[]>([]);
   const [capabilitiesLoading, setCapabilitiesLoading] = useState(true);
@@ -269,9 +242,8 @@ export default function App() {
     setLog(nextToken ? "管理员口令已仅保存在当前浏览器会话。" : "管理员口令已清除。");
   }
 
-  function navigateWorkspace(id: PageId, path: string) {
-    setActiveNav(id);
-    window.history.pushState({ page: id }, "", path);
+  function navigateWorkspace(id: typeof activeNav) {
+    navigate(id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -1226,77 +1198,23 @@ export default function App() {
     void loadCampaigns();
     void loadCapabilities();
     void loadRecoverableSeats(true);
-    const onPopState = () => setActiveNav(pageFromPath(window.location.pathname));
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  const currentPage = navItems.find((item) => item.id === activeNav) ?? navItems[0];
   const activePc = pcs.find((pc) => pc.id === authIdentity?.pc_id) ?? null;
   const otherPcs = pcs.filter((pc) => pc.id !== authIdentity?.pc_id);
 
   return (
-    <main className={`app-shell ${activeNav === "investigators" ? "investigator-shell" : ""}`}>
-      <aside className="sidebar">
-        <div className="brand">
-          <CircleDot size={18} />
-          AI KP Local
-        </div>
-        <nav>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                aria-pressed={activeNav === item.id}
-                className={`nav-item ${activeNav === item.id ? "active" : ""}`}
-                key={item.id}
-                onClick={() => navigateWorkspace(item.id, item.path)}
-                type="button"
-              >
-                <Icon size={17} />
-                {item.label}
-                {item.planned && <small>规划</small>}
-              </button>
-            );
-          })}
-        </nav>
-      </aside>
-
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">{currentPage.label}</p>
-            <h1>{activeCampaign?.title ?? "AI KP Local"}</h1>
-          </div>
-          <div className="topbar-actions">
-            <button className="ghost-button" onClick={loadCampaigns} type="button">
-              <RefreshCw size={16} />
-              连接后端
-            </button>
-            {authIdentity && (
-              <span
-                className={`realtime-pill ${realtimeStatus}`}
-                title={realtimeNote}
-              >
-                {realtimeStatus === "live" ? <Wifi size={14} /> : <WifiOff size={14} />}
-                {realtimeStatus === "live"
-                  ? "实时同步"
-                  : realtimeStatus === "connecting"
-                    ? "正在连接"
-                    : realtimeStatus === "retrying"
-                      ? "重新连接"
-                      : "同步离线"}
-              </span>
-            )}
-            <span className={`status-pill ${loading ? "busy" : "ready"}`}>
-              {loading
-                ? "请求中"
-                : authIdentity
-                  ? `${authIdentity.role === "kp" ? "KP" : "玩家"} · ${authIdentity.display_name}`
-                  : "未加入会话"}
-            </span>
-          </div>
-        </header>
+    <AppLayout
+      activePage={activeNav}
+      campaignTitle={activeCampaign?.title ?? "AI KP Local"}
+      currentRoute={currentPage}
+      identity={authIdentity}
+      loading={loading}
+      onNavigate={navigateWorkspace}
+      onRefresh={() => void loadCampaigns()}
+      realtimeNote={realtimeNote}
+      realtimeStatus={realtimeStatus}
+    >
 
         {activeNav === "investigators" && (
           <InvestigatorPage campaign={activeCampaign} identity={authIdentity} />
@@ -1588,7 +1506,6 @@ export default function App() {
           loading={capabilitiesLoading}
           onRetry={() => void loadCapabilities()}
         />
-      </section>
-    </main>
+    </AppLayout>
   );
 }

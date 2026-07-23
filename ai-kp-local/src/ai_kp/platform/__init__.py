@@ -1,1 +1,1 @@
-"""Future system-neutral domain package. It must never import a concrete ruleset, FastAPI, or SQLite."""
+"""System-neutral domain package without concrete ruleset, FastAPI, or SQLite dependencies."""

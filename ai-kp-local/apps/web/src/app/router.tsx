@@ -1,2 +1,55 @@
-// Future history-backed route registry. Existing navigation remains in App.tsx until migrated.
-// Intentionally exports nothing until the corresponding capability has real acceptance tests.
+import {
+  Brain,
+  Cpu,
+  Dice5,
+  LayoutDashboard,
+  ListChecks,
+  Map,
+  UserRound,
+  Users
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
+export const workspaceRoutes = [
+  { id: "play", label: "游玩桌面", icon: LayoutDashboard, path: "/play", planned: false },
+  { id: "campaigns", label: "团与权限", icon: Users, path: "/campaigns", planned: false },
+  { id: "investigators", label: "调查员", icon: UserRound, path: "/investigators", planned: false },
+  { id: "maps", label: "地图棋子", icon: Map, path: "/maps", planned: false },
+  { id: "memory", label: "角色记忆", icon: Brain, path: "/memory", planned: false },
+  { id: "npcs", label: "NPC", icon: Users, path: "/npcs", planned: true },
+  { id: "rules", label: "规则知识", icon: Dice5, path: "/rules", planned: false },
+  { id: "models", label: "模型设置", icon: Cpu, path: "/models", planned: false },
+  { id: "planning", label: "功能规划", icon: ListChecks, path: "/planning", planned: true }
+] as const;
+
+export type PageId = (typeof workspaceRoutes)[number]["id"];
+export type WorkspaceRoute = (typeof workspaceRoutes)[number];
+
+export function pageFromPath(pathname: string): PageId {
+  return workspaceRoutes.find((item) => item.path === pathname)?.id ?? "play";
+}
+
+export function useWorkspaceRoute() {
+  const [activePage, setActivePage] = useState<PageId>(() => pageFromPath(window.location.pathname));
+
+  useEffect(() => {
+    const onPopState = () => setActivePage(pageFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const route = useMemo(
+    () => workspaceRoutes.find((item) => item.id === activePage) ?? workspaceRoutes[0],
+    [activePage]
+  );
+
+  function navigate(next: PageId) {
+    const destination = workspaceRoutes.find((item) => item.id === next) ?? workspaceRoutes[0];
+    if (window.location.pathname !== destination.path) {
+      window.history.pushState({}, "", destination.path);
+    }
+    setActivePage(destination.id);
+  }
+
+  return { activePage, navigate, route };
+}

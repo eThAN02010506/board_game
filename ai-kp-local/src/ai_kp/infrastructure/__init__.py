@@ -1,1 +1,1 @@
-"""Future external-adapter package; domain policy must not be decided here."""
+"""External adapters for databases, models, knowledge indexes, realtime, and security."""

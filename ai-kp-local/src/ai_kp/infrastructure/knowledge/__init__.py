@@ -1,1 +1,1 @@
-"""Future vector index and file-store adapters for isolated knowledge spaces."""
+"""Rulebook PDF extraction and isolated knowledge-index adapters."""

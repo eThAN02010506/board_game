@@ -1,1 +1,1 @@
-"""Future AI-assisted ruleset authoring pipeline; generated output is untrusted until approved."""
+"""AI-assisted ruleset extraction and validation; generated output remains untrusted."""

@@ -19,7 +19,11 @@ The React workspace follows the same separation:
 - `apps/web/src/session` owns browser-session credential and active-map persistence. It stores only opaque tokens and selection IDs, never authoritative campaign data.
 - `apps/web/src/realtime/provider.tsx` is the frontend provider boundary for WebSocket lifecycle, cursor replay, event-to-refresh routing, burst coalescing, full sync, and stale campaign/session guards.
 - `apps/web/src/features` contains the campaign, session, map, action, proposal, and capability-planning panels. `shared` contains presentation components reused by features.
-- `apps/web/src/app/App.tsx` currently composes workspace state and feature callbacks. Further feature extraction must preserve current behavior and gain focused acceptance tests; the former root path is only a compatibility export.
+- `apps/web/src/app/router.tsx` is the single route registry and browser-history adapter.
+  `app/layout/AppLayout.tsx` owns the shared navigation and status shell.
+- `apps/web/src/app/App.tsx` currently composes workspace state and feature callbacks. Further
+  feature extraction must preserve current behavior and gain focused acceptance tests; the former
+  root path is only a compatibility export.
 - Top-level product areas use distinct history-backed paths (`/play`, `/campaigns`, `/investigators`, `/maps`, `/memory`, `/npcs`, `/rules`, and `/planning`). `/play` is the intentional composite exception: it places the controlled investigator and public party summaries beside the central map, with a separately scrollable action/chat column.
 
 The documented target packages now exist as comment/docstring-only scaffolding. Their activation
