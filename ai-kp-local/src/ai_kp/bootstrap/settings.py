@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="qwen3:8b")
     rulebook_index_root: Path = Field(default=Path("data/rag/rulesets"))
     rulebook_embedding_dimensions: int = Field(default=384, ge=64, le=2048)
+    map_asset_root: Path = Field(default=Path("data/map-assets"))
+    image_base_url: str | None = None
+    image_api_key: str = Field(default="local")
+    image_model: str | None = None
+    image_timeout_seconds: float = Field(default=300, ge=10, le=1800)
     cors_origins: str = Field(default="http://localhost:5173")
     local_admin_enabled: bool = True
     admin_token: str | None = None

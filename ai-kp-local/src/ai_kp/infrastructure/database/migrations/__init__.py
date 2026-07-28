@@ -16,6 +16,8 @@ from ai_kp.infrastructure.database.migrations import (
     v0009_model_configuration,
     v0010_session_seats,
     v0011_skill_checks,
+    v0012_map_spec_assets,
+    v0013_map_revision_backfill,
 )
 
 
@@ -77,6 +79,16 @@ MIGRATIONS = (
         v0011_skill_checks.VERSION,
         v0011_skill_checks.NAME,
         v0011_skill_checks.migrate,
+    ),
+    Migration(
+        v0012_map_spec_assets.VERSION,
+        v0012_map_spec_assets.NAME,
+        v0012_map_spec_assets.migrate,
+    ),
+    Migration(
+        v0013_map_revision_backfill.VERSION,
+        v0013_map_revision_backfill.NAME,
+        v0013_map_revision_backfill.migrate,
     ),
 )
 

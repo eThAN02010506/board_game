@@ -37,7 +37,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="available",
         phase="MVP",
         audience="all",
-        summary="结构化地图、SVG、发布边界、棋子位置和移动版本已持久化。",
+        summary="MapSpec 结构地图、分层 SVG、发布边界、棋子位置和移动版本已持久化。",
         acceptance=("重启后地图与棋子可恢复，玩家不可见隐藏地点。",),
     ),
     Capability(
@@ -223,10 +223,13 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="map_asset_revisions",
         label="地图图片资产与版本缓存",
-        status="planned",
+        status="partial",
         phase="F4",
         audience="kp",
-        summary="把结构化地图、渲染文件、生成参数和 revision 分离，用内容哈希持久复用。",
+        summary=(
+            "MapSpec revision、规范哈希、布局哈希、图片生成参数与内容寻址文件已经分离并可重启恢复；"
+            "尚缺 KP 结构编辑产生后续 revision 的工作流。"
+        ),
         dependencies=("map_workspace",),
         acceptance=("关闭模型并重启后仍能打开原图，编辑产生新 revision 而不覆盖旧版。",),
     ),
@@ -243,10 +246,13 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="image_map_generation",
         label="AI 图片地图生成",
-        status="planned",
+        status="partial",
         phase="F4",
         audience="kp",
-        summary="接入可替换的本地图像生成器，同时保留结构化地点、路线和可见性层。",
+        summary=(
+            "已实现独立 OpenAI-compatible 图片端口、玩家安全提示词投影、候选缓存与 KP 选用；"
+            "尚缺 ComfyUI/ControlNet 适配器与真实图片模型的审美验收。"
+        ),
         dependencies=("map_asset_revisions", "model_adapter"),
         acceptance=("生成失败不破坏旧地图，背景图与棋子状态彼此独立。",),
     ),
@@ -327,11 +333,10 @@ CAPABILITIES: tuple[Capability, ...] = (
 )
 
 
-def validate_capabilities(capabilities: tuple[Capability, ...] = CAPABILITIES) -> None:
-    ids = [capability.id for capability in capabilities]
-    if len(ids) != len(set(ids)):
-        raise ValueError("Capability IDs must be unique")
-    known_ids = set(ids)
+def _validate_capability_metadata(
+    capabilities: tuple[Capability, ...],
+    known_ids: set[str],
+) -> None:
     for capability in capabilities:
         missing = set(capability.dependencies) - known_ids
         if missing:
@@ -343,9 +348,10 @@ def validate_capabilities(capabilities: tuple[Capability, ...] = CAPABILITIES) -
         if not capability.acceptance:
             raise ValueError(f"Capability {capability.id} needs an acceptance criterion")
 
-    dependency_map = {
-        capability.id: capability.dependencies for capability in capabilities
-    }
+
+def _validate_dependency_cycles(
+    dependency_map: dict[str, tuple[str, ...]],
+) -> None:
     visiting: set[str] = set()
     visited: set[str] = set()
 
@@ -360,8 +366,19 @@ def validate_capabilities(capabilities: tuple[Capability, ...] = CAPABILITIES) -
         visiting.remove(capability_id)
         visited.add(capability_id)
 
-    for capability_id in ids:
+    for capability_id in dependency_map:
         visit(capability_id)
+
+
+def validate_capabilities(capabilities: tuple[Capability, ...] = CAPABILITIES) -> None:
+    ids = [capability.id for capability in capabilities]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Capability IDs must be unique")
+    known_ids = set(ids)
+    _validate_capability_metadata(capabilities, known_ids)
+    _validate_dependency_cycles(
+        {capability.id: capability.dependencies for capability in capabilities}
+    )
 
 
 def list_capabilities(*, include_available: bool = True) -> list[dict]:

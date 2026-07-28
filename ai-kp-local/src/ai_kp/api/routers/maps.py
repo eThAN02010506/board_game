@@ -1,7 +1,10 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 
+from ai_kp.application.map_image_service import MapImageService
+from ai_kp.application.errors import KpSessionEndedError
 from ai_kp.application.map_service import (
     GenerateMapCommand,
     MapService,
@@ -9,10 +12,21 @@ from ai_kp.application.map_service import (
     PlaceTokenCommand,
 )
 from ai_kp.api.authz import campaign_for_map, campaign_for_token, require_campaign_role
-from ai_kp.api.dependencies import get_identity, get_repo
-from ai_kp.api.schemas import MapGenerateRequest, MapTokenCreate, MapTokenMove
+from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
+from ai_kp.api.schemas import (
+    MapGenerateRequest,
+    MapImageGenerateRequest,
+    MapPublishRequest,
+    MapTokenCreate,
+    MapTokenMove,
+)
+from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.images.openai_compatible import OpenAICompatibleImageProvider
+from ai_kp.infrastructure.images.storage import MapAssetFileStore
 from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.llm.model_configuration import normalize_openai_base_url
 from ai_kp.platform.sessions.models import AuthenticatedMember
+from ai_kp.platform.scenes.map_spec import build_image_prompt
 
 
 router = APIRouter()
@@ -54,6 +68,17 @@ def generate_and_save_map(
             style=payload.style,
             width=payload.width,
             height=payload.height,
+            map_kind=payload.map_kind,
+            era_year=payload.era_year,
+            locale=payload.locale,
+            season=payload.season,
+            time_of_day=payload.time_of_day,
+            weather=payload.weather,
+            public_architecture=tuple(payload.public_architecture),
+            features=tuple(payload.features),
+            required_elements=tuple(payload.required_elements),
+            forbidden_elements=tuple(payload.forbidden_elements),
+            visual_style=payload.visual_style,
         ),
     )
 
@@ -64,6 +89,7 @@ def get_map(
     view: Literal["player", "kp"] = "kp",
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_app_settings),
 ) -> dict:
     campaign_id = campaign_for_map(repo, map_id)
     require_campaign_role(identity, campaign_id)
@@ -76,18 +102,180 @@ def get_map(
         if identity.role == "player" or view == "player"
         else ("player", "table", "kp")
     )
-    return repo.get_map(map_id, allowed_visibility=allowed_visibility)
+    result = repo.get_map(map_id, allowed_visibility=allowed_visibility)
+    if identity.role == "kp":
+        provider_configured = bool(settings.image_base_url and settings.image_model)
+        revision_ready = bool(result.get("revision_id"))
+        result["image_generation"] = {
+            "available": provider_configured and revision_ready,
+            "model": settings.image_model,
+            "safety": "player_safe_projection",
+            "unavailable_reason": (
+                None
+                if provider_configured and revision_ready
+                else (
+                    "legacy_map_requires_revision"
+                    if provider_configured
+                    else "provider_not_configured"
+                )
+            ),
+        }
+    return result
 
 
-@router.post("/maps/{map_id}/publish")
-def publish_map(
+def _asset_response(asset: dict, *, cache_hit: bool | None = None) -> dict:
+    result = {
+        key: value
+        for key, value in asset.items()
+        if key not in {"storage_path"}
+    }
+    if cache_hit is not None:
+        result["cache_hit"] = cache_hit
+    return result
+
+
+def _image_provider(request: Request, settings: Settings):
+    overridden = getattr(request.app.state, "map_image_provider", None)
+    if overridden is not None:
+        return overridden
+    if not settings.image_base_url or not settings.image_model:
+        raise ValueError(
+            "尚未配置图片模型；请设置 AI_KP_IMAGE_BASE_URL 与 AI_KP_IMAGE_MODEL"
+        )
+    return OpenAICompatibleImageProvider(
+        normalize_openai_base_url(settings.image_base_url),
+        settings.image_api_key,
+        settings.image_model,
+        timeout_seconds=settings.image_timeout_seconds,
+    )
+
+
+@router.get("/maps/{map_id}/image-prompt")
+def preview_map_image_prompt(
     map_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_app_settings),
+) -> dict:
+    campaign_id = campaign_for_map(repo, map_id)
+    require_campaign_role(identity, campaign_id, ("kp",))
+    revision = repo.get_current_map_revision(map_id)
+    if revision is None:
+        raise ValueError("旧地图尚未建立 MapSpec revision")
+    return {
+        "map_id": map_id,
+        "revision_id": revision["id"],
+        "prompt": build_image_prompt(revision["spec"], "table"),
+        "provider_configured": bool(settings.image_base_url and settings.image_model),
+        "model": settings.image_model,
+        "projection": "player_safe",
+    }
+
+
+@router.post("/maps/{map_id}/image-assets/generate")
+async def generate_map_image_asset(
+    map_id: str,
+    payload: MapImageGenerateRequest,
+    request: Request,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_app_settings),
+) -> dict:
+    campaign_id = campaign_for_map(repo, map_id)
+    require_campaign_role(identity, campaign_id, ("kp",))
+    provider = _image_provider(request, settings)
+    try:
+        asset, cache_hit = await MapImageService(
+            repo,
+            provider,
+            MapAssetFileStore(settings.map_asset_root),
+        ).generate_public_background(
+            map_id,
+            width=payload.width,
+            height=payload.height,
+            seed=payload.seed,
+            member_id=identity.member_id,
+            session_id=identity.session_id,
+        )
+    except KpSessionEndedError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    repo.append_realtime_event(
+        session_id=identity.session_id,
+        campaign_id=campaign_id,
+        audience="kp",
+        event_type="map.asset_ready",
+        resource_type="map_asset",
+        resource_id=asset["id"],
+        payload={"map_id": map_id, "cache_hit": cache_hit},
+    )
+    return _asset_response(asset, cache_hit=cache_hit)
+
+
+@router.post("/maps/{map_id}/assets/{asset_id}/select")
+def select_map_image_asset(
+    map_id: str,
+    asset_id: str,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
     campaign_id = campaign_for_map(repo, map_id)
     require_campaign_role(identity, campaign_id, ("kp",))
-    return MapService(repo).publish(map_id, campaign_id, identity.session_id)
+    asset = repo.select_public_map_asset(map_id, asset_id)
+    audience = "session" if repo.is_map_published(map_id) else "kp"
+    repo.append_realtime_event(
+        session_id=identity.session_id,
+        campaign_id=campaign_id,
+        audience=audience,
+        event_type="map.changed",
+        resource_type="map",
+        resource_id=map_id,
+        payload={"map_id": map_id, "background_changed": True},
+    )
+    return _asset_response(asset)
+
+
+@router.get("/map-assets/{asset_id}/content")
+def get_map_asset_content(
+    asset_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_app_settings),
+) -> FileResponse:
+    asset = repo.get_map_asset(asset_id)
+    campaign_id = campaign_for_map(repo, asset["map_id"])
+    require_campaign_role(identity, campaign_id)
+    if identity.role == "player" and not repo.is_map_asset_player_visible(asset_id):
+        raise HTTPException(status_code=404, detail="Map asset not found")
+    path = MapAssetFileStore(settings.map_asset_root).resolve(str(asset["storage_path"]))
+    return FileResponse(
+        path,
+        media_type=asset["mime_type"],
+        headers={
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "ETag": f'"{asset["content_hash"]}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.post("/maps/{map_id}/publish")
+def publish_map(
+    map_id: str,
+    payload: MapPublishRequest,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    campaign_id = campaign_for_map(repo, map_id)
+    require_campaign_role(identity, campaign_id, ("kp",))
+    return MapService(repo).publish(
+        map_id,
+        campaign_id,
+        identity.session_id,
+        expected_revision_id=payload.expected_revision_id,
+        expected_selected_asset_id=payload.expected_selected_asset_id,
+    )
 
 
 @router.post("/maps/{map_id}/unpublish")

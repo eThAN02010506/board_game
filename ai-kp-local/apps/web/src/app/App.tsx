@@ -13,6 +13,7 @@ import type {
   Campaign,
   CreateSkillCheckInput,
   ContextAssembly,
+  MapGenerationInput,
   MapToken,
   PlayerActionRecord,
   PlayerCharacter,
@@ -51,26 +52,6 @@ import {
 } from "../session/session-storage";
 import "../styles.css";
 
-const defaultLocations = "旧码头, 废弃仓库, 报社, 警局";
-const defaultRoutes = "旧码头>废弃仓库\n旧码头>报社\n报社>警局";
-
-function splitList(value: string) {
-  return value
-    .split(/[,\n，、]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function parseRoutes(value: string): [string, string][] {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.split(/>|->|—|-/).map((item) => item.trim()))
-    .filter((items) => items.length >= 2 && items[0] && items[1])
-    .map((items) => [items[0], items[1]]);
-}
-
 function stringifyForLog(value: unknown) {
   const secretFields = new Set([
     "access_token",
@@ -101,6 +82,16 @@ function publicPcSummary(pc: PlayerCharacter): NonNullable<PlayerCharacter["publ
   return declared && typeof declared === "object"
     ? (declared as NonNullable<PlayerCharacter["public_summary"]>)
     : {};
+}
+
+function mapImageSize(width: number, height: number): {
+  width: number;
+  height: number;
+} {
+  const ratio = width / height;
+  if (ratio >= 1.15) return { width: 1536, height: 1024 };
+  if (ratio <= 0.87) return { width: 1024, height: 1536 };
+  return { width: 1024, height: 1024 };
 }
 
 
@@ -150,10 +141,6 @@ export default function App() {
 
   const [campaignTitle, setCampaignTitle] = useState("雾港 1928");
   const [campaignTime, setCampaignTime] = useState("1928-10-03 19:30");
-  const [mapTitle, setMapTitle] = useState("旧码头区域图");
-  const [mapPrompt, setMapPrompt] = useState("旧码头、废弃仓库、报社、警局");
-  const [locationsText, setLocationsText] = useState(defaultLocations);
-  const [routesText, setRoutesText] = useState(defaultRoutes);
   const [tokenLabel, setTokenLabel] = useState("林若川");
   const [tokenActorId, setTokenActorId] = useState("");
   const [tokenLocation, setTokenLocation] = useState("旧码头");
@@ -187,14 +174,6 @@ export default function App() {
   const activeProposal = useMemo(
     () => proposals.find((proposal) => proposal.id === activeProposalId) ?? proposals[0] ?? null,
     [activeProposalId, proposals]
-  );
-
-  const activeMapImage = useMemo(
-    () =>
-      activeMap?.svg_text
-        ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(activeMap.svg_text)}`
-        : "",
-    [activeMap?.svg_text]
   );
 
   async function run<T>(label: string, action: () => Promise<T>): Promise<T | undefined> {
@@ -829,8 +808,7 @@ export default function App() {
     }
   }
 
-  async function generateMap(event: FormEvent) {
-    event.preventDefault();
+  async function generateMap(input: MapGenerationInput) {
     if (!activeCampaign || credentialBridge.snapshot().role !== "kp") {
       setLog("请先以 KP 身份开启或恢复该团会话。");
       return;
@@ -840,12 +818,7 @@ export default function App() {
     const result = await run("生成并保存地图", () =>
       requestJson<SavedMap>(`/campaigns/${campaignId}/maps/generate`, {
         method: "POST",
-        body: JSON.stringify({
-          title: mapTitle,
-          prompt: mapPrompt,
-          locations: splitList(locationsText),
-          routes: parseRoutes(routesText)
-        })
+        body: JSON.stringify(input)
       })
     );
     if (result && activeCampaignIdRef.current === campaignId && campaignSelectionVersion.current === version) {
@@ -856,6 +829,37 @@ export default function App() {
       setMaps((items) => [result, ...items.filter((item) => item.id !== result.id)]);
       setTokenLocation(result.locations?.[0]?.name ?? tokenLocation);
       setMoveTarget(result.locations?.[1]?.name ?? moveTarget);
+    }
+  }
+
+  async function generateMapBackground(seed: number | null) {
+    if (!activeMap || credentialBridge.snapshot().role !== "kp") {
+      setLog("请先以 KP 身份打开一张地图。");
+      return;
+    }
+    const mapId = activeMap.id;
+    const size = mapImageSize(activeMap.width, activeMap.height);
+    const result = await run("生成玩家安全的时代背景候选", () =>
+      requestJson(`/maps/${mapId}/image-assets/generate`, {
+        method: "POST",
+        body: JSON.stringify({ ...size, seed })
+      })
+    );
+    if (result && activeMapIdRef.current === mapId) {
+      await openMap(mapId);
+    }
+  }
+
+  async function selectMapAsset(assetId: string) {
+    if (!activeMap || credentialBridge.snapshot().role !== "kp") return;
+    const mapId = activeMap.id;
+    const result = await run("选用地图背景候选", () =>
+      requestJson(`/maps/${mapId}/assets/${assetId}/select`, {
+        method: "POST"
+      })
+    );
+    if (result && activeMapIdRef.current === mapId) {
+      await openMap(mapId);
     }
   }
 
@@ -901,9 +905,17 @@ export default function App() {
     if (!activeMap || credentialBridge.snapshot().role !== "kp") return;
     const mapId = activeMap.id;
     const campaignId = activeMap.campaign_id;
+    const publishSnapshot =
+      published && activeMap.revision_id
+        ? {
+            expected_revision_id: activeMap.revision_id,
+            expected_selected_asset_id: activeMap.render?.selected_asset_id ?? null
+          }
+        : null;
     const result = await run(published ? "发布地图" : "收回地图", () =>
       requestJson<SavedMap>(`/maps/${mapId}/${published ? "publish" : "unpublish"}`, {
-        method: "POST"
+        method: "POST",
+        body: publishSnapshot ? JSON.stringify(publishSnapshot) : undefined
       })
     );
     if (
@@ -1274,28 +1286,24 @@ export default function App() {
           </section>
         </div>}
 
-        {activeNav === "maps" && <div className="page-grid map-page-grid">
+        {activeNav === "maps" && <div className={`page-grid map-page-grid ${authIdentity?.role ?? "guest"}`}>
           {authIdentity?.role === "kp" && (
             <MapGeneratorPanel
-              locationsText={locationsText}
+              campaign={activeCampaign}
+              loading={loading}
               onGenerate={generateMap}
-              onLocationsTextChange={setLocationsText}
-              onPromptChange={setMapPrompt}
-              onRoutesTextChange={setRoutesText}
-              onTitleChange={setMapTitle}
-              prompt={mapPrompt}
-              routesText={routesText}
-              title={mapTitle}
             />
           )}
 
           <MapStage
             activeMap={activeMap}
-            activeMapImage={activeMapImage}
             hasIdentity={Boolean(authIdentity)}
+            loading={loading}
             maps={maps}
+            onGenerateBackground={(seed) => void generateMapBackground(seed)}
             onOpenMap={(mapId) => void openMap(mapId)}
-            onRefresh={() => void loadMaps()}
+            onRefresh={() => void refreshRealtimeMaps()}
+            onSelectAsset={(assetId) => void selectMapAsset(assetId)}
             onSetPublished={(published) => void setMapPublished(published)}
             role={authIdentity?.role}
           />
@@ -1391,13 +1399,14 @@ export default function App() {
           <div className="play-map-column">
             <MapStage
               activeMap={activeMap}
-              activeMapImage={activeMapImage}
               hasIdentity={Boolean(authIdentity)}
+              loading={loading}
               maps={maps}
               onOpenMap={(mapId) => void openMap(mapId)}
-              onRefresh={() => void loadMaps()}
+              onRefresh={() => void refreshRealtimeMaps()}
               onSetPublished={(published) => void setMapPublished(published)}
               role={authIdentity?.role}
+              showReviewControls={false}
             />
           </div>
 

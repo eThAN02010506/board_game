@@ -69,6 +69,10 @@ class RealtimeWebSocketTests(unittest.TestCase):
         self.client.post(
             f"/maps/{self.saved_map['id']}/publish",
             headers=self.kp_headers,
+            json={
+                "expected_revision_id": self.saved_map["revision_id"],
+                "expected_selected_asset_id": None,
+            },
         ).raise_for_status()
         self.player = self.client.post(
             "/sessions/join",
@@ -468,6 +472,10 @@ class RealtimeWebSocketTests(unittest.TestCase):
         self.client.post(
             f"/maps/{self.saved_map['id']}/publish",
             headers=self.kp_headers,
+            json={
+                "expected_revision_id": self.saved_map["revision_id"],
+                "expected_selected_asset_id": None,
+            },
         ).raise_for_status()
 
         with self.client.websocket_connect(

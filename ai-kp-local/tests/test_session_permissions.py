@@ -101,6 +101,10 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
         publish_map = await self.client.post(
             f"/maps/{self.map_a['id']}/publish",
             headers=self.kp_a_headers,
+            json={
+                "expected_revision_id": self.map_a["revision_id"],
+                "expected_selected_asset_id": None,
+            },
         )
         self.assertEqual(publish_map.status_code, 200)
         self.player_a = (
@@ -576,6 +580,10 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
         publish = await self.client.post(
             f"/maps/{draft_map['id']}/publish",
             headers=self.kp_a_headers,
+            json={
+                "expected_revision_id": draft_map["revision_id"],
+                "expected_selected_asset_id": None,
+            },
         )
         player_maps_after = await self.client.get(
             f"/campaigns/{self.campaign_a['id']}/maps",

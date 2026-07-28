@@ -394,10 +394,143 @@ export type SavedMap = {
   status: "draft" | "published";
   width: number;
   height: number;
+  revision_id?: string;
+  revision_no?: number;
+  spec_version?: string;
+  spec_hash?: string;
+  layout_hash?: string;
   svg_text?: string;
+  overlay_svg_text?: string;
+  map_spec?: MapSpec;
+  validation?: MapValidationReport;
+  render?: {
+    background_asset_url: string | null;
+    selected_asset_id: string | null;
+    asset_status: "none" | "ready" | "failed";
+    fallback_svg: boolean;
+  };
+  assets?: MapAsset[];
+  image_generation?: {
+    available: boolean;
+    model: string | null;
+    safety: "player_safe_projection";
+    unavailable_reason?: "provider_not_configured" | "legacy_map_requires_revision" | null;
+  };
   locations?: MapLocation[];
   routes?: MapRoute[];
   tokens?: MapToken[];
+};
+
+export type MapVisibility = "player" | "table" | "kp";
+
+export type MapSpec = {
+  schema_version: "map-spec.v1";
+  title: string;
+  scene_brief?: string;
+  style: string;
+  map_kind: "regional" | "site" | "floorplan";
+  canvas: {
+    width: number;
+    height: number;
+    coordinate_unit: "logical_px";
+    origin: "top_left";
+  };
+  era: {
+    year: number | null;
+    locale: string;
+    season: string;
+    time_of_day: string;
+    weather: string;
+    public_architecture: string[];
+    technology: string[];
+    forbidden_visuals?: string[];
+  };
+  locations: Array<{
+    id: string;
+    name: string;
+    visibility: MapVisibility;
+    position: { x: number; y: number };
+  }>;
+  connections: Array<{
+    id: string;
+    from_location_id: string;
+    to_location_id: string;
+    visibility: MapVisibility;
+  }>;
+  features: Array<{
+    id: string;
+    name: string;
+    location_id: string | null;
+    visibility: MapVisibility;
+    position: { x: number; y: number };
+  }>;
+  coverage: {
+    required_element_names: string[];
+  };
+};
+
+export type MapValidationReport = {
+  schema_version: "map-spec.v1";
+  valid: boolean;
+  coverage: {
+    required: number;
+    covered: number;
+    percent: number;
+  };
+  issues: Array<{
+    level: "warning" | "error";
+    code: string;
+    message: string;
+    element_id: string | null;
+  }>;
+};
+
+export type MapAsset = {
+  id: string;
+  map_id: string;
+  revision_id: string;
+  audience: "table" | "kp";
+  kind: "background" | "thumbnail";
+  status: "ready" | "failed";
+  generation_input_hash: string;
+  content_hash: string | null;
+  mime_type: string | null;
+  width: number | null;
+  height: number | null;
+  provider: string;
+  model: string;
+  seed: number | null;
+  parameters: Record<string, unknown>;
+  prompt_text: string;
+  error_text: string | null;
+  content_url: string;
+  cache_hit?: boolean;
+  created_at: string;
+};
+
+export type MapGenerationInput = {
+  title: string;
+  prompt: string;
+  style: string;
+  map_kind: "regional" | "site" | "floorplan";
+  locations: string[];
+  routes: [string, string][];
+  features: string[];
+  required_elements: string[];
+  era_year: number | null;
+  locale: string;
+  season: string;
+  time_of_day: string;
+  weather: string;
+  public_architecture: string[];
+  forbidden_elements: string[];
+  visual_style:
+    | "period_illustrated_map"
+    | "architectural_blueprint"
+    | "ink_atlas"
+    | "tactical_floorplan";
+  width: number;
+  height: number;
 };
 
 export type MapLocation = {

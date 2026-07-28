@@ -9,7 +9,9 @@ __pycache__/
 data/*.sqlite3
 data/*.log
 data/rag/
+data/map-assets/
 src/model/
 node_modules/
 .pnpm-store/
 dist/
+.idea/

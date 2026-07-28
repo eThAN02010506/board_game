@@ -72,6 +72,22 @@ export function requestJsonWithAccessToken<T>(
   return sendJson(url, init, accessToken, credentials.adminToken);
 }
 
+export async function requestBlob(url: string, signal?: AbortSignal): Promise<Blob> {
+  const headers = new Headers();
+  if (credentials.accessToken) {
+    headers.set("Authorization", `Bearer ${credentials.accessToken}`);
+  }
+  if (credentials.adminToken) {
+    headers.set("X-AI-KP-Admin-Token", credentials.adminToken);
+  }
+  const response = await fetch(`${apiBase}${url}`, { headers, signal });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `${response.status} ${response.statusText}`);
+  }
+  return response.blob();
+}
+
 export function fetchCapabilities(): Promise<Capability[]> {
   return requestJson<Capability[]>("/capabilities");
 }

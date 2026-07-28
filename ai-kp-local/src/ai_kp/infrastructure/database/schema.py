@@ -199,12 +199,16 @@ CREATE TABLE IF NOT EXISTS maps (
   height INTEGER NOT NULL DEFAULT 640,
   svg_text TEXT NOT NULL,
   created_by TEXT NOT NULL DEFAULT 'ai',
+  current_revision_id TEXT,
+  selected_public_asset_id TEXT,
+  reveal_version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS map_locations (
   id TEXT PRIMARY KEY,
   map_id TEXT NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+  element_id TEXT,
   name TEXT NOT NULL,
   x REAL NOT NULL,
   y REAL NOT NULL,
@@ -216,11 +220,51 @@ CREATE TABLE IF NOT EXISTS map_locations (
 CREATE TABLE IF NOT EXISTS map_routes (
   id TEXT PRIMARY KEY,
   map_id TEXT NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+  element_id TEXT,
   start_location_id TEXT NOT NULL REFERENCES map_locations(id) ON DELETE CASCADE,
   end_location_id TEXT NOT NULL REFERENCES map_locations(id) ON DELETE CASCADE,
   travel_time TEXT,
   visibility TEXT NOT NULL DEFAULT 'table',
   notes TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS map_revisions (
+  id TEXT PRIMARY KEY,
+  map_id TEXT NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+  revision_no INTEGER NOT NULL,
+  spec_version TEXT NOT NULL,
+  spec_json TEXT NOT NULL,
+  spec_hash TEXT NOT NULL,
+  layout_hash TEXT NOT NULL,
+  validation_json TEXT NOT NULL DEFAULT '{}',
+  source_kind TEXT NOT NULL DEFAULT 'kp_brief',
+  created_by TEXT NOT NULL DEFAULT 'ai',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(map_id, revision_no),
+  UNIQUE(map_id, spec_hash)
+);
+
+CREATE TABLE IF NOT EXISTS map_assets (
+  id TEXT PRIMARY KEY,
+  map_id TEXT NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+  revision_id TEXT NOT NULL REFERENCES map_revisions(id) ON DELETE CASCADE,
+  audience TEXT NOT NULL DEFAULT 'table' CHECK (audience IN ('table', 'kp')),
+  kind TEXT NOT NULL DEFAULT 'background' CHECK (kind IN ('background', 'thumbnail')),
+  status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('ready', 'failed')),
+  generation_input_hash TEXT NOT NULL,
+  content_hash TEXT,
+  storage_path TEXT,
+  mime_type TEXT,
+  width INTEGER,
+  height INTEGER,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  seed INTEGER,
+  parameters_json TEXT NOT NULL DEFAULT '{}',
+  prompt_text TEXT NOT NULL DEFAULT '',
+  error_text TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(map_id, generation_input_hash)
 );
 
 CREATE TABLE IF NOT EXISTS map_tokens (
@@ -493,6 +537,8 @@ CREATE INDEX IF NOT EXISTS idx_context_assemblies_campaign ON context_assemblies
 CREATE INDEX IF NOT EXISTS idx_maps_campaign ON maps(campaign_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_map_locations_map ON map_locations(map_id, order_index);
 CREATE INDEX IF NOT EXISTS idx_map_routes_map ON map_routes(map_id);
+CREATE INDEX IF NOT EXISTS idx_map_revisions_map ON map_revisions(map_id, revision_no);
+CREATE INDEX IF NOT EXISTS idx_map_assets_map ON map_assets(map_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_map_tokens_map ON map_tokens(map_id);
 CREATE INDEX IF NOT EXISTS idx_map_token_moves_token ON map_token_moves(token_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_module_chunks_module_order ON module_chunks(module_id, order_index);

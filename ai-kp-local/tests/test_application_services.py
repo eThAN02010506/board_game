@@ -66,7 +66,12 @@ class ApplicationServiceTests(unittest.TestCase):
                     session_id,
                     PlaceTokenCommand(label="Investigator", location_name="Pier"),
                 )
-                service.publish(saved_map["id"], campaign["id"], session_id)
+                service.publish(
+                    saved_map["id"],
+                    campaign["id"],
+                    session_id,
+                    expected_revision_id=saved_map["revision_id"],
+                )
                 moved = service.move_token(
                     token["id"],
                     campaign["id"],
@@ -93,6 +98,50 @@ class ApplicationServiceTests(unittest.TestCase):
                         ("map.token_moved", "session"),
                     ],
                 )
+
+    def test_map_service_refuses_to_publish_an_invalid_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "invalid-map.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("Invalid map")
+                session = SessionService(repo).create(campaign["id"])
+                saved_map = MapService(repo).generate_and_save(
+                    campaign["id"],
+                    session["session"]["id"],
+                    GenerateMapCommand(
+                        title="Review required",
+                        prompt="Entrance, Archive",
+                        locations=("Entrance", "Archive"),
+                    ),
+                )
+                connection.execute(
+                    "UPDATE map_revisions SET validation_json = ? WHERE id = ?",
+                    (
+                        json.dumps(
+                            {
+                                "schema_version": "map-spec.v1",
+                                "valid": False,
+                                "coverage": {
+                                    "required": 2,
+                                    "covered": 1,
+                                    "percent": 50,
+                                },
+                                "issues": [],
+                            }
+                        ),
+                        saved_map["revision_id"],
+                    ),
+                )
+
+                with self.assertRaisesRegex(ValueError, "未通过校验"):
+                    MapService(repo).publish(
+                        saved_map["id"],
+                        campaign["id"],
+                        session["session"]["id"],
+                        expected_revision_id=saved_map["revision_id"],
+                    )
+
+                self.assertEqual(repo.get_map(saved_map["id"])["status"], "draft")
 
     def test_turn_service_links_and_resolves_queued_player_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

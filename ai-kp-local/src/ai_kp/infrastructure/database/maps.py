@@ -1,13 +1,24 @@
 """SQLite adapter for maps, locations, routes, tokens, and movement history."""
 
+import json
 import sqlite3
+from typing import Any
 
 from ai_kp.core.ids import new_id
 from ai_kp.platform.scenes.map_generation import (
     GeneratedLocation,
     GeneratedMap,
     GeneratedRoute,
+    map_spec_for_generated_map,
+    render_overlay_svg,
     render_svg,
+)
+from ai_kp.platform.scenes.map_spec import (
+    MAP_SPEC_VERSION,
+    map_layout_hash,
+    map_spec_hash,
+    project_map_spec,
+    require_valid_map_spec,
 )
 from ai_kp.infrastructure.database.rows import row_to_dict
 
@@ -18,6 +29,10 @@ class MapRepository:
 
     def create_map(self, campaign_id: str, generated_map: GeneratedMap, created_by: str = "ai") -> dict:
         map_id = new_id("map")
+        map_spec = map_spec_for_generated_map(generated_map)
+        validation_report = (
+            generated_map.validation_report or require_valid_map_spec(map_spec).to_dict()
+        )
         self.connection.execute(
             """
             INSERT INTO maps (id, campaign_id, title, prompt, style, width, height, svg_text, created_by)
@@ -35,19 +50,24 @@ class MapRepository:
                 created_by,
             ),
         )
+        spec_location_by_name = {
+            str(item["name"]): item for item in map_spec.get("locations", [])
+        }
         location_ids: dict[str, str] = {}
         for order_index, location in enumerate(generated_map.locations):
             location_id = new_id("loc")
             location_ids[location.name] = location_id
+            spec_location = spec_location_by_name.get(location.name, {})
             self.connection.execute(
                 """
                 INSERT INTO map_locations
-                  (id, map_id, name, x, y, visibility, notes, order_index)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                  (id, map_id, element_id, name, x, y, visibility, notes, order_index)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     location_id,
                     map_id,
+                    spec_location.get("id"),
                     location.name,
                     location.x,
                     location.y,
@@ -56,20 +76,28 @@ class MapRepository:
                     order_index,
                 ),
             )
-        for route in generated_map.routes:
+        spec_connections = list(map_spec.get("connections", []))
+        for route_index, route in enumerate(generated_map.routes):
             start_id = location_ids.get(route.start)
             end_id = location_ids.get(route.end)
             if not start_id or not end_id:
-                continue
+                raise ValueError(f"Unknown route endpoint: {route.start} -> {route.end}")
+            spec_connection = (
+                spec_connections[route_index]
+                if route_index < len(spec_connections)
+                else {}
+            )
             self.connection.execute(
                 """
                 INSERT INTO map_routes
-                  (id, map_id, start_location_id, end_location_id, travel_time, visibility, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                  (id, map_id, element_id, start_location_id, end_location_id,
+                   travel_time, visibility, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     new_id("route"),
                     map_id,
+                    spec_connection.get("id"),
                     start_id,
                     end_id,
                     route.travel_time,
@@ -77,6 +105,16 @@ class MapRepository:
                     route.notes,
                 ),
             )
+        revision_id = self._create_map_revision(
+            map_id,
+            map_spec,
+            validation_report,
+            created_by=created_by,
+        )
+        self.connection.execute(
+            "UPDATE maps SET current_revision_id = ? WHERE id = ?",
+            (revision_id, map_id),
+        )
         return self.get_map(map_id)
 
     def list_maps(
@@ -88,11 +126,16 @@ class MapRepository:
         status_filter = "AND status = 'published'" if published_only else ""
         rows = self.connection.execute(
             f"""
-            SELECT id, campaign_id, title, prompt, style, status, width, height, created_by, created_at
-            FROM maps
-            WHERE campaign_id = ?
+            SELECT
+              m.id, m.campaign_id, m.title, m.prompt, m.style, m.status,
+              m.width, m.height, m.created_by, m.created_at,
+              m.current_revision_id, m.selected_public_asset_id, m.reveal_version,
+              r.revision_no, r.spec_version, r.spec_hash, r.layout_hash
+            FROM maps m
+            LEFT JOIN map_revisions r ON r.id = m.current_revision_id
+            WHERE m.campaign_id = ?
               {status_filter}
-            ORDER BY created_at DESC
+            ORDER BY m.created_at DESC
             """,
             (campaign_id,),
         ).fetchall()
@@ -100,6 +143,15 @@ class MapRepository:
         if not include_prompt:
             for result in results:
                 result["prompt"] = ""
+                for private_key in (
+                    "current_revision_id",
+                    "selected_public_asset_id",
+                    "reveal_version",
+                    "revision_no",
+                    "spec_hash",
+                    "layout_hash",
+                ):
+                    result.pop(private_key, None)
         return results
 
     def set_map_status(self, map_id: str, status: str) -> dict:
@@ -112,6 +164,26 @@ class MapRepository:
         if updated.rowcount != 1:
             raise KeyError(f"Map not found: {map_id}")
         return self.get_map(map_id)
+
+    def get_map_publish_snapshot(self, map_id: str) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT m.status, m.current_revision_id, m.selected_public_asset_id,
+                   r.validation_json
+            FROM maps m
+            LEFT JOIN map_revisions r ON r.id = m.current_revision_id
+            WHERE m.id = ?
+            """,
+            (map_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Map not found: {map_id}")
+        result = row_to_dict(row)
+        validation_json = result.pop("validation_json", None)
+        result["validation"] = (
+            json.loads(validation_json) if validation_json else None
+        )
+        return result
 
     def is_map_published(self, map_id: str) -> bool:
         row = self.connection.execute(
@@ -175,37 +247,350 @@ class MapRepository:
         result["locations"] = [row_to_dict(row) for row in locations]
         result["routes"] = [row_to_dict(row) for row in routes]
         result["tokens"] = self.list_map_tokens(map_id, allowed_visibility=allowed_visibility)
+        revision = self.get_current_map_revision(map_id)
+        if revision is not None:
+            full_spec = revision["spec"]
+            projected_spec = project_map_spec(full_spec, allowed_visibility)
+            result.update(
+                {
+                    "revision_id": revision["id"],
+                    "revision_no": revision["revision_no"],
+                    "spec_version": revision["spec_version"],
+                    "spec_hash": revision["spec_hash"],
+                    "layout_hash": revision["layout_hash"],
+                    "validation": revision["validation"],
+                    "map_spec": projected_spec,
+                }
+            )
+        else:
+            projected_spec = self._legacy_spec_from_rows(result, locations, routes)
+
+        rendered_map = GeneratedMap(
+            title=result["title"],
+            prompt=result["prompt"] if "kp" in allowed_visibility else "",
+            style=result["style"],
+            width=result["width"],
+            height=result["height"],
+            locations=[
+                GeneratedLocation(
+                    name=row["name"],
+                    x=row["x"],
+                    y=row["y"],
+                    visibility=row["visibility"],
+                    notes=row["notes"],
+                )
+                for row in locations
+            ],
+            routes=[
+                GeneratedRoute(
+                    start=row["start_name"],
+                    end=row["end_name"],
+                    travel_time=row["travel_time"],
+                    visibility=row["visibility"],
+                    notes=row["notes"],
+                )
+                for row in routes
+            ],
+            map_spec=projected_spec,
+        )
+        result["svg_text"] = render_svg(rendered_map)
+        result["overlay_svg_text"] = render_overlay_svg(rendered_map)
         if "kp" not in allowed_visibility:
             result["prompt"] = ""
-            filtered_map = GeneratedMap(
-                title=result["title"],
-                prompt="",
-                style=result["style"],
-                width=result["width"],
-                height=result["height"],
-                locations=[
-                    GeneratedLocation(
-                        name=row["name"],
-                        x=row["x"],
-                        y=row["y"],
-                        visibility=row["visibility"],
-                        notes=row["notes"],
-                    )
-                    for row in locations
-                ],
-                routes=[
-                    GeneratedRoute(
-                        start=row["start_name"],
-                        end=row["end_name"],
-                        travel_time=row["travel_time"],
-                        visibility=row["visibility"],
-                        notes=row["notes"],
-                    )
-                    for row in routes
-                ],
-            )
-            result["svg_text"] = render_svg(filtered_map)
+            result.pop("validation", None)
+            for private_key in (
+                "current_revision_id",
+                "selected_public_asset_id",
+                "reveal_version",
+                "revision_id",
+                "revision_no",
+                "spec_hash",
+                "layout_hash",
+            ):
+                result.pop(private_key, None)
+        selected_asset = self._selected_public_asset(map_id)
+        result["render"] = {
+            "background_asset_url": (
+                f"/map-assets/{selected_asset['id']}/content" if selected_asset else None
+            ),
+            "selected_asset_id": selected_asset["id"] if selected_asset else None,
+            "asset_status": selected_asset["status"] if selected_asset else "none",
+            "fallback_svg": selected_asset is None,
+        }
+        if "kp" in allowed_visibility:
+            result["assets"] = [
+                self._asset_for_response(item) for item in self.list_map_assets(map_id)
+            ]
         return result
+
+    def _create_map_revision(
+        self,
+        map_id: str,
+        map_spec: dict[str, Any],
+        validation_report: dict[str, Any],
+        *,
+        created_by: str,
+    ) -> str:
+        revision_id = new_id("maprev")
+        revision_no = int(
+            self.connection.execute(
+                "SELECT COALESCE(MAX(revision_no), 0) + 1 FROM map_revisions WHERE map_id = ?",
+                (map_id,),
+            ).fetchone()[0]
+        )
+        self.connection.execute(
+            """
+            INSERT INTO map_revisions
+              (id, map_id, revision_no, spec_version, spec_json, spec_hash, layout_hash,
+               validation_json, source_kind, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                revision_id,
+                map_id,
+                revision_no,
+                MAP_SPEC_VERSION,
+                json.dumps(map_spec, ensure_ascii=False, sort_keys=True),
+                map_spec_hash(map_spec),
+                map_layout_hash(map_spec),
+                json.dumps(validation_report, ensure_ascii=False, sort_keys=True),
+                str(map_spec.get("provenance", {}).get("source_kind", "kp_brief")),
+                created_by,
+            ),
+        )
+        return revision_id
+
+    def get_current_map_revision(self, map_id: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT r.*
+            FROM maps m
+            JOIN map_revisions r ON r.id = m.current_revision_id
+            WHERE m.id = ?
+            """,
+            (map_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        result = row_to_dict(row)
+        result["spec"] = json.loads(result.pop("spec_json"))
+        result["validation"] = json.loads(result.pop("validation_json"))
+        return result
+
+    def _legacy_spec_from_rows(
+        self,
+        map_row: dict[str, Any],
+        locations: list[sqlite3.Row],
+        routes: list[sqlite3.Row],
+    ) -> dict[str, Any]:
+        legacy_map = GeneratedMap(
+            title=map_row["title"],
+            prompt=map_row["prompt"],
+            style=map_row["style"],
+            width=map_row["width"],
+            height=map_row["height"],
+            locations=[
+                GeneratedLocation(
+                    name=row["name"],
+                    x=row["x"],
+                    y=row["y"],
+                    visibility=row["visibility"],
+                    notes=row["notes"],
+                )
+                for row in locations
+            ],
+            routes=[
+                GeneratedRoute(
+                    start=row["start_name"],
+                    end=row["end_name"],
+                    travel_time=row["travel_time"],
+                    visibility=row["visibility"],
+                    notes=row["notes"],
+                )
+                for row in routes
+            ],
+        )
+        return map_spec_for_generated_map(legacy_map)
+
+    def create_map_asset(
+        self,
+        *,
+        map_id: str,
+        revision_id: str,
+        generation_input_hash: str,
+        content_hash: str | None,
+        storage_path: str | None,
+        mime_type: str | None,
+        width: int | None,
+        height: int | None,
+        provider: str,
+        model: str,
+        seed: int | None,
+        parameters: dict[str, Any],
+        prompt_text: str,
+        status: str = "ready",
+        error_text: str | None = None,
+    ) -> dict[str, Any]:
+        asset_id = new_id("mapasset")
+        self.connection.execute(
+            """
+            INSERT INTO map_assets
+              (id, map_id, revision_id, audience, kind, status, generation_input_hash,
+               content_hash, storage_path, mime_type, width, height, provider, model, seed,
+               parameters_json, prompt_text, error_text)
+            VALUES (?, ?, ?, 'table', 'background', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                asset_id,
+                map_id,
+                revision_id,
+                status,
+                generation_input_hash,
+                content_hash,
+                storage_path,
+                mime_type,
+                width,
+                height,
+                provider,
+                model,
+                seed,
+                json.dumps(parameters, ensure_ascii=False, sort_keys=True),
+                prompt_text,
+                error_text,
+            ),
+        )
+        return self.get_map_asset(asset_id)
+
+    def repair_map_asset(
+        self,
+        asset_id: str,
+        *,
+        revision_id: str,
+        content_hash: str,
+        storage_path: str,
+        mime_type: str,
+        width: int,
+        height: int,
+        provider: str,
+        model: str,
+        seed: int | None,
+        parameters: dict[str, Any],
+        prompt_text: str,
+    ) -> dict[str, Any]:
+        updated = self.connection.execute(
+            """
+            UPDATE map_assets
+            SET revision_id = ?, status = 'ready', content_hash = ?, storage_path = ?,
+                mime_type = ?, width = ?, height = ?, provider = ?, model = ?, seed = ?,
+                parameters_json = ?, prompt_text = ?, error_text = NULL
+            WHERE id = ?
+            """,
+            (
+                revision_id,
+                content_hash,
+                storage_path,
+                mime_type,
+                width,
+                height,
+                provider,
+                model,
+                seed,
+                json.dumps(parameters, ensure_ascii=False, sort_keys=True),
+                prompt_text,
+                asset_id,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise KeyError(f"Map asset not found: {asset_id}")
+        return self.get_map_asset(asset_id)
+
+    def find_map_asset_by_generation_hash(
+        self,
+        map_id: str,
+        generation_input_hash: str,
+    ) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM map_assets
+            WHERE map_id = ? AND generation_input_hash = ? AND status = 'ready'
+            """,
+            (map_id, generation_input_hash),
+        ).fetchone()
+        return self._decode_asset(row) if row is not None else None
+
+    def get_map_asset(self, asset_id: str) -> dict[str, Any]:
+        row = self.connection.execute(
+            "SELECT * FROM map_assets WHERE id = ?",
+            (asset_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Map asset not found: {asset_id}")
+        return self._decode_asset(row)
+
+    def is_map_asset_player_visible(self, asset_id: str) -> bool:
+        row = self.connection.execute(
+            """
+            SELECT 1
+            FROM map_assets a
+            JOIN maps m ON m.id = a.map_id
+            WHERE a.id = ?
+              AND m.status = 'published'
+              AND m.selected_public_asset_id = a.id
+              AND a.audience = 'table'
+              AND a.status = 'ready'
+            """,
+            (asset_id,),
+        ).fetchone()
+        return row is not None
+
+    def list_map_assets(self, map_id: str) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            "SELECT * FROM map_assets WHERE map_id = ? ORDER BY created_at DESC, id DESC",
+            (map_id,),
+        ).fetchall()
+        return [self._decode_asset(row) for row in rows]
+
+    def select_public_map_asset(self, map_id: str, asset_id: str) -> dict[str, Any]:
+        asset = self.get_map_asset(asset_id)
+        if asset["map_id"] != map_id or asset["audience"] != "table":
+            raise ValueError("Map asset does not belong to this public map view")
+        if asset["status"] != "ready":
+            raise ValueError("Only a ready map asset can be selected")
+        current_revision = self.get_current_map_revision(map_id)
+        if current_revision is None or asset["revision_id"] != current_revision["id"]:
+            raise ValueError("Map asset belongs to an older map revision")
+        self.connection.execute(
+            "UPDATE maps SET selected_public_asset_id = ? WHERE id = ?",
+            (asset_id, map_id),
+        )
+        return asset
+
+    def _selected_public_asset(self, map_id: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT a.*
+            FROM maps m
+            JOIN map_assets a ON a.id = m.selected_public_asset_id
+            WHERE m.id = ? AND a.status = 'ready' AND a.audience = 'table'
+            """,
+            (map_id,),
+        ).fetchone()
+        return self._decode_asset(row) if row is not None else None
+
+    @staticmethod
+    def _decode_asset(row: sqlite3.Row) -> dict[str, Any]:
+        result = row_to_dict(row)
+        result["parameters"] = json.loads(result.pop("parameters_json"))
+        result["content_url"] = f"/map-assets/{result['id']}/content"
+        return result
+
+    @staticmethod
+    def _asset_for_response(asset: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in asset.items()
+            if key not in {"storage_path"}
+        }
 
     def find_map_location_id(self, map_id: str, location_name: str) -> str:
         row = self.connection.execute(

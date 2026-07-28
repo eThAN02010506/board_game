@@ -13,6 +13,17 @@ class GenerateMapCommand:
     style: str = "investigation"
     width: int = 960
     height: int = 640
+    map_kind: str = "regional"
+    era_year: int | None = None
+    locale: str = ""
+    season: str = ""
+    time_of_day: str = ""
+    weather: str = ""
+    public_architecture: tuple[str, ...] = ()
+    features: tuple[str, ...] = ()
+    required_elements: tuple[str, ...] = ()
+    forbidden_elements: tuple[str, ...] = ()
+    visual_style: str = "period_illustrated_map"
 
 
 @dataclass(frozen=True)
@@ -47,6 +58,7 @@ class MapService:
         session_id: str,
         command: GenerateMapCommand,
     ) -> dict:
+        campaign = self.repo.get_campaign(campaign_id)
         generated_map = generate_map(
             title=command.title,
             prompt=command.prompt,
@@ -55,6 +67,18 @@ class MapService:
             style=command.style,
             width=command.width,
             height=command.height,
+            map_kind=command.map_kind,
+            era_year=command.era_year,
+            locale=command.locale,
+            season=command.season,
+            time_of_day=command.time_of_day,
+            weather=command.weather,
+            public_architecture=list(command.public_architecture),
+            feature_names=list(command.features),
+            required_elements=list(command.required_elements),
+            forbidden_elements=list(command.forbidden_elements),
+            visual_style=command.visual_style,
+            campaign_time=campaign.get("current_time"),
         )
         saved_map = self.repo.create_map(campaign_id, generated_map, created_by="ai")
         self.repo.append_realtime_event(
@@ -68,7 +92,24 @@ class MapService:
         )
         return saved_map
 
-    def publish(self, map_id: str, campaign_id: str, session_id: str) -> dict:
+    def publish(
+        self,
+        map_id: str,
+        campaign_id: str,
+        session_id: str,
+        *,
+        expected_revision_id: str,
+        expected_selected_asset_id: str | None = None,
+    ) -> dict:
+        self.repo.begin_immediate()
+        snapshot = self.repo.get_map_publish_snapshot(map_id)
+        validation = snapshot.get("validation")
+        if not isinstance(validation, dict) or validation.get("valid") is not True:
+            raise ValueError("地图规范未通过校验，不能发布")
+        if snapshot["current_revision_id"] != expected_revision_id:
+            raise ValueError("地图版本已变化，请刷新并重新审核后发布")
+        if snapshot["selected_public_asset_id"] != expected_selected_asset_id:
+            raise ValueError("正式背景已变化，请刷新并重新审核后发布")
         return self._set_status(
             map_id,
             campaign_id,

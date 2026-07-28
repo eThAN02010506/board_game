@@ -1,6 +1,8 @@
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from ai_kp.core.db import connect, init_db
 from ai_kp.storage.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
 
@@ -69,6 +71,16 @@ def test_init_db_migrates_legacy_schema_once_and_is_idempotent(tmp_path: Path) -
     connection = connect(tmp_path / "legacy.sqlite3")
     try:
         connection.executescript(LEGACY_SCHEMA)
+        connection.execute(
+            """
+            INSERT INTO maps
+              (id, campaign_id, title, prompt, style, width, height, svg_text, created_by)
+            VALUES (
+              'map_legacy', 'camp_legacy', '旧地图', '旧入口与旧走廊',
+              'investigation', 960, 640, '<svg></svg>', 'legacy'
+            )
+            """
+        )
 
         init_db(connection)
         first_records = connection.execute(
@@ -85,6 +97,32 @@ def test_init_db_migrates_legacy_schema_once_and_is_idempotent(tmp_path: Path) -
         }
         assert "client_action_id" in _column_names(connection, "player_actions")
         assert "status" in _column_names(connection, "maps")
+        assert "current_revision_id" in _column_names(connection, "maps")
+        assert "element_id" in _column_names(connection, "map_locations")
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'map_revisions'"
+        ).fetchone()
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'map_assets'"
+        ).fetchone()
+        legacy_map = connection.execute(
+            "SELECT current_revision_id FROM maps LIMIT 1"
+        ).fetchone()
+        assert legacy_map is not None
+        assert legacy_map["current_revision_id"]
+        assert connection.execute(
+            "SELECT spec_version FROM map_revisions WHERE id = ?",
+            (legacy_map["current_revision_id"],),
+        ).fetchone()["spec_version"] == "map-spec.v1"
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' "
+            "AND name = 'trg_maps_current_revision_guard'"
+        ).fetchone()
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE maps SET current_revision_id = 'maprev_wrong' "
+                "WHERE id = (SELECT id FROM maps LIMIT 1)"
+            )
         assert "version" in _column_names(connection, "map_tokens")
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'idx_player_actions_idempotency'"
@@ -96,6 +134,41 @@ def test_init_db_migrates_legacy_schema_once_and_is_idempotent(tmp_path: Path) -
     expected = [(migration.version, migration.name) for migration in MIGRATIONS]
     assert [tuple(row) for row in first_records] == expected
     assert [tuple(row) for row in second_records] == expected
+
+
+def test_legacy_map_that_fails_current_validation_does_not_block_upgrade(
+    tmp_path: Path,
+) -> None:
+    connection = connect(tmp_path / "small-legacy-map.sqlite3")
+    try:
+        connection.executescript(LEGACY_SCHEMA)
+        connection.execute(
+            """
+            INSERT INTO maps
+              (id, campaign_id, title, prompt, style, width, height, svg_text, created_by)
+            VALUES (
+              'map_small', 'camp_legacy', '旧版小地图', '旧系统允许的小画布',
+              'investigation', 100, 100, '<svg></svg>', 'legacy'
+            )
+            """
+        )
+
+        init_db(connection)
+
+        row = connection.execute(
+            """
+            SELECT r.validation_json
+            FROM maps m
+            JOIN map_revisions r ON r.id = m.current_revision_id
+            WHERE m.id = 'map_small'
+            """
+        ).fetchone()
+        assert row is not None
+        assert '"valid": false' in row["validation_json"]
+        assert '"canvas_size"' in row["validation_json"]
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()
 
 
 def test_connect_configures_file_and_memory_databases(tmp_path: Path) -> None:

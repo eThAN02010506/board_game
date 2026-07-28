@@ -6,13 +6,13 @@ The backend has explicit composition, transport, application, domain, ruleset, a
 
 - `src/ai_kp/bootstrap/composition.py` is the composition root. It initializes the database once, installs CORS and error handlers, and mounts the domain routers. `bootstrap/settings.py` owns runtime settings. `api/main.py` remains the stable compatibility ASGI entry point.
 - `src/ai_kp/api/routers/{system,campaigns,sessions,world,maps,turns,realtime}.py` owns HTTP/WebSocket transport only. `dependencies.py`, `authz.py`, `errors.py`, and `schemas.py` centralize per-request repository lifetime, authentication, authorization, error mapping, and transport DTOs.
-- `src/ai_kp/application/{campaign,world,session,map,turn}_service.py` owns use cases that coordinate validation, domain components, multiple writes, the transactional realtime outbox, and the local-model boundary. It has no FastAPI dependency.
+- `src/ai_kp/application/{campaign,world,session,map,map_image,turn}_service.py` owns use cases that coordinate validation, domain components, multiple writes, the transactional realtime outbox, and the local-model boundary. It has no FastAPI dependency.
 - `src/ai_kp/application/ports/` defines the narrow persistence and AI-director contracts used by
   each service. Application code must not import `api`, `bootstrap`, or `infrastructure`;
   concrete adapters are supplied at the composition/delivery boundary.
 - `src/ai_kp/platform/` owns ruleset-neutral memory, module, and scene logic. `director/` owns AI KP context and proposal orchestration. `rule_authoring/` owns extracted rule objects and deterministic validation/execution.
 - `src/ai_kp/infrastructure/database/` owns SQLite mechanics, schema, ordered migrations, and feature repositories. Its `Repository` facade intentionally supplies one shared transaction boundary to current application services.
-- `src/ai_kp/infrastructure/{knowledge,llm,realtime,security}/` owns external and persistence adapters. These layers may depend inward on domain contracts; domain packages do not depend on these adapters.
+- `src/ai_kp/infrastructure/{knowledge,llm,images,realtime,security}/` owns external and persistence adapters. These layers may depend inward on domain contracts; domain packages do not depend on these adapters.
 - `src/ai_kp/application/realtime/` owns the authenticated connection lifecycle and pure wire-message
   decisions. `platform/realtime/ports.py` defines channel and event-store contracts;
   `infrastructure/realtime/` contains only Starlette, worker-thread, SQLite, and origin-check
@@ -91,7 +91,9 @@ This catalogue is the single source of truth for delivery status, phase, depende
 - `campaign_npcs` records how an NPC relates to one campaign.
 - Global NPC identity is stored once in `npcs`; this allows cross-module reuse.
 - `modules` and `module_chunks` store imported KP material with visibility and spoiler metadata.
-- `maps`, `map_locations`, and `map_routes` persist AI-generated SVG and the structured location graph as reusable campaign state in SQLite.
+- `maps` stores stable identity, publication status, the current revision pointer and the selected public background; `map_revisions` stores canonical MapSpec JSON, validation output and content/layout hashes.
+- `map_locations` and `map_routes` are the current compatible projection used by movement and older API fields. Deterministic SVG is rendered from the role-filtered current MapSpec instead of being trusted as an independent structure source.
+- `map_assets` stores only validated image metadata, generation hash, prompt audit and a path relative to the controlled asset root. PNG/JPEG bytes use content-addressed storage outside SQLite and remain behind authenticated API access.
 - `maps.status` is the publication boundary: generated maps start as `draft`; players can only discover/read `published` maps.
 - `map_tokens` and `map_token_moves` store offline-table style piece placement and movement history. `map_tokens.version` provides optimistic concurrency control so a stale client cannot overwrite a newer move.
 - `campaign_sessions` stores one active/closed play session per campaign and only the hash of its shared join code.
@@ -161,11 +163,20 @@ In development, Vite proxies both HTTP and WebSocket `/api` traffic. `VITE_BACKE
 
 ## Map Publication Flow
 
-1. KP generation persists structured locations/routes plus SVG with `status=draft`.
-2. KP can inspect draft maps, place tokens, and publish/unpublish explicitly.
-3. Player map lists include only `published` maps; direct access to a draft returns not found.
-4. Player responses include only `player`/`table` locations, routes, and tokens. Player movement additionally requires a visible current location, destination, and route, and the token must be bound to the authenticated PC.
-5. Player movement history omits KP-only movement metadata and hidden locations.
+1. KP generation converts the request and campaign time into `map-spec.v1`, validates structure, geometry, connectivity, era context and required-element coverage, then persists revision 1 and the compatible locations/routes projection with `status=draft`.
+2. The full KP response is rendered from the current MapSpec. A player response first projects the spec to `player/table`, removes scene brief, provenance and KP notes, then renders a fresh safe SVG.
+3. Optional image generation builds its prompt from the player-safe projection only. It cannot see KP-only elements, clues, tokens or hidden routes. A generation hash makes identical provider/model/seed/spec requests reusable.
+4. Provider output must be Base64 PNG/JPEG within byte and pixel limits. The file is written atomically to content-addressed storage; creating a candidate does not change the selected background or publication state.
+5. KP previews candidates and explicitly selects one. Only the selected public asset can be fetched by players, and only while the map is published; unselected assets remain KP-only.
+6. KP can inspect draft maps, place tokens, and publish/unpublish explicitly. Player map lists include only `published` maps; direct access to a draft returns not found.
+7. Background image, safe structure SVG, labels and tokens share one SVG coordinate system. If the asset cannot be loaded, the client removes only the image layer and keeps the deterministic SVG playable.
+8. Player movement requires a visible current location, destination and route, and the token must be bound to the authenticated PC. Movement history omits KP-only metadata and hidden locations.
+
+Map images are decorative, never authoritative. “Every requested element exists” is proven by the
+MapSpec coverage report and deterministic overlay, not by visual inspection of diffusion-model
+pixels. Historical plausibility is constrained by the era profile and forbidden list, while
+aesthetic acceptance remains an explicit KP decision. See
+[`MAP_GENERATION.md`](MAP_GENERATION.md).
 
 ## Player Action and Proposal Flow
 

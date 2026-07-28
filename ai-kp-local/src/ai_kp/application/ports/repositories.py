@@ -36,7 +36,9 @@ class RealtimeOutbox(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class MapStore(RealtimeOutbox, Protocol):
+class MapStore(CampaignStore, RealtimeOutbox, Protocol):
+    def begin_immediate(self) -> None: ...
+
     def create_map(
         self,
         campaign_id: str,
@@ -45,6 +47,8 @@ class MapStore(RealtimeOutbox, Protocol):
     ) -> dict: ...
 
     def set_map_status(self, map_id: str, status: str) -> dict: ...
+
+    def get_map_publish_snapshot(self, map_id: str) -> dict[str, Any]: ...
 
     def is_map_token_player_visible(self, token_id: str) -> bool: ...
 
@@ -69,6 +73,24 @@ class MapStore(RealtimeOutbox, Protocol):
         allowed_visibility: tuple[str, ...] | None = None,
         expected_version: int | None = None,
     ) -> dict: ...
+
+
+class MapImageStore(Protocol):
+    def begin_immediate(self) -> None: ...
+
+    def is_session_member_active(self, member_id: str, session_id: str) -> bool: ...
+
+    def get_current_map_revision(self, map_id: str) -> dict[str, Any] | None: ...
+
+    def find_map_asset_by_generation_hash(
+        self,
+        map_id: str,
+        generation_input_hash: str,
+    ) -> dict[str, Any] | None: ...
+
+    def create_map_asset(self, **values: Any) -> dict[str, Any]: ...
+
+    def repair_map_asset(self, asset_id: str, **values: Any) -> dict[str, Any]: ...
 
 
 class CheckStore(CampaignStore, Protocol):

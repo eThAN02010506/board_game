@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ai_kp.director.turn_output import (
     CheckCandidate,
@@ -186,13 +186,86 @@ class ModuleImport(BaseModel):
 
 
 class MapGenerateRequest(BaseModel):
-    title: str
-    prompt: str
-    style: str = "investigation"
-    locations: list[str] = Field(default_factory=list)
-    routes: list[tuple[str, str]] = Field(default_factory=list)
-    width: int = 960
-    height: int = 640
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=160)
+    prompt: str = Field(min_length=2, max_length=4000)
+    style: str = Field(default="investigation", min_length=1, max_length=80)
+    map_kind: Literal["regional", "site", "floorplan"] = "regional"
+    locations: list[str] = Field(default_factory=list, max_length=32)
+    routes: list[tuple[str, str]] = Field(default_factory=list, max_length=64)
+    features: list[str] = Field(default_factory=list, max_length=48)
+    required_elements: list[str] = Field(default_factory=list, max_length=80)
+    era_year: int | None = Field(default=None, ge=1000, le=2100)
+    locale: str = Field(default="", max_length=160)
+    season: str = Field(default="", max_length=80)
+    time_of_day: str = Field(default="", max_length=80)
+    weather: str = Field(default="", max_length=120)
+    public_architecture: list[str] = Field(default_factory=list, max_length=20)
+    forbidden_elements: list[str] = Field(default_factory=list, max_length=40)
+    visual_style: Literal[
+        "period_illustrated_map",
+        "architectural_blueprint",
+        "ink_atlas",
+        "tactical_floorplan",
+    ] = "period_illustrated_map"
+    width: int = Field(default=960, ge=640, le=2048)
+    height: int = Field(default=640, ge=480, le=2048)
+
+    @model_validator(mode="after")
+    def validate_structure(self) -> "MapGenerateRequest":
+        self.title = self.title.strip()
+        self.prompt = self.prompt.strip()
+        self.locations = [item.strip() for item in self.locations if item.strip()]
+        self.routes = [
+            (start.strip(), end.strip())
+            for start, end in self.routes
+            if start.strip() and end.strip()
+        ]
+        self.features = [item.strip() for item in self.features if item.strip()]
+        self.required_elements = [
+            item.strip() for item in self.required_elements if item.strip()
+        ]
+        self.public_architecture = [
+            item.strip() for item in self.public_architecture if item.strip()
+        ]
+        self.forbidden_elements = [
+            item.strip() for item in self.forbidden_elements if item.strip()
+        ]
+        if len(self.locations) != len(set(self.locations)):
+            raise ValueError("地点名称不能重复")
+        if len(self.features) != len(set(self.features)):
+            raise ValueError("场景元素不能重复")
+        if any(len(item) > 100 for item in (*self.locations, *self.features)):
+            raise ValueError("地点和场景元素名称不能超过 100 个字符")
+        if self.locations:
+            known = set(self.locations)
+            unknown = sorted(
+                {
+                    endpoint
+                    for route in self.routes
+                    for endpoint in route
+                    if endpoint not in known
+                }
+            )
+            if unknown:
+                raise ValueError(f"路线引用了未知地点：{', '.join(unknown)}")
+        available = set(self.locations) | set(self.features)
+        missing = sorted(set(self.required_elements) - available)
+        if missing:
+            raise ValueError(f"必需元素尚未列入地点或场景元素：{', '.join(missing)}")
+        return self
+
+
+class MapImageGenerateRequest(BaseModel):
+    width: int = Field(default=1024, ge=512, le=2048)
+    height: int = Field(default=1024, ge=512, le=2048)
+    seed: int | None = Field(default=None, ge=0, le=2_147_483_647)
+
+
+class MapPublishRequest(BaseModel):
+    expected_revision_id: str = Field(min_length=1, max_length=100)
+    expected_selected_asset_id: str | None = Field(default=None, max_length=100)
 
 
 class MapTokenCreate(BaseModel):

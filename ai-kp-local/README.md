@@ -8,7 +8,8 @@
 - SQLite 本地数据库与事件流
 - Campaign、PC、NPC、Memory、World Time 的基础数据模型
 - KP 本/模组纯文本导入、切块、秘密标签和剧透边界
-- AI 地图生成；SVG、地点、路线、棋子位置、移动记录和棋子版本均持久化到 SQLite
+- 时代化地图生成；MapSpec、修订、校验报告、SVG、地点、路线、棋子与图片候选均可本地持久化
+- 可选 OpenAI-compatible 图片模型；只接收玩家安全投影，图片失效时自动回退到完整可玩的确定性 SVG
 - 线下跑团式棋子移动，以及基于棋子版本的并发移动冲突保护
 - AI KP 草稿审批流：草稿、批准、拒绝、覆写，批准后才写入事件/记忆
 - 严格结构化 AI 输出：叙述、检定、事件、记忆、NPC 更新和地图移动均校验
@@ -106,7 +107,7 @@ ai-kp-local/
 │   ├── platform/               # 通用记忆、模组、场景与规则无关领域结构
 │   ├── director/               # AI KP 上下文、提示词、提案编排与结构化输出
 │   ├── rule_authoring/         # 规则对象提取、三层校验与确定性执行
-│   ├── infrastructure/         # SQLite、MiniRAG、LLM、权限和实时适配器
+│   ├── infrastructure/         # SQLite、MiniRAG、LLM、图片、权限和实时适配器
 │   ├── planning/               # 可机读的唯一能力目录
 │   ├── rulesets/               # 应用层规则端口、显式注册表与当前 CoC7 适配器
 │   └── core/及旧包             # ID 与兼容导出；新代码不再依赖旧实现路径
@@ -127,6 +128,7 @@ ai-kp-local/
 目标目录骨架、当前实现与迁移位置的对应关系，以及占位文件启用条件见 [`docs/ARCHITECTURE_SKELETON.md`](docs/ARCHITECTURE_SKELETON.md)。
 规则书 PDF 摄取、MiniRAG 隔离索引、三层校验、权限和真实验收见 [`docs/RULEBOOK_KNOWLEDGE.md`](docs/RULEBOOK_KNOWLEDGE.md)。
 当前仅支持 CoC、上传规则书与可执行插件的区别，以及未来第二规则系统的接入条件见 [`docs/RULESET_BOUNDARY.md`](docs/RULESET_BOUNDARY.md)。
+地图 MapSpec、时代约束、图片安全投影、版本/缓存和真实验收边界见 [`docs/MAP_GENERATION.md`](docs/MAP_GENERATION.md)。
 
 ## 开发自检
 
@@ -137,10 +139,11 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest -q
 .venv/bin/ruff check src tests
 ```
 
-前端构建同时执行 TypeScript 检查与 Vite 生产打包：
+前端组件测试、TypeScript 检查与 Vite 生产打包：
 
 ```bash
 cd apps/web
+pnpm test
 pnpm run build
 ```
 
@@ -208,26 +211,59 @@ AI_KP_LLM_MODEL=<从 /v1/models 响应取得的 id>
 
 ## 地图生成
 
-地图会作为可重复调用的本地持久数据保存到 SQLite，而不是只留在模型上下文或进程内缓存中。保存内容包括地图元数据、SVG、地点、路线、棋子当前位置、移动历史和棋子 `version`。页面重新启动或再次进入团时，会先恢复会话，再通过 API 读取该 `campaign + role` 上次选择的地图；浏览器只缓存选择的地图 ID，权威地图内容仍来自 SQLite。
+地图会作为可重复调用的本地持久数据保存，而不是只留在模型上下文或进程缓存中。SQLite 保存地图身份、不可变 MapSpec 修订、校验报告、地点/路线投影、已选图片、棋子当前位置、移动历史和棋子 `version`；PNG/JPEG 图片按内容哈希写入 `AI_KP_MAP_ASSET_ROOT`。页面重新启动或再次进入团时，会先恢复会话，再通过 API 读取该 `campaign + role` 上次选择的地图；浏览器只缓存选择的地图 ID，权威内容仍来自后端。
 
-结构化地点和路线用于路线规划、分队行动与隐藏地点过滤，SVG 用于前端直接展示。移动请求携带当前棋子 `version`；并发页面使用旧版本重复移动时，服务端会拒绝冲突，客户端重新同步后才能继续。
+MapSpec 是结构事实源，包含地图种类、统一坐标系、时代/地域、地点、连接、场景元素、必含元素和视觉约束。创建时会校验 Schema、画布边界、路线端点、连通性、时代信息和必含元素覆盖率；存在错误时不能保存或发布。结构化地点和路线继续用于路线规划、分队行动与隐藏地点过滤。
 
-新生成的地图状态为 `draft`，只有 KP 能列出或直接读取。KP 显式发布后状态变为 `published`，玩家才能看到其中玩家/全桌可见的地点、路线与棋子；KP 也可以把地图重新收回为草稿。
+渲染采用同一坐标系内的分层画布：可选时代背景图片、确定性结构/标签 SVG、棋子。图片只负责材质、光照和氛围；全部地点、路线和必含元素仍由 MapSpec/SVG 保证，因此图片模型不可用、漏画或文件损坏时，地图仍能完整游玩。
+
+新生成的地图状态为 `draft`，只有 KP 能列出或直接读取。发送给图片模型的内容先投影为玩家安全版本，完全移除 KP 地点、秘密路线、KP 备注、棋子与线索；生成候选不会自动替换当前背景或发布地图。KP 预览并选用候选后，再显式发布。玩家只能取得已发布地图当前选中的公共图片及玩家/全桌可见结构。
 
 ```http
 POST /campaigns/{campaign_id}/maps/generate
+GET  /maps/{map_id}/image-prompt
+POST /maps/{map_id}/image-assets/generate
+POST /maps/{map_id}/assets/{asset_id}/select
+GET  /map-assets/{asset_id}/content
 POST /maps/{map_id}/publish
 POST /maps/{map_id}/unpublish
 ```
 
 ```json
 {
-  "title": "旧码头区域图",
-  "prompt": "旧码头、废弃仓库、报社、警局",
-  "locations": ["旧码头", "废弃仓库", "报社", "警局"],
-  "routes": [["旧码头", "废弃仓库"], ["旧码头", "报社"], ["报社", "警局"]]
+  "title": "黑水镇警局",
+  "prompt": "1928 年新英格兰警局的夜间调查地图",
+  "map_kind": "floorplan",
+  "locations": ["街道入口", "接待大厅", "走廊", "问询室", "值班办公室", "楼梯"],
+  "routes": [["街道入口", "接待大厅"], ["接待大厅", "走廊"], ["走廊", "问询室"]],
+  "features": ["深色木制接待台", "机械打字机", "有线电话"],
+  "required_elements": ["街道入口", "接待大厅", "走廊", "问询室", "深色木制接待台"],
+  "era_year": 1928,
+  "locale": "美国马萨诸塞州",
+  "time_of_day": "夜晚",
+  "weather": "冷雨",
+  "public_architecture": ["新英格兰市政建筑", "红砖", "深色木材"],
+  "forbidden_elements": ["霓虹招牌"]
 }
 ```
+
+`forbidden_elements` 是 KP 私有的额外视觉审查清单，不会进入公共图片提示词。图片提示只
+使用由年份确定性产生的通用时代禁忌，避免负面提示本身泄露“不要画某个秘密地点”。
+`public_architecture` 则是明确的公共字段：玩家和图片模型都能看到，不能填写秘密建筑。
+
+图片模型是独立可选依赖，不复用聊天模型配置。它必须提供
+`/v1/images/generations` 并返回 `b64_json`：
+
+```env
+AI_KP_IMAGE_BASE_URL=http://127.0.0.1:8188/v1
+AI_KP_IMAGE_API_KEY=local
+AI_KP_IMAGE_MODEL=<服务实际暴露的图片模型 ID>
+AI_KP_MAP_ASSET_ROOT=data/map-assets
+```
+
+当前适配器不跟随模型返回的任意远程图片 URL，只接受经过 Base64 解码、PNG/JPEG
+签名、尺寸、像素和 32 MiB 上限校验的位图。完整设计、权限和 real-case 清单见
+[`docs/MAP_GENERATION.md`](docs/MAP_GENERATION.md)。
 
 玩家移动不是电子游戏式格子寻路，而是线下跑团式 token 移动：
 
