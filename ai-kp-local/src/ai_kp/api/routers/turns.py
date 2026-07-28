@@ -2,12 +2,6 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ai_kp.application.errors import KpSessionEndedError
-from ai_kp.application.check_consequence_service import (
-    CheckConsequenceService,
-    GenerateCheckConsequenceCommand,
-)
-from ai_kp.application.turn_service import KpTurnCommand, ManualProposalCommand, TurnService
 from ai_kp.api.authz import campaign_for_proposal, require_campaign_role
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.schemas import (
@@ -16,13 +10,18 @@ from ai_kp.api.schemas import (
     ProposalDecision,
     TurnProposalCreate,
 )
+from ai_kp.application.check_consequence_service import (
+    CheckConsequenceService,
+    GenerateCheckConsequenceCommand,
+)
+from ai_kp.application.errors import KpSessionEndedError
+from ai_kp.application.turn_service import KpTurnCommand, ManualProposalCommand, TurnService
 from ai_kp.bootstrap.settings import Settings
-from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.director.orchestrator import KpOrchestrator
 from ai_kp.director.turn_output import StructuredOutputError
+from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.platform.sessions.models import AuthenticatedMember
-
 
 router = APIRouter()
 

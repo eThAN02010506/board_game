@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import re
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from hashlib import sha256
-import json
-import re
-from typing import Any, Iterable
-
+from typing import Any
 
 MAP_SPEC_VERSION = "map-spec.v1"
 VALID_VISIBILITY = {"player", "table", "kp"}
@@ -131,7 +131,7 @@ def _era_defaults(year: int | None) -> tuple[list[str], list[str], list[str], li
 
 
 def _element_id(prefix: str, name: str, index: int) -> str:
-    digest = sha256(f"{prefix}:{index}:{name}".encode("utf-8")).hexdigest()[:12]
+    digest = sha256(f"{prefix}:{index}:{name}".encode()).hexdigest()[:12]
     return f"{prefix}_{digest}"
 
 
@@ -779,9 +779,11 @@ def build_image_prompt(spec: dict[str, Any], audience: str = "table") -> str:
             "Create a polished tabletop RPG map background.",
             f"Map kind: {projected.get('map_kind', 'site')}.",
             f"Era: {era_label}. Locale: {era.get('locale') or 'unspecified'}.",
-            f"Season: {era.get('season') or 'unspecified'}; "
-            f"time: {era.get('time_of_day') or 'unspecified'}; "
-            f"weather: {era.get('weather') or 'unspecified'}.",
+            (
+                f"Season: {era.get('season') or 'unspecified'}; "
+                f"time: {era.get('time_of_day') or 'unspecified'}; "
+                f"weather: {era.get('weather') or 'unspecified'}."
+            ),
             "Confirmed-public architecture and materials: "
             + ", ".join(era.get("public_architecture", []))
             + ".",
@@ -790,17 +792,23 @@ def build_image_prompt(spec: dict[str, Any], audience: str = "table") -> str:
             "Visible environmental elements: " + ", ".join(feature_names or ["none specified"]) + ".",
             "Approximate public layout anchors: " + layout_anchors + ".",
             "Public circulation links: " + circulation_links + ".",
-            f"Viewpoint: {visual.get('viewpoint', 'orthographic_top_down')}; "
-            f"style: {visual.get('style_preset', 'period_illustrated_map')}; "
-            f"palette: {', '.join(visual.get('palette', []))}.",
-            "Do not generate any text, labels, legends, people, characters, tokens, clues, "
-            "secret rooms, or hidden passages. Leave readable negative space for deterministic "
-            "SVG labels and gameplay overlays.",
+            (
+                f"Viewpoint: {visual.get('viewpoint', 'orthographic_top_down')}; "
+                f"style: {visual.get('style_preset', 'period_illustrated_map')}; "
+                f"palette: {', '.join(visual.get('palette', []))}."
+            ),
+            (
+                "Do not generate any text, labels, legends, people, characters, tokens, clues, "
+                "secret rooms, or hidden passages. Leave readable negative space for deterministic "
+                "SVG labels and gameplay overlays."
+            ),
             "Forbidden anachronisms and visual elements: "
             + ", ".join(safe_forbidden or ["none specified"])
             + ".",
-            "Maintain a coherent, practical layout with clear circulation, plausible scale, "
-            "period-appropriate materials, attractive lighting, and restrained detail.",
+            (
+                "Maintain a coherent, practical layout with clear circulation, plausible scale, "
+                "period-appropriate materials, attractive lighting, and restrained detail."
+            ),
         ]
     )
 

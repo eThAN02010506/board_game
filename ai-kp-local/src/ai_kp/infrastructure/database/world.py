@@ -3,12 +3,12 @@
 import json
 
 from ai_kp.core.ids import new_id
+from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
+from ai_kp.infrastructure.database.sqlite import SQLiteRepository
+from ai_kp.platform.facts import RESERVED_FACT_EVENT_PREFIX
 from ai_kp.platform.memory.npc_candidates import NpcCandidate, NpcCandidateService
 from ai_kp.platform.memory.retrieval import MemoryRetriever, RetrievedMemory
 from ai_kp.platform.modules.ingestion import ModuleChunk
-from ai_kp.platform.facts import RESERVED_FACT_EVENT_PREFIX
-from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
-from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 
 
 class WorldRepository(SQLiteRepository):

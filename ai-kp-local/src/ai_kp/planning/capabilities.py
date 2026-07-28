@@ -1,7 +1,6 @@
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-
 CapabilityStatus = Literal["available", "partial", "planned"]
 CapabilityAudience = Literal["all", "kp", "player"]
 

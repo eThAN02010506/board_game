@@ -4,13 +4,13 @@ import sqlite3
 from typing import Any
 
 from ai_kp.core.ids import new_id
+from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 from ai_kp.infrastructure.security.tokens import (
     generate_access_token,
     generate_seat_invitation_code,
     hash_access_token,
     hash_seat_invitation_code,
 )
-from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 
 
 class SessionSeatRepository(SQLiteRepository):

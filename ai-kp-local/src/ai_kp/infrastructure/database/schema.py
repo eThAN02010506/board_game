@@ -7,7 +7,6 @@ from pathlib import Path
 
 from ai_kp.infrastructure.database.migrations import apply_migrations
 
-
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 

@@ -7,8 +7,8 @@ from ai_kp.application.play.proposal_approval import plan_proposed_checks
 from ai_kp.application.ports.director import KpDirector
 from ai_kp.application.ports.repositories import TurnStore
 from ai_kp.platform.resolution.proposals import validate_unresolved_check_boundary
-from ai_kp.rulesets import get_ruleset
 from ai_kp.platform.sessions.models import AuthenticatedMember
+from ai_kp.rulesets import get_ruleset
 
 
 @dataclass(frozen=True)

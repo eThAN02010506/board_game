@@ -2,7 +2,6 @@
 
 import sqlite3
 
-
 VERSION = 11
 NAME = "add_replayable_skill_checks"
 

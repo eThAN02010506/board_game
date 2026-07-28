@@ -2,7 +2,6 @@ import sqlite3
 
 from ai_kp.infrastructure.database.migrations.helpers import ensure_column
 
-
 VERSION = 2
 NAME = "add_player_action_idempotency"
 

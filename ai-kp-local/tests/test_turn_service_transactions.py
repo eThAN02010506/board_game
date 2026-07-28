@@ -146,16 +146,15 @@ class TurnServiceTransactionTests(unittest.TestCase):
                     repo,
                     "create_skill_check",
                     side_effect=fail_second_check,
+                ), self.assertRaisesRegex(
+                    RuntimeError,
+                    "injected concrete check failure",
                 ):
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "injected concrete check failure",
-                    ):
-                        service.approve(
-                            proposal["id"],
-                            campaign["id"],
-                            identity,
-                        )
+                    service.approve(
+                        proposal["id"],
+                        campaign["id"],
+                        identity,
+                    )
                 connection.rollback()
                 self.assertEqual(
                     self._state(
@@ -197,16 +196,15 @@ class TurnServiceTransactionTests(unittest.TestCase):
                     repo,
                     "append_realtime_event",
                     side_effect=fail_world_updated,
+                ), self.assertRaisesRegex(
+                    RuntimeError,
+                    "injected approval outbox failure",
                 ):
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "injected approval outbox failure",
-                    ):
-                        service.approve(
-                            proposal["id"],
-                            campaign["id"],
-                            identity,
-                        )
+                    service.approve(
+                        proposal["id"],
+                        campaign["id"],
+                        identity,
+                    )
                 connection.rollback()
                 self.assertEqual(
                     self._state(
@@ -248,16 +246,15 @@ class TurnServiceTransactionTests(unittest.TestCase):
                     repo,
                     "append_realtime_event",
                     side_effect=fail_proposal_rejected,
+                ), self.assertRaisesRegex(
+                    RuntimeError,
+                    "injected rejection outbox failure",
                 ):
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "injected rejection outbox failure",
-                    ):
-                        service.reject(
-                            proposal["id"],
-                            campaign["id"],
-                            identity,
-                        )
+                    service.reject(
+                        proposal["id"],
+                        campaign["id"],
+                        identity,
+                    )
                 connection.rollback()
                 self.assertEqual(
                     self._state(

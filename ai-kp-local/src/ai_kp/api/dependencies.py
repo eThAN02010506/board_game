@@ -5,10 +5,9 @@ from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ai_kp.bootstrap.settings import Settings
-from ai_kp.infrastructure.database.schema import connect
 from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.database.schema import connect
 from ai_kp.platform.sessions.models import AuthenticatedMember, AuthenticatedPlayer
-
 
 bearer = HTTPBearer(auto_error=False)
 

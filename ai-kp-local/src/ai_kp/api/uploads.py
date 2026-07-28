@@ -7,7 +7,6 @@ from urllib.parse import unquote
 
 from fastapi import HTTPException, Request
 
-
 MAX_UPLOAD_FILENAME_CHARACTERS = 255
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
 

@@ -5,7 +5,6 @@ import secrets
 from dataclasses import dataclass
 from typing import Literal
 
-
 SuccessLevel = Literal["fumble", "failure", "regular", "hard", "extreme", "critical"]
 Difficulty = Literal["regular", "hard", "extreme"]
 
@@ -160,12 +159,12 @@ def _validate_target(target: int) -> None:
 
 
 __all__ = [
-    "D100Check",
-    "D100Resolution",
-    "Difficulty",
     "RULESET_ID",
     "RULESET_VERSION",
     "SOURCE_REFERENCE",
+    "D100Check",
+    "D100Resolution",
+    "Difficulty",
     "resolve_d100",
     "roll_d100_check",
     "secure_d100_dice",

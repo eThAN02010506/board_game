@@ -1,3 +1,3 @@
 """Compatibility imports for the migrated AI KP output contract."""
 
-from ai_kp.director.turn_output import *  # noqa: F403
+from ai_kp.director.turn_output import *

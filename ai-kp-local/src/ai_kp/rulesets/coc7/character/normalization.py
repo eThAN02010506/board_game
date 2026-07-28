@@ -3,7 +3,6 @@
 from copy import deepcopy
 from typing import Any
 
-
 ATTRIBUTE_KEYS = ("str", "con", "siz", "dex", "app", "int", "pow", "edu")
 
 

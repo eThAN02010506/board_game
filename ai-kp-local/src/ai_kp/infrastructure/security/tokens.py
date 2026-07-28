@@ -3,7 +3,6 @@
 import hashlib
 import secrets
 
-
 JOIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 

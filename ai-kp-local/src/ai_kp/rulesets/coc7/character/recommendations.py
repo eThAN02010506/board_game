@@ -8,7 +8,6 @@ from typing import Any
 from ai_kp.rulesets.coc7.character.creation_rules import OCCUPATION_POINT_FORMULAS
 from ai_kp.rulesets.coc7.character.skills import COC7_SKILL_CATALOG
 
-
 PHYSICAL_SKILLS = {
     "coc7.climb",
     "coc7.dodge",

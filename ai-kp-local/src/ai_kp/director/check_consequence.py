@@ -7,7 +7,6 @@ from ai_kp.director.turn_output import (
 )
 from ai_kp.platform.resolution import HIDDEN_CHECK_PUBLIC_NARRATION
 
-
 CHECK_CONSEQUENCE_OUTPUT_INSTRUCTIONS = """只返回一个 JSON 对象，不要 Markdown 或额外文字。你正在解释已经完成并验证的检定，不能要求新检定，也不能预改地图。字段必须是：
 {
   "public_narration": "严格依据已验证检定结果给出的玩家可见后果",

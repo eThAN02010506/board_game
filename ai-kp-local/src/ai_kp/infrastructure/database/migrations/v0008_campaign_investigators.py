@@ -2,7 +2,6 @@
 
 import sqlite3
 
-
 VERSION = 8
 NAME = "add_campaign_investigator_review_and_runtime_state"
 

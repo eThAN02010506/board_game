@@ -8,7 +8,6 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 FIELD_PATH_PATTERN = (
     r"^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*){0,15}$"
 )
@@ -51,7 +50,7 @@ class Operand(ClosedRuleModel):
     divisor: float = Field(default=1.0, allow_inf_nan=False)
 
     @model_validator(mode="after")
-    def exactly_one_source(self) -> "Operand":
+    def exactly_one_source(self) -> Operand:
         if (self.field is None) == (self.value is None):
             raise ValueError("operand requires exactly one of field or value")
         if self.divisor == 0:
@@ -86,7 +85,7 @@ class LookupRow(ClosedRuleModel):
     output: dict[str, Any] = Field(max_length=128)
 
     @model_validator(mode="after")
-    def has_matcher(self) -> "LookupRow":
+    def has_matcher(self) -> LookupRow:
         if self.equals is None and self.minimum is None and self.maximum is None:
             raise ValueError("lookup row requires equals or a numeric range")
         if isinstance(self.equals, float) and not isfinite(self.equals):
@@ -108,7 +107,7 @@ class RuleExecution(ClosedRuleModel):
     rows: list[LookupRow] = Field(default_factory=list, max_length=512)
 
     @model_validator(mode="after")
-    def shape_matches_kind(self) -> "RuleExecution":
+    def shape_matches_kind(self) -> RuleExecution:
         if self.kind == "condition_effects" and not self.branches:
             raise ValueError("condition_effects requires at least one branch")
         if self.kind == "condition_effects" and (self.lookup_input or self.rows):

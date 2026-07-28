@@ -1,3 +1,3 @@
 """Compatibility imports for the migrated world repository."""
 
-from ai_kp.infrastructure.database.world import *  # noqa: F403
+from ai_kp.infrastructure.database.world import *

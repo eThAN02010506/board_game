@@ -1,7 +1,7 @@
 """Primitive field, operand, condition, and effect operations for the rule DSL."""
 
-from math import isfinite
 import re
+from math import isfinite
 from typing import Any
 
 from ai_kp.rule_authoring.models import (
@@ -10,7 +10,6 @@ from ai_kp.rule_authoring.models import (
     Effect,
     Operand,
 )
-
 
 MAX_EXECUTION_DEPTH = 32
 MAX_EXECUTION_NODES = 20_000

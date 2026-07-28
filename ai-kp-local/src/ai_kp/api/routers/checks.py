@@ -1,10 +1,5 @@
 from fastapi import APIRouter, Depends
 
-from ai_kp.application.check_service import (
-    CheckService,
-    CreateCheckCommand,
-    ResolveCheckCommand,
-)
 from ai_kp.api.dependencies import get_identity, get_repo
 from ai_kp.api.schemas import (
     SkillCheckCreate,
@@ -12,9 +7,13 @@ from ai_kp.api.schemas import (
     SkillCheckOverride,
     SkillCheckResolve,
 )
+from ai_kp.application.check_service import (
+    CheckService,
+    CreateCheckCommand,
+    ResolveCheckCommand,
+)
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
-
 
 router = APIRouter()
 

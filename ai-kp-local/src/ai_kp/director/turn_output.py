@@ -6,7 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-
 Visibility = Literal["player", "table", "kp"]
 MemoryScope = Literal[
     "campaign_fact",

@@ -21,7 +21,6 @@ from ai_kp.infrastructure.llm.model_configuration import (
     validate_local_model_path,
 )
 
-
 router = APIRouter()
 
 

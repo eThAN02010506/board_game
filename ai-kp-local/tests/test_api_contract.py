@@ -5,7 +5,6 @@ from pathlib import Path
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
 
-
 EXPECTED_HTTP_ROUTES = {
     ("GET", "/"),
     ("GET", "/health"),

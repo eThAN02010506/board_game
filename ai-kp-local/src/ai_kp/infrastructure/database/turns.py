@@ -14,11 +14,10 @@ from ai_kp.director.turn_output import (
 )
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
+from ai_kp.platform.resolution import build_check_consequence_snapshot
 from ai_kp.platform.resolution.proposals import (
     validate_proposal_resolution_boundary,
 )
-from ai_kp.platform.resolution import build_check_consequence_snapshot
-
 
 PROPOSAL_JSON_FIELDS = (
     "proposed_checks",

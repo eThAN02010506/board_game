@@ -1,7 +1,7 @@
 """Canonical scoped context assembly for the AI KP director."""
 
-import math
 import json
+import math
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -12,7 +12,6 @@ from ai_kp.director.turn_output import STRUCTURED_OUTPUT_INSTRUCTIONS
 from ai_kp.platform.facts import FactLedgerEntry, visible_fact_heads
 from ai_kp.platform.memory.npc_candidates import NpcCandidateService
 from ai_kp.platform.memory.retrieval import MemoryRetriever, tokenize
-
 
 CJK_RE = re.compile(r"[\u3400-\u9fff]")
 

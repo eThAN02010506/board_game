@@ -2,9 +2,8 @@
 
 import re
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
-
 
 WORD_RE = re.compile(r"[a-zA-Z0-9_]+")
 CJK_SEQUENCE_RE = re.compile(r"[\u3400-\u9fff]+")

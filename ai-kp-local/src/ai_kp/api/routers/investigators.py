@@ -18,10 +18,9 @@ from ai_kp.application.investigator_service import (
     InvestigatorService,
 )
 from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.platform.sessions.models import AuthenticatedMember, AuthenticatedPlayer
 from ai_kp.rulesets import DEFAULT_RULESET_ID, get_ruleset
 from ai_kp.rulesets.coc7.character.xlsx_import import MAX_XLSX_BYTES
-from ai_kp.platform.sessions.models import AuthenticatedMember, AuthenticatedPlayer
-
 
 router = APIRouter()
 

@@ -3,7 +3,6 @@
 import re
 from dataclasses import dataclass
 
-
 META_RE = re.compile(r"@(?P<key>[a-zA-Z_]+)=(?P<value>[^\s]+)")
 META_LINE_RE = re.compile(r"^\s*(?:@[a-zA-Z_]+=[^\s]+\s*)+$")
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(?P<title>.+?)\s*#*\s*$")

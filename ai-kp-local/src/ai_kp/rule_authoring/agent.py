@@ -8,7 +8,6 @@ from typing import Any
 
 from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
-
 PROMPT_VERSION = "coc7-rule-extractor-v2-compact"
 
 COMPACT_FORMAT = """{
@@ -109,7 +108,9 @@ JSON 格式：
             payload = {"rules": payload}
         rules = payload.get("rules") if isinstance(payload, dict) else None
         if not isinstance(rules, list):
-            raise ValueError("Rule extraction response requires a rules array")
+            raise ValueError(  # noqa: TRY004
+                "Rule extraction response requires a rules array"
+            )
         if len(rules) > 24:
             raise ValueError("Rule extraction response exceeded 24 candidates")
         return [candidate for candidate in rules if isinstance(candidate, dict)]

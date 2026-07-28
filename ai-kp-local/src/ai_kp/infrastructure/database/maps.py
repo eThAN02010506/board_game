@@ -5,6 +5,7 @@ import sqlite3
 from typing import Any
 
 from ai_kp.core.ids import new_id
+from ai_kp.infrastructure.database.rows import row_to_dict
 from ai_kp.platform.scenes.map_generation import (
     GeneratedLocation,
     GeneratedMap,
@@ -20,7 +21,6 @@ from ai_kp.platform.scenes.map_spec import (
     project_map_spec,
     require_valid_map_spec,
 )
-from ai_kp.infrastructure.database.rows import row_to_dict
 
 
 class MapRepository:

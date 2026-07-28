@@ -7,14 +7,13 @@ from dataclasses import dataclass
 from typing import Literal
 
 from ai_kp.rulesets.coc7.mechanics.skill_check import (
-    D100Resolution,
     RULESET_ID,
     RULESET_VERSION,
     SOURCE_REFERENCE,
+    D100Resolution,
     SuccessLevel,
     success_level,
 )
-
 
 OpposedOutcome = Literal["left_wins", "right_wins", "tie"]
 OpposedDecision = Literal["success_level", "target", "unresolved_tie"]

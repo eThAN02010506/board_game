@@ -5,7 +5,6 @@ from collections.abc import Iterable
 from ai_kp.rulesets.base import Ruleset
 from ai_kp.rulesets.coc7 import COC7_RULESET
 
-
 DEFAULT_RULESET_ID = "coc7"
 
 

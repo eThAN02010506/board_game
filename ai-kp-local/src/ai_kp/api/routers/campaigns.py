@@ -7,7 +7,6 @@ from ai_kp.application.campaign_service import CampaignService, CreateCampaignCo
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
-
 router = APIRouter()
 
 

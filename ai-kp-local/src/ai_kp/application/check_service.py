@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 
 from ai_kp.application.ports.repositories import CheckStore
-from ai_kp.rulesets import get_ruleset
 from ai_kp.platform.sessions.models import AuthenticatedMember
+from ai_kp.rulesets import get_ruleset
 
 
 @dataclass(frozen=True)

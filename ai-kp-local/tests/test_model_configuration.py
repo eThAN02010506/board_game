@@ -155,18 +155,17 @@ def test_image_model_discovery_uses_actual_provider_ids(tmp_path: Path) -> None:
     with patch(
         "ai_kp.api.routers.models.discover_openai_models",
         new=AsyncMock(return_value=["flux-period-map", "sdxl"]),
-    ) as discover:
-        with TestClient(app) as client:
-            response = client.post(
-                "/image-model-settings/discover",
-                headers=headers,
-                json={
-                    "base_url": "http://127.0.0.1:8188",
-                    "api_key": "",
-                    "model": "",
-                    "timeout_seconds": 300,
-                },
-            )
+    ) as discover, TestClient(app) as client:
+        response = client.post(
+            "/image-model-settings/discover",
+            headers=headers,
+            json={
+                "base_url": "http://127.0.0.1:8188",
+                "api_key": "",
+                "model": "",
+                "timeout_seconds": 300,
+            },
+        )
 
     assert response.status_code == 200
     assert response.json()["models"] == ["flux-period-map", "sdxl"]

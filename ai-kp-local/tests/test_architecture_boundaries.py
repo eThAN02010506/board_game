@@ -9,8 +9,8 @@ from ai_kp.api import main as compatibility_main
 from ai_kp.application.world_service import WorldService
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
-from ai_kp.infrastructure.database.facts import FactRepository
 from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
+from ai_kp.infrastructure.database.facts import FactRepository
 from ai_kp.infrastructure.database.investigators import InvestigatorRepository
 from ai_kp.infrastructure.database.maps import MapRepository
 from ai_kp.infrastructure.database.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
@@ -24,7 +24,6 @@ from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 from ai_kp.infrastructure.database.turns import TurnRepository
 from ai_kp.infrastructure.database.world import WorldRepository
 from ai_kp.infrastructure.realtime.outbox import RealtimeRepository
-
 
 PROJECT_ROOT = Path(__file__).parents[1]
 
@@ -298,10 +297,8 @@ def test_coc7_plugin_uses_canonical_ruleset_modules_not_compatibility_shims() ->
     assert not {
         name
         for name in imports
-        if name == "ai_kp.rules"
-        or name.startswith("ai_kp.rules.")
-        or name == "ai_kp.characters"
-        or name.startswith("ai_kp.characters.")
+        if name in {"ai_kp.rules", "ai_kp.characters"}
+        or name.startswith(("ai_kp.rules.", "ai_kp.characters."))
     }
 
 

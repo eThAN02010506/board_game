@@ -1,9 +1,9 @@
 """Framework-neutral lifecycle for one authenticated realtime connection."""
 
 import asyncio
+import time
 from contextlib import suppress
 from dataclasses import dataclass
-import time
 
 from ai_kp.application.realtime.messages import (
     ProtocolRejection,

@@ -1,9 +1,8 @@
 """Migration 13: backfill legacy map specs and guard map revision pointers."""
 
-from hashlib import sha256
 import json
 import sqlite3
-
+from hashlib import sha256
 
 VERSION = 13
 NAME = "backfill_map_revisions_and_guard_pointers"

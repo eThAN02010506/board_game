@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
-from ai_kp.application.session_service import SessionService
 from ai_kp.api.authz import is_local_admin, require_campaign_role
 from ai_kp.api.dependencies import (
     get_identity,
@@ -18,9 +17,9 @@ from ai_kp.api.schemas import (
     SessionSeatCreate,
     SessionSeatPcAssign,
 )
+from ai_kp.application.session_service import SessionService
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember, AuthenticatedPlayer
-
 
 router = APIRouter()
 

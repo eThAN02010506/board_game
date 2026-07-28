@@ -1,7 +1,7 @@
 """Canonical AI KP director orchestration pipeline."""
 
-import sqlite3
 import json
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
@@ -12,7 +12,6 @@ from ai_kp.director.check_consequence import (
 from ai_kp.director.context_builder import ContextAssembly, ContextBuilder, estimate_tokens
 from ai_kp.director.turn_output import KpTurnOutput, StructuredOutputError, parse_kp_turn_output
 from ai_kp.platform.ports.llm import ChatMessage, LlmClient
-
 
 CHECK_CONSEQUENCE_CONTEXT_BUDGET = 8000
 

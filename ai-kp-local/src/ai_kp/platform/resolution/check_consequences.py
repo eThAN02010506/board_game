@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import unicodedata
 from collections.abc import Iterable, Mapping
 from hashlib import sha256
-import json
 from math import isfinite
 from typing import Any
-import unicodedata
-
 
 CHECK_CONSEQUENCE_SCHEMA_VERSION = "check-consequence.v1"
 HIDDEN_CHECK_PUBLIC_NARRATION = "局势仍在发展，当前没有可公开确认的新信息。"
@@ -117,7 +116,7 @@ def _json_object(value: Any, *, field_name: str) -> dict[str, Any]:
         raise ValueError(f"{field_name} must be an object")
     normalized = _normalize_json(value, field_name=field_name)
     if not isinstance(normalized, dict):
-        raise ValueError(f"{field_name} must be an object")
+        raise ValueError(f"{field_name} must be an object")  # noqa: TRY004
     return normalized
 
 

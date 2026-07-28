@@ -4,6 +4,7 @@ from pathlib import Path
 
 import httpx
 from PIL import Image
+
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
 from ai_kp.core.db import connect

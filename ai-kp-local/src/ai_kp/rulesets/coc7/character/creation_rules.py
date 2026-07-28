@@ -5,7 +5,6 @@ from typing import Any
 from ai_kp.rulesets.coc7.character.normalization import ATTRIBUTE_KEYS
 from ai_kp.rulesets.sdk.characters import CharacterValidationIssue
 
-
 OCCUPATION_POINT_FORMULAS = {
     "edu4": ("edu", 4, None, 0),
     "edu2_app2": ("edu", 2, "app", 2),

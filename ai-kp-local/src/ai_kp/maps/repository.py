@@ -1,3 +1,3 @@
 """Compatibility imports for the migrated map repository."""
 
-from ai_kp.infrastructure.database.maps import *  # noqa: F403
+from ai_kp.infrastructure.database.maps import *

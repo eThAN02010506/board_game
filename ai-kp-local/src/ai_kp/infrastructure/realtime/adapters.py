@@ -1,9 +1,9 @@
 """Starlette and SQLite adapters for the realtime application ports."""
 
 import asyncio
+import json
 from collections.abc import Callable
 from contextlib import suppress
-import json
 from typing import Any, TypeVar
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -11,7 +11,6 @@ from fastapi import WebSocket, WebSocketDisconnect
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.realtime.ports import FrameTooLargeError, RealtimeDisconnected
 from ai_kp.platform.sessions.models import AuthenticatedMember
-
 
 SEND_TIMEOUT_SECONDS = 5.0
 MAX_CLIENT_FRAME_BYTES = 8 * 1024

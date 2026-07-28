@@ -4,8 +4,13 @@ from pathlib import Path
 
 from ai_kp.core.db import db_session
 from ai_kp.core.repository import Repository
-from ai_kp.maps.generation import generate_map
-from ai_kp.maps.generation import GeneratedLocation, GeneratedMap, GeneratedRoute, render_svg
+from ai_kp.maps.generation import (
+    GeneratedLocation,
+    GeneratedMap,
+    GeneratedRoute,
+    generate_map,
+    render_svg,
+)
 
 
 class MapGenerationTests(unittest.TestCase):

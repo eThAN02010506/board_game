@@ -4,7 +4,6 @@ import sqlite3
 
 from ai_kp.infrastructure.database.migrations.helpers import ensure_column
 
-
 VERSION = 12
 NAME = "add_versioned_map_specs_and_assets"
 

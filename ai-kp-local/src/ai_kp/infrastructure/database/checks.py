@@ -9,7 +9,6 @@ from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 from ai_kp.platform.resolution import build_check_consequence_snapshot
 
-
 _SUCCESS_LEVEL_RANK = {
     "fumble": -1,
     "failure": 0,

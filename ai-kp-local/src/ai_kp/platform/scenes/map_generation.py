@@ -1,9 +1,9 @@
 """Canonical deterministic structured-map generation and layered SVG rendering."""
 
-from dataclasses import dataclass, field
-from html import escape
 import math
 import re
+from dataclasses import dataclass, field
+from html import escape
 from typing import Any
 
 from ai_kp.platform.scenes.map_spec import (

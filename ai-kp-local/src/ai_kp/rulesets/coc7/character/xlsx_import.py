@@ -13,7 +13,6 @@ from zipfile import BadZipFile, ZipFile
 
 from ai_kp.rulesets.coc7.character.pipeline import validate_character_sheet
 
-
 MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"

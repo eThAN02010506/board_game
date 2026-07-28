@@ -17,7 +17,6 @@ from ai_kp.infrastructure.realtime.adapters import (
 )
 from ai_kp.platform.realtime.ports import FrameTooLargeError, RealtimeDisconnected
 
-
 AUTH_TIMEOUT_SECONDS = 5.0
 POLL_INTERVAL_SECONDS = 0.35
 HEARTBEAT_INTERVAL_SECONDS = 15.0
@@ -50,11 +49,11 @@ async def handle_realtime_websocket(
 __all__ = [
     "AUTH_TIMEOUT_SECONDS",
     "CLIENT_TIMEOUT_SECONDS",
-    "FrameTooLargeError",
     "HEARTBEAT_INTERVAL_SECONDS",
     "MAX_CLIENT_FRAME_BYTES",
     "POLL_INTERVAL_SECONDS",
-    "RealtimeDisconnected",
     "SEND_TIMEOUT_SECONDS",
+    "FrameTooLargeError",
+    "RealtimeDisconnected",
     "handle_realtime_websocket",
 ]

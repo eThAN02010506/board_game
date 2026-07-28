@@ -2,7 +2,6 @@
 
 import sqlite3
 
-
 VERSION = 10
 NAME = "add_per_seat_invitations"
 

@@ -10,9 +10,12 @@ from ai_kp.platform.sessions.models import AuthenticatedMember
 
 def is_local_admin(request: Request, supplied_admin_token: str | None) -> bool:
     settings = get_app_settings(request)
-    if settings.admin_token and supplied_admin_token:
-        if secrets.compare_digest(settings.admin_token, supplied_admin_token):
-            return True
+    if (
+        settings.admin_token
+        and supplied_admin_token
+        and secrets.compare_digest(settings.admin_token, supplied_admin_token)
+    ):
+        return True
     if not settings.local_admin_enabled or request.client is None:
         return False
     try:

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Literal
-import unicodedata
-
 
 FactCategory = Literal[
     "canonical_fact",
@@ -177,7 +176,7 @@ class WorldFact:
 
 def _validate_correction_fact(fact: WorldFact) -> str:
     if not isinstance(fact, WorldFact):
-        raise ValueError("correction must be a WorldFact")
+        raise TypeError("correction must be a WorldFact")
     if fact.category != "retconned" or fact.supersedes_fact_id is None:
         raise ValueError("correction must be a retconned fact")
     return fact.supersedes_fact_id
@@ -218,7 +217,7 @@ class AppendOnlyCorrectionResult:
 
     def __post_init__(self) -> None:
         if not isinstance(self.retained_fact, WorldFact):
-            raise ValueError("retained_fact must be a WorldFact")
+            raise TypeError("retained_fact must be a WorldFact")
         correction_target = _validate_correction_fact(self.appended_fact)
         if correction_target != self.retained_fact.fact_id:
             raise ValueError("Appended correction must supersede retained_fact")
@@ -241,10 +240,10 @@ class AppendOnlyCorrectionResult:
 
 
 __all__ = [
-    "AppendOnlyCorrectionCommand",
-    "AppendOnlyCorrectionResult",
     "FACT_CATEGORIES",
     "FACT_VISIBILITIES",
+    "AppendOnlyCorrectionCommand",
+    "AppendOnlyCorrectionResult",
     "FactCategory",
     "FactVisibility",
     "WorldFact",

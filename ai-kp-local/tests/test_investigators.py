@@ -183,17 +183,15 @@ def test_local_skill_recommendation_fills_budgets_and_respects_era() -> None:
     assert "coc7.cthulhu_mythos" not in allocated_keys
     assert "coc7.computer_use" not in allocated_keys
     assert "coc7.electronics" not in allocated_keys
-    assert set(
-        (
-            "coc7.art_craft_1",
-            "coc7.history",
-            "coc7.library_use",
-            "coc7.psychology",
-            "coc7.fast_talk",
-            "coc7.spot_hidden",
-            "coc7.credit_rating",
-        )
-    ).issubset(allocated_keys)
+    assert {
+        "coc7.art_craft_1",
+        "coc7.history",
+        "coc7.library_use",
+        "coc7.psychology",
+        "coc7.fast_talk",
+        "coc7.spot_hidden",
+        "coc7.credit_rating",
+    }.issubset(allocated_keys)
     photography = next(
         allocation
         for allocation in recommendation["allocations"]

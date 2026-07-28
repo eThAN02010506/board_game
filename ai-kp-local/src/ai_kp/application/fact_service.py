@@ -14,7 +14,6 @@ from ai_kp.platform.facts import (
 )
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
-
 _CATEGORY_VISIBILITY = {
     "canonical_fact": "table",
     "kp_secret": "kp",

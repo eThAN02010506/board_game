@@ -2,7 +2,6 @@
 
 import sqlite3
 
-
 VERSION = 14
 NAME = "add_image_model_configuration"
 

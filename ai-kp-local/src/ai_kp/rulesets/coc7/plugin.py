@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
-from ai_kp.rulesets.coc7.character.recommendations import recommend_coc7_skill_points
-from ai_kp.rulesets.coc7.character.skills import list_coc7_skill_catalog
+from ai_kp.rulesets.base import RulesetManifest
 from ai_kp.rulesets.coc7.character.pipeline import (
     normalize_character_sheet,
     validate_character_sheet,
 )
+from ai_kp.rulesets.coc7.character.recommendations import recommend_coc7_skill_points
+from ai_kp.rulesets.coc7.character.skills import list_coc7_skill_catalog
 from ai_kp.rulesets.coc7.character.xlsx_import import import_coc_character_xlsx
 from ai_kp.rulesets.coc7.mechanics.opposed_check import (
     OpposedParticipant,
@@ -20,7 +22,6 @@ from ai_kp.rulesets.coc7.mechanics.skill_check import (
     resolve_d100,
     secure_d100_dice,
 )
-from ai_kp.rulesets.base import RulesetManifest
 from ai_kp.rulesets.sdk.characters import CharacterSheetValidation
 
 

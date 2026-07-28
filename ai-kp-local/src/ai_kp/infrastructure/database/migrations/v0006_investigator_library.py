@@ -2,7 +2,6 @@
 
 import sqlite3
 
-
 VERSION = 6
 NAME = "add_player_owned_investigator_library"
 

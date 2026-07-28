@@ -2,7 +2,6 @@
 
 import sqlite3
 
-
 VERSION = 9
 NAME = "add_model_configuration"
 

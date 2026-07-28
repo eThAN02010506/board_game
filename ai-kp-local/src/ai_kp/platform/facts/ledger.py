@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
-from typing import Any, Iterable, Mapping
 import unicodedata
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
 from ai_kp.platform.facts.models import AppendOnlyCorrectionResult, WorldFact
-
 
 FACT_SCHEMA_VERSION = "world-fact.v1"
 FACT_ASSERTED_EVENT = "world_fact.asserted"
@@ -32,7 +32,7 @@ def _source_reference(value: Mapping[str, Any] | None) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, Mapping):
-        raise ValueError("source_reference must be an object")
+        raise TypeError("source_reference must be an object")
     try:
         encoded = json.dumps(dict(value), ensure_ascii=False, sort_keys=True, allow_nan=False)
     except (TypeError, ValueError) as exc:
@@ -41,7 +41,7 @@ def _source_reference(value: Mapping[str, Any] | None) -> dict[str, Any]:
         raise ValueError("source_reference cannot exceed 8000 encoded characters")
     decoded = json.loads(encoded)
     if not isinstance(decoded, dict):
-        raise ValueError("source_reference must be an object")
+        raise TypeError("source_reference must be an object")
     return decoded
 
 
@@ -68,7 +68,7 @@ class FactLedgerEntry:
         object.__setattr__(self, "fact_key", _identifier(self.fact_key, "fact_key"))
         object.__setattr__(self, "event_id", _identifier(self.event_id, "event_id"))
         if not isinstance(self.fact, WorldFact):
-            raise ValueError("fact must be a WorldFact")
+            raise TypeError("fact must be a WorldFact")
         if self.fact.fact_id != self.event_id:
             raise ValueError("fact_id must equal the authoritative event_id")
         if type(self.revision) is not int or self.revision < 1:
@@ -161,7 +161,7 @@ class FactLedgerEntry:
         }
 
     @classmethod
-    def from_event(cls, event: Mapping[str, Any]) -> "FactLedgerEntry":
+    def from_event(cls, event: Mapping[str, Any]) -> FactLedgerEntry:
         event_type = event.get("event_type")
         if event_type not in FACT_EVENT_TYPES:
             raise ValueError(f"Unsupported world-fact event type: {event_type}")
@@ -174,12 +174,16 @@ class FactLedgerEntry:
         else:
             payload = payload_value
         if not isinstance(payload, dict):
-            raise ValueError("World-fact event payload must be an object")
+            raise ValueError(  # noqa: TRY004
+                "World-fact event payload must be an object"
+            )
         if payload.get("schema_version") != FACT_SCHEMA_VERSION:
             raise ValueError("Unsupported world-fact schema version")
         fact_payload = payload.get("fact")
         if not isinstance(fact_payload, dict):
-            raise ValueError("World-fact event is missing its fact object")
+            raise ValueError(  # noqa: TRY004
+                "World-fact event is missing its fact object"
+            )
         fact = WorldFact(**fact_payload)
         expected_event_type = (
             FACT_RETCONNED_EVENT
@@ -268,11 +272,7 @@ def visible_fact_heads(
     for entry in project_fact_heads(entries):
         if not include_retconned and not entry.active:
             continue
-        if role == "kp":
-            visible.append(entry)
-        elif entry.fact.visibility == "table":
-            visible.append(entry)
-        elif (
+        if role == "kp" or entry.fact.visibility == "table" or (
             entry.fact.visibility == "player"
             and pc_id is not None
             and entry.fact.pc_id == pc_id

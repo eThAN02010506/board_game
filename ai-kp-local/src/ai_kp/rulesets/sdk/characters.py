@@ -3,7 +3,6 @@
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
-
 CharacterValidationLayer = Literal["structure", "ruleset", "review_policy"]
 CharacterValidationSeverity = Literal["warning", "error"]
 

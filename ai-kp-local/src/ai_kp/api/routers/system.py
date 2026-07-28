@@ -3,7 +3,6 @@ from fastapi import APIRouter, Query
 from ai_kp.planning.capabilities import list_capabilities
 from ai_kp.rulesets import list_rulesets
 
-
 router = APIRouter()
 
 

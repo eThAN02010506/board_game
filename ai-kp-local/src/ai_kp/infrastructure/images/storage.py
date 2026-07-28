@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from io import BytesIO
-from hashlib import sha256
-from pathlib import Path
 import tempfile
-from typing import Any
 import warnings
+from hashlib import sha256
+from io import BytesIO
+from pathlib import Path
+from typing import Any
 
 from PIL import Image, UnidentifiedImageError
 
 from ai_kp.platform.ports.images import StoredMapAsset
-
 
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
 MAX_IMAGE_PIXELS = 16_777_216

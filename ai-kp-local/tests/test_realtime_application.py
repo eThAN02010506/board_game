@@ -11,7 +11,6 @@ from ai_kp.application.realtime.session import RealtimePolicy, RealtimeSession
 from ai_kp.platform.realtime import RealtimeDisconnected
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
-
 IDENTITY = AuthenticatedMember(
     member_id="member-1",
     session_id="session-1",

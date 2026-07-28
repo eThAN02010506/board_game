@@ -13,7 +13,6 @@ from ai_kp.infrastructure.knowledge.pdf_ingestion import MAX_PDF_BYTES, extract_
 from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
-
 router = APIRouter()
 
 

@@ -6,8 +6,7 @@ test imports can continue to use ``ai_kp.api.main``.
 
 from ai_kp.bootstrap.composition import app, create_app
 from ai_kp.infrastructure.llm.openai_compatible import (
-    OpenAICompatibleClient as OpenAICompatibleClient,
+    OpenAICompatibleClient,
 )
-
 
 __all__ = ["OpenAICompatibleClient", "app", "create_app"]

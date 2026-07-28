@@ -24,7 +24,6 @@ from ai_kp.application.world_service import (
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
-
 router = APIRouter()
 
 

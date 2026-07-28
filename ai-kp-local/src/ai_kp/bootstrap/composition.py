@@ -22,13 +22,13 @@ from ai_kp.api.routers import (
 )
 from ai_kp.api.routers.debug import DebugTelemetry, DebugTelemetryMiddleware
 from ai_kp.bootstrap.settings import Settings, get_settings
-from ai_kp.infrastructure.database.schema import connect, init_db
 from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.infrastructure.llm.local_runtime import LocalModelRuntime
-from ai_kp.infrastructure.llm.model_configuration import apply_model_configuration
+from ai_kp.infrastructure.database.schema import connect, init_db
 from ai_kp.infrastructure.images.model_configuration import (
     apply_image_model_configuration,
 )
+from ai_kp.infrastructure.llm.local_runtime import LocalModelRuntime
+from ai_kp.infrastructure.llm.model_configuration import apply_model_configuration
 
 
 @asynccontextmanager

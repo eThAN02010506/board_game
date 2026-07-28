@@ -4,7 +4,6 @@ from typing import Any, Literal
 from ai_kp.application.ports.repositories import WorldStore
 from ai_kp.platform.modules.ingestion import chunk_plaintext_module
 
-
 WorldView = Literal["player", "kp"]
 
 

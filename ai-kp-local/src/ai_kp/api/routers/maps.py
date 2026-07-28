@@ -3,14 +3,6 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from ai_kp.application.map_image_service import MapImageService
-from ai_kp.application.errors import KpSessionEndedError
-from ai_kp.application.map_service import (
-    GenerateMapCommand,
-    MapService,
-    MoveTokenCommand,
-    PlaceTokenCommand,
-)
 from ai_kp.api.authz import campaign_for_map, campaign_for_token, require_campaign_role
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.schemas import (
@@ -20,14 +12,21 @@ from ai_kp.api.schemas import (
     MapTokenCreate,
     MapTokenMove,
 )
+from ai_kp.application.errors import KpSessionEndedError
+from ai_kp.application.map_image_service import MapImageService
+from ai_kp.application.map_service import (
+    GenerateMapCommand,
+    MapService,
+    MoveTokenCommand,
+    PlaceTokenCommand,
+)
 from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.images.openai_compatible import OpenAICompatibleImageProvider
 from ai_kp.infrastructure.images.storage import MapAssetFileStore
-from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.llm.model_configuration import normalize_openai_base_url
-from ai_kp.platform.sessions.models import AuthenticatedMember
 from ai_kp.platform.scenes.map_spec import build_image_prompt
-
+from ai_kp.platform.sessions.models import AuthenticatedMember
 
 router = APIRouter()
 

@@ -2,16 +2,17 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import patch
 
+from ai_kp.application.rulebook_service import RulebookService
 from ai_kp.core.db import connect, init_db
 from ai_kp.core.repository import Repository
-from ai_kp.application.rulebook_service import RulebookService
+from ai_kp.infrastructure.knowledge.minirag import MiniRagOriginalIndex
 from ai_kp.rulebook.engine import RuleExecutionError, execute_rule
 from ai_kp.rulebook.models import RuleObject
 from ai_kp.rulebook.pdf_ingestion import extract_rulebook_pdf
 from ai_kp.rulebook.validation import RuleValidator
-from ai_kp.infrastructure.knowledge.minirag import MiniRagOriginalIndex
 
 
 class _FakePage:
@@ -24,7 +25,7 @@ class _FakePage:
 
 class _FakeReader:
     is_encrypted = False
-    metadata = {"/Title": "测试规则书"}
+    metadata: ClassVar[dict[str, str]] = {"/Title": "测试规则书"}
 
     def __init__(self, _stream, strict=True):
         self.pages = [

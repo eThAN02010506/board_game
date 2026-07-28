@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from collections import Counter, deque
-from datetime import UTC, datetime
 import os
-from pathlib import Path
 import platform
 import shutil
 import sqlite3
 import time
+from collections import Counter, deque
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+
 from fastapi import APIRouter, Depends, Header, Query, Request, WebSocket
 from fastapi.responses import HTMLResponse
 from fastapi.routing import APIRoute, APIWebSocketRoute
@@ -20,11 +21,8 @@ from ai_kp.api.authz import require_local_admin
 from ai_kp.api.debug_dashboard import DEBUG_DASHBOARD_HTML
 from ai_kp.api.dependencies import get_app_settings, get_repo
 from ai_kp.api.uploads import read_limited_body, safe_upload_filename
-from ai_kp.rulesets.coc7.character.xlsx_import import (
-    MAX_XLSX_BYTES,
-    import_coc_character_xlsx,
-)
 from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.database.migrations import LATEST_SCHEMA_VERSION
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.llm.local_runtime import LocalModelRuntime
 from ai_kp.infrastructure.llm.model_configuration import (
@@ -32,8 +30,10 @@ from ai_kp.infrastructure.llm.model_configuration import (
     public_model_configuration,
 )
 from ai_kp.infrastructure.realtime.websocket import handle_realtime_websocket
-from ai_kp.infrastructure.database.migrations import LATEST_SCHEMA_VERSION
-
+from ai_kp.rulesets.coc7.character.xlsx_import import (
+    MAX_XLSX_BYTES,
+    import_coc_character_xlsx,
+)
 
 router = APIRouter(tags=["debug"])
 
@@ -407,7 +407,9 @@ async def model_probe(
             "latency_ms": round((time.perf_counter() - started) * 1000, 2),
             "runtime": _runtime(request).status(),
         }
-    except Exception as exc:
+    # A diagnostic endpoint must report failures from any subsystem instead of
+    # turning the entire debug console request into another opaque 500 response.
+    except Exception as exc:  # noqa: BLE001
         return {
             "ok": False,
             "base_url": settings.llm_base_url,

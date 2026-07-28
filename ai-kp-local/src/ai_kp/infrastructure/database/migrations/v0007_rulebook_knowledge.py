@@ -2,7 +2,6 @@
 
 import sqlite3
 
-
 VERSION = 7
 NAME = "add_rulebook_dual_storage"
 

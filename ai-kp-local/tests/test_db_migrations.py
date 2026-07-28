@@ -6,7 +6,6 @@ import pytest
 from ai_kp.core.db import connect, init_db
 from ai_kp.storage.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
 
-
 LEGACY_SCHEMA = """
 CREATE TABLE maps (
   id TEXT PRIMARY KEY,

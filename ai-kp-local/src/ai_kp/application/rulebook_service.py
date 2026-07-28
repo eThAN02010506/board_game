@@ -120,7 +120,9 @@ class RulebookService:
                                 accepted += 1
                             else:
                                 rejected += 1
-                        except Exception as exc:
+                        # Third-party validators can raise library-specific errors.
+                        # A bad candidate is isolated and recorded without aborting its chunk.
+                        except Exception as exc:  # noqa: BLE001
                             self.repo.record_rule_validation_issue(
                                 source_id,
                                 validation_layer="schema_or_validation",
@@ -131,7 +133,9 @@ class RulebookService:
                             )
                             rejected += 1
                     self.repo.mark_rule_chunk(chunk["id"], extraction_status="completed")
-                except Exception as exc:
+                # Model and parser failures are persisted per chunk so later chunks
+                # can continue and the failed chunk can be retried independently.
+                except Exception as exc:  # noqa: BLE001
                     self.repo.mark_rule_chunk(chunk["id"], extraction_status="failed")
                     self.repo.record_rule_validation_issue(
                         source_id,
@@ -178,7 +182,9 @@ class RulebookService:
             chunk_ids = await self._index(source).retrieve(question, top_k)
         except OriginalTextIndexUnavailableError:
             backend = "lexical_fallback"
-        except Exception:
+        # MiniRAG is optional. Any backend-specific failure must preserve the
+        # deterministic lexical fallback instead of breaking rule lookup.
+        except Exception:  # noqa: BLE001
             backend = "lexical_fallback"
         chunks = []
         for chunk_id in chunk_ids:
