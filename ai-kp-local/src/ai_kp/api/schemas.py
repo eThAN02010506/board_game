@@ -11,6 +11,50 @@ from ai_kp.director.turn_output import (
 )
 
 
+class HealthResponse(BaseModel):
+    ok: bool
+
+
+class CampaignResponse(BaseModel):
+    id: str
+    title: str
+    system: str
+    current_time: str | None = None
+    created_at: str
+
+
+class BackupFileResponse(BaseModel):
+    archive_path: str
+    size: int = Field(ge=0)
+    sha256: str = Field(min_length=64, max_length=64)
+
+
+class BackupManifestResponse(BaseModel):
+    format_version: int
+    app_version: str
+    schema_version: int
+    created_at: str
+    files: list[BackupFileResponse]
+
+
+class BackupSummaryResponse(BaseModel):
+    filename: str
+    size: int = Field(ge=0)
+    created_at: str
+
+
+class BackupCreateResponse(BaseModel):
+    filename: str
+    size: int = Field(ge=0)
+    manifest: BackupManifestResponse
+
+
+class BackupVerifyResponse(BaseModel):
+    ok: bool
+    filename: str
+    manifest: BackupManifestResponse
+
+
 class CampaignCreate(BaseModel):
     title: str
     system: str = "coc7"

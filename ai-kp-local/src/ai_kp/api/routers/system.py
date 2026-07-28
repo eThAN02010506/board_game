@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Query
 
+from ai_kp.api.schemas import HealthResponse
 from ai_kp.planning.capabilities import list_capabilities
 from ai_kp.rulesets import list_rulesets
 
 router = APIRouter()
 
 
-@router.get("/health")
-def health() -> dict:
-    return {"ok": True}
+@router.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    return HealthResponse(ok=True)
 
 
 @router.get("/rulesets")

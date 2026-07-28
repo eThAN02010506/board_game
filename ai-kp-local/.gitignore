@@ -15,4 +15,7 @@ src/model/
 node_modules/
 .pnpm-store/
 dist/
+.playwright/
+playwright-report/
+test-results/
 .idea/

@@ -41,3 +41,19 @@ Run the focused deterministic suite with:
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
   .venv/bin/python -m unittest tests.test_memory tests.test_context_builder
 ```
+# Automated retrieval benchmark
+
+The deterministic benchmark accepts a JSON array anchored to durable memory
+IDs. Each case declares the query, campaign/PC visibility scope, expected IDs,
+forbidden IDs and `top_k`. Run it against a copied test database:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/evaluate_memory_retrieval.py \
+  data/evaluation/memory-cases.json \
+  --db data/evaluation/ai-kp-copy.sqlite3
+```
+
+The report includes Recall@k, reciprocal rank, and forbidden-result hits.
+Any forbidden hit returns a non-zero process status. Keep KP-secret IDs and
+cross-campaign IDs in `forbidden_ids` so retriever changes cannot silently
+weaken spoiler isolation.

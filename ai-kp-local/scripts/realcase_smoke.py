@@ -16,7 +16,6 @@ from typing import Any
 
 import httpx
 
-
 CJK_RE = re.compile(r"[\u3400-\u9fff]")
 
 

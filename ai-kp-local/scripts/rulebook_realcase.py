@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -86,7 +85,7 @@ async def run(args: argparse.Namespace) -> None:
                             "validation_passed": report["passed"],
                         }
                     )
-                except Exception as exc:
+                except (KeyError, TypeError, ValueError) as exc:
                     outcomes.append({"status": "rejected", "error": str(exc)[:500]})
             print("MODEL", model, flush=True)
             print("EXTRACT", {"page": args.extract_page, "outcomes": outcomes}, flush=True)

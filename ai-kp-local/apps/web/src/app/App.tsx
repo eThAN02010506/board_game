@@ -2,7 +2,7 @@ import {
   AlertCircle,
   Brain
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   credentialBridge,
   requestJson,
@@ -29,15 +29,12 @@ import { useCredentials } from "../auth/credentials";
 import { ActionPanel } from "../features/actions/ActionPanel";
 import { CampaignPanel } from "../features/campaigns/CampaignPanel";
 import { CheckPanel } from "../features/checks/CheckPanel";
-import { InvestigatorPage } from "../features/investigators/InvestigatorPage";
 import { MapGeneratorPanel } from "../features/maps/MapGeneratorPanel";
 import { MapStage } from "../features/maps/MapStage";
-import { ModelSettingsPage } from "../features/models/ModelSettingsPage";
 import { TokenPanel } from "../features/maps/TokenPanel";
 import { PlanningPanel } from "../features/planning/PlanningPanel";
 import { useCapabilities } from "../features/planning/useCapabilities";
 import { ProposalPanel } from "../features/proposals/ProposalPanel";
-import { RulebookPage } from "../features/rules/RulebookPage";
 import { SessionPanel } from "../features/sessions/SessionPanel";
 import { useWorkspaceRealtime } from "../realtime/provider";
 import { AppLayout } from "./layout/AppLayout";
@@ -51,6 +48,22 @@ import {
   writeCampaignToken
 } from "../session/session-storage";
 import "../styles.css";
+
+const InvestigatorPage = lazy(() =>
+  import("../features/investigators/InvestigatorPage").then((module) => ({
+    default: module.InvestigatorPage
+  }))
+);
+const ModelSettingsPage = lazy(() =>
+  import("../features/models/ModelSettingsPage").then((module) => ({
+    default: module.ModelSettingsPage
+  }))
+);
+const RulebookPage = lazy(() =>
+  import("../features/rules/RulebookPage").then((module) => ({
+    default: module.RulebookPage
+  }))
+);
 
 function stringifyForLog(value: unknown) {
   const secretFields = new Set([
@@ -1245,12 +1258,22 @@ export default function App() {
     >
 
         {activeNav === "investigators" && (
-          <InvestigatorPage campaign={activeCampaign} identity={authIdentity} />
+          <Suspense fallback={<section className="page-card">正在载入调查员工作台……</section>}>
+            <InvestigatorPage campaign={activeCampaign} identity={authIdentity} />
+          </Suspense>
         )}
 
-        {activeNav === "rules" && <RulebookPage identity={authIdentity} />}
+        {activeNav === "rules" && (
+          <Suspense fallback={<section className="page-card">正在载入规则知识……</section>}>
+            <RulebookPage identity={authIdentity} />
+          </Suspense>
+        )}
 
-        {activeNav === "models" && <ModelSettingsPage />}
+        {activeNav === "models" && (
+          <Suspense fallback={<section className="page-card">正在载入模型设置……</section>}>
+            <ModelSettingsPage />
+          </Suspense>
+        )}
 
         {activeNav === "campaigns" && <div className="page-grid campaign-page-grid">
           <CampaignPanel

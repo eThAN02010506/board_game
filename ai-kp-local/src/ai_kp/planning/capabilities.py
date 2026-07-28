@@ -266,10 +266,13 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="semantic_memory_search",
         label="本地语义记忆检索",
-        status="planned",
+        status="partial",
         phase="F3",
         audience="all",
-        summary="在现有词法检索之外增加可选的本地 FTS/向量索引、重建和可解释召回。",
+        summary=(
+            "已有同步更新且可重建的 SQLite FTS5 trigram 候选层，并在召回不足时回退到"
+            "中文二元词检索；尚缺可选本地向量、reranker、召回解释 UI 和固定评测集。"
+        ),
         dependencies=("memory_foundation", "memory_workspace"),
         acceptance=("关闭模型并重启后索引可重建，召回结果显示来源且继续遵守角色可见性。",),
     ),
@@ -349,12 +352,18 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="campaign_backup_restore",
         label="本地备份、导出与恢复",
-        status="planned",
+        status="available",
         phase="F4",
         audience="kp",
-        summary="打包 SQLite、地图资产、模组来源和版本信息，支持校验、恢复与迁移到另一台本地设备。",
+        summary=(
+            "可在线快照 SQLite 并打包地图资产、规则索引、版本与逐文件 SHA-256；"
+            "支持管理员下载/校验和停服后的安全恢复。"
+        ),
         dependencies=("session_roles", "map_workspace", "memory_foundation"),
-        acceptance=("从备份恢复后地图、角色、NPC、时间线和审批审计一致，损坏备份不会覆盖现有数据。",),
+        acceptance=(
+            "从备份恢复后地图、角色、NPC、时间线和审批审计一致，损坏备份不会覆盖现有数据。",
+            "恢复必须先通过 ZIP 路径、文件数量、总大小、哈希、schema 版本与 SQLite 完整性校验。",
+        ),
     ),
     Capability(
         id="human_kp_modes",

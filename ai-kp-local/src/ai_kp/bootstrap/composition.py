@@ -3,9 +3,11 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ai_kp.api.errors import register_error_handlers
 from ai_kp.api.routers import (
+    backups,
     campaigns,
     checks,
     debug,
@@ -21,6 +23,10 @@ from ai_kp.api.routers import (
     world,
 )
 from ai_kp.api.routers.debug import DebugTelemetry, DebugTelemetryMiddleware
+from ai_kp.api.security import (
+    SecurityHeadersMiddleware,
+    SensitiveOperationRateLimitMiddleware,
+)
 from ai_kp.bootstrap.settings import Settings, get_settings
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.schema import connect, init_db
@@ -69,6 +75,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resolved_settings.db_path.parent / "model-runtime.log"
     )
     app.state.debug_telemetry = DebugTelemetry()
+    if resolved_settings.deployment_mode == "lan":
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=resolved_settings.trusted_host_list,
+        )
+        app.add_middleware(
+            SensitiveOperationRateLimitMiddleware,
+            requests=resolved_settings.sensitive_rate_limit_requests,
+            window_seconds=resolved_settings.sensitive_rate_limit_window_seconds,
+        )
     app.add_middleware(DebugTelemetryMiddleware, telemetry=app.state.debug_telemetry)
     app.add_middleware(
         CORSMiddleware,
@@ -77,10 +93,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Add last so security headers wrap CORS, host rejection, rate limits, and route errors.
+    app.add_middleware(SecurityHeadersMiddleware)
     register_error_handlers(app)
 
     domain_routers = (
         debug.router,
+        backups.router,
         system.router,
         realtime.router,
         campaigns.router,

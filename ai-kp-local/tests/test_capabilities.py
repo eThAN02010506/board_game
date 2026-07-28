@@ -43,13 +43,20 @@ class CapabilityPlaceholderTests(unittest.TestCase):
             "map_reveal_editor",
             "image_map_generation",
             "model_quantization_profiles",
-            "campaign_backup_restore",
             "human_kp_modes",
             "voice_companion",
             "webrtc_rooms",
         }
         self.assertEqual(expected, set(unfinished))
         self.assertTrue(all(status in {"partial", "planned"} for status in unfinished.values()))
+
+    def test_backup_is_available_and_semantic_search_has_a_lexical_baseline(self) -> None:
+        capabilities = {item.id: item for item in CAPABILITIES}
+
+        self.assertEqual(capabilities["campaign_backup_restore"].status, "available")
+        self.assertIn("SHA-256", capabilities["campaign_backup_restore"].summary)
+        self.assertEqual(capabilities["semantic_memory_search"].status, "partial")
+        self.assertIn("FTS5", capabilities["semantic_memory_search"].summary)
 
     def test_world_fact_plan_preserves_event_authority_and_epistemic_boundaries(self) -> None:
         capability = next(

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from ai_kp.api.authz import is_local_admin, require_local_admin
 from ai_kp.api.dependencies import get_optional_identity, get_repo
-from ai_kp.api.schemas import CampaignCreate
+from ai_kp.api.schemas import CampaignCreate, CampaignResponse
 from ai_kp.application.campaign_service import CampaignService, CreateCampaignCommand
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
@@ -10,7 +10,7 @@ from ai_kp.platform.sessions.models import AuthenticatedMember
 router = APIRouter()
 
 
-@router.get("/campaigns")
+@router.get("/campaigns", response_model=list[CampaignResponse])
 def list_campaigns(
     request: Request,
     x_ai_kp_admin_token: str | None = Header(default=None),
@@ -25,7 +25,7 @@ def list_campaigns(
     raise HTTPException(status_code=401, detail="Session token required")
 
 
-@router.post("/campaigns")
+@router.post("/campaigns", response_model=CampaignResponse)
 def create_campaign(
     payload: CampaignCreate,
     _admin: None = Depends(require_local_admin),

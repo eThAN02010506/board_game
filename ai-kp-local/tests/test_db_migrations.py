@@ -107,6 +107,9 @@ def test_init_db_migrates_legacy_schema_once_and_is_idempotent(tmp_path: Path) -
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE name = 'image_model_configuration'"
         ).fetchone()
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'memories_fts'"
+        ).fetchone()
         legacy_map = connection.execute(
             "SELECT current_revision_id FROM maps LIMIT 1"
         ).fetchone()

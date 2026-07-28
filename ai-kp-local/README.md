@@ -36,6 +36,9 @@ KP 本被视为带来源的权威大纲而非完整世界清单。AI 可以为�
 - 地图 `draft -> published` 发布边界
 - API 合同、应用服务、权限、数据库迁移、实时同步与核心域的自动测试
 - 后端根路径 Debug 调试台；集中查看模型、SQLite、路由、请求、日志，并提供 API、Excel 与 WebSocket 探针
+- 可校验的完整本地备份；在线快照 SQLite、地图资产与规则索引，停服后安全恢复
+- SQLite FTS5 trigram 记忆候选索引；短词或非连续中文查询自动回退到原有词法召回
+- `local`/`lan` 部署模式；LAN 模式启用 Host allowlist、敏感操作限流与管理员口令强制校验
 
 ## 快速开始
 
@@ -148,6 +151,7 @@ ai-kp-local/
 目标目录骨架、当前实现与迁移位置的对应关系，以及占位文件启用条件见 [`docs/ARCHITECTURE_SKELETON.md`](docs/ARCHITECTURE_SKELETON.md)。
 规则书 PDF 摄取、MiniRAG 隔离索引、三层校验、权限和真实验收见 [`docs/RULEBOOK_KNOWLEDGE.md`](docs/RULEBOOK_KNOWLEDGE.md)。
 当前仅支持 CoC、上传规则书与可执行插件的区别，以及未来第二规则系统的接入条件见 [`docs/RULESET_BOUNDARY.md`](docs/RULESET_BOUNDARY.md)。
+备份包格式、在线快照、完整性校验和停服恢复步骤见 [`docs/BACKUP_AND_RECOVERY.md`](docs/BACKUP_AND_RECOVERY.md)。
 事件权威的世界事实分类、追加式纠错、角色可见性与 AI 上下文边界见 [`docs/WORLD_FACT_LEDGER.md`](docs/WORLD_FACT_LEDGER.md)。
 地图 MapSpec、时代约束、图片安全投影、版本/缓存和真实验收边界见 [`docs/MAP_GENERATION.md`](docs/MAP_GENERATION.md)。
 
@@ -166,6 +170,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest -q
 cd apps/web
 pnpm test
 pnpm run build
+pnpm exec playwright install chromium  # 首次运行
+pnpm e2e
 ```
 
 与结构迁移直接相关的快速回归集是：

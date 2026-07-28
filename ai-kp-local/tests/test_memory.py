@@ -183,6 +183,58 @@ class MemoryTests(unittest.TestCase):
                 self.assertEqual([item.id for item in first_run], expected_ids)
                 self.assertEqual([item.id for item in second_run], expected_ids)
 
+    def test_fts_index_stays_synchronized_and_preserves_visibility_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "fts.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("雾港 1928")
+                visible = repo.add_memory(
+                    campaign_id=campaign["id"],
+                    scope="clue",
+                    visibility="table",
+                    text="钟楼地下室藏有一条秘密通道。",
+                )
+                repo.add_memory(
+                    campaign_id=campaign["id"],
+                    scope="clue",
+                    visibility="kp",
+                    text="钟楼地下室藏有神话生物。",
+                )
+                retriever = MemoryRetriever(connection)
+
+                results = retriever.retrieve(
+                    "调查钟楼地下室",
+                    campaign_id=campaign["id"],
+                    visibility=("table",),
+                )
+                indexed_count = connection.execute(
+                    "SELECT COUNT(*) FROM memories_fts"
+                ).fetchone()[0]
+
+                self.assertEqual([item.id for item in results], [visible["id"]])
+                self.assertEqual(indexed_count, 2)
+
+                connection.execute(
+                    "UPDATE memories SET text = '旧码头仓库已被封锁。' WHERE id = ?",
+                    (visible["id"],),
+                )
+                self.assertEqual(
+                    retriever.retrieve(
+                        "钟楼地下室",
+                        campaign_id=campaign["id"],
+                        visibility=("table",),
+                    ),
+                    [],
+                )
+                self.assertEqual(
+                    [item.id for item in retriever.retrieve(
+                        "旧码头仓库",
+                        campaign_id=campaign["id"],
+                        visibility=("table",),
+                    )],
+                    [visible["id"]],
+                )
+
     def test_npc_candidate_requires_reasonable_match(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.sqlite3"
