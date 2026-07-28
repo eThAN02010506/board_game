@@ -9,6 +9,10 @@ from ai_kp.rulesets.coc7.character.pipeline import (
     validate_character_sheet,
 )
 from ai_kp.rulesets.coc7.character.xlsx_import import import_coc_character_xlsx
+from ai_kp.rulesets.coc7.mechanics.opposed_check import (
+    OpposedParticipant,
+    resolve_opposed,
+)
 from ai_kp.rulesets.coc7.mechanics.skill_check import (
     RULESET_ID,
     RULESET_VERSION,
@@ -37,6 +41,7 @@ class Coc7Ruleset:
             "skill_catalog",
             "skill_recommendation",
             "skill_check",
+            "opposed_check",
         ),
     )
 
@@ -87,6 +92,21 @@ class Coc7Ruleset:
             bonus_dice=bonus_dice,
             ones_digit=int(raw_dice["ones_digit"]),
             tens_digits=tuple(int(item) for item in raw_dice["tens_digits"]),
+        ).as_dict()
+
+    def resolve_opposed_check(
+        self,
+        *,
+        left_participant_id: str,
+        left_target: int,
+        left_roll: int,
+        right_participant_id: str,
+        right_target: int,
+        right_roll: int,
+    ) -> dict[str, Any]:
+        return resolve_opposed(
+            OpposedParticipant(left_participant_id, left_target, left_roll),
+            OpposedParticipant(right_participant_id, right_target, right_roll),
         ).as_dict()
 
 

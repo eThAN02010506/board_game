@@ -52,6 +52,19 @@ Conflicts become `quarantined`. Only `validated` objects can be executed. Valida
 candidate: one truncated or malformed object does not discard valid siblings from the same model
 response.
 
+## Runtime safety envelope
+
+The executable schema rejects unknown fields, malformed or excessively deep field paths, mixed
+execution shapes, non-finite numbers, and rule objects above the fixed operation budget. Runtime
+inputs must be inert JSON-shaped values; validation happens before copying, so custom Python
+objects, copy hooks, cyclic or aliased containers, excessive depth, and oversized collections
+never enter the executor.
+
+Lookup type errors, invalid arithmetic, and non-finite results are normalized to
+`RuleExecutionError`. Successful results are validated again before returning. These limits make
+rule execution deterministic and bounded; they do not turn extracted natural language into
+executable code.
+
 ## API
 
 Rulebook mutation requires local administrator access:

@@ -5,9 +5,11 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass
+from typing import Any
 
 from ai_kp.director.prompts import KP_SYSTEM_PROMPT
 from ai_kp.director.turn_output import STRUCTURED_OUTPUT_INSTRUCTIONS
+from ai_kp.platform.facts import FactLedgerEntry, visible_fact_heads
 from ai_kp.platform.memory.npc_candidates import NpcCandidateService
 from ai_kp.platform.memory.retrieval import MemoryRetriever, tokenize
 
@@ -47,6 +49,8 @@ class ContextBuilder:
         profession_hint: str | None = None,
         active_spoiler_tags: tuple[str, ...] = (),
         visibility_scope: str = "kp",
+        output_instructions: str = STRUCTURED_OUTPUT_INSTRUCTIONS,
+        additional_sources: tuple[dict[str, Any], ...] = (),
     ) -> ContextAssembly:
         allowed_visibility = ("player", "table", "kp") if visibility_scope == "kp" else ("player", "table")
         included: list[dict] = []
@@ -67,6 +71,12 @@ class ContextBuilder:
             }
         )
         self._add_pc_context(campaign_id, pc_id, visibility_scope, included)
+        self._add_world_facts(
+            campaign_id,
+            pc_id,
+            visibility_scope,
+            included,
+        )
 
         memories = MemoryRetriever(self.connection).retrieve(
             player_action,
@@ -117,8 +127,15 @@ class ContextBuilder:
             included,
             excluded,
         )
+        # Trusted use-case sources (for example deterministic check results)
+        # must be considered before optional memories and module excerpts.
+        included[1:1] = [dict(source) for source in additional_sources]
 
-        selected, budget_excluded = self._fit_budget(player_action, included)
+        selected, budget_excluded = self._fit_budget(
+            player_action,
+            included,
+            output_instructions,
+        )
         excluded.extend(budget_excluded)
         sections = "\n\n".join(
             f"[{source['kind']}] id={source['id']} label={source['label']}\n{source['content']}"
@@ -132,7 +149,7 @@ class ContextBuilder:
 
 候选 NPC 只表示“可能自然出现”，不得强制安排出场。
 
-{STRUCTURED_OUTPUT_INSTRUCTIONS}""".strip()
+{output_instructions}""".strip()
         messages = [
             {"role": "system", "content": KP_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -240,10 +257,56 @@ class ContextBuilder:
                 }
             )
 
+    def _add_world_facts(
+        self,
+        campaign_id: str,
+        pc_id: str | None,
+        visibility_scope: str,
+        included: list[dict],
+    ) -> None:
+        rows = self.connection.execute(
+            """
+            SELECT * FROM events
+            WHERE campaign_id = ?
+              AND event_type IN ('world_fact.asserted', 'world_fact.retconned')
+            ORDER BY created_at, id
+            """,
+            (campaign_id,),
+        ).fetchall()
+        entries = [FactLedgerEntry.from_event(dict(row)) for row in rows]
+        for entry in visible_fact_heads(
+            entries,
+            role=visibility_scope,
+            pc_id=pc_id,
+        ):
+            owner = (
+                f"；仅角色 {entry.fact.pc_id} 的认知"
+                if entry.fact.pc_id is not None
+                else ""
+            )
+            included.append(
+                {
+                    "kind": "world_fact",
+                    "id": entry.event_id,
+                    "label": f"{entry.fact.category}:{entry.fact.subject}",
+                    "content": (
+                        f"类别：{entry.fact.category}{owner}；"
+                        f"主语：{entry.fact.subject}；"
+                        f"关系：{entry.fact.predicate}；"
+                        f"内容：{entry.fact.object_text}"
+                    ),
+                    "visibility": entry.fact.visibility,
+                    "fact_key": entry.fact_key,
+                    "revision": entry.revision,
+                }
+            )
+
     def _add_recent_events(self, campaign_id: str, visibility: tuple[str, ...], included: list[dict]) -> None:
         placeholders = ",".join("?" for _ in visibility)
         rows = self.connection.execute(
-            f"""SELECT * FROM events WHERE campaign_id = ? AND visibility IN ({placeholders})
+            f"""SELECT * FROM events
+            WHERE campaign_id = ? AND visibility IN ({placeholders})
+              AND event_type NOT LIKE 'world_fact.%'
             ORDER BY created_at DESC LIMIT 5""",
             (campaign_id, *visibility),
         ).fetchall()
@@ -302,27 +365,48 @@ class ContextBuilder:
             source["excluded_reason"] = "module_chunk_limit"
             excluded.append(self._without_content(source))
 
-    def _fit_budget(self, player_action: str, sources: list[dict]) -> tuple[list[dict], list[dict]]:
+    def _fit_budget(
+        self,
+        player_action: str,
+        sources: list[dict],
+        output_instructions: str,
+    ) -> tuple[list[dict], list[dict]]:
         reserved = (
             estimate_tokens(KP_SYSTEM_PROMPT)
             + estimate_tokens(player_action)
-            + estimate_tokens(STRUCTURED_OUTPUT_INSTRUCTIONS)
+            + estimate_tokens(output_instructions)
             + 200
         )
         used = reserved
         selected: list[dict] = []
         excluded: list[dict] = []
-        for source in sources:
+        required_sources = [
+            source for source in sources if source.get("required") is True
+        ]
+        optional_sources = [
+            source for source in sources if source.get("required") is not True
+        ]
+        for source in required_sources:
             cost = estimate_tokens(
                 f"{source['kind']} {source['id']} {source['label']} {source['content']}"
             ) + 8
-            if used + cost <= self.max_context_tokens:
-                selected.append(source)
-                used += cost
-            else:
+            if used + cost > self.max_context_tokens:
+                raise ValueError(
+                    f"Required context source exceeds token budget: {source['kind']}"
+                )
+            selected.append(source)
+            used += cost
+        for source in optional_sources:
+            cost = estimate_tokens(
+                f"{source['kind']} {source['id']} {source['label']} {source['content']}"
+            ) + 8
+            if used + cost > self.max_context_tokens:
                 rejected = dict(source)
                 rejected["excluded_reason"] = "token_budget"
                 excluded.append(self._without_content(rejected))
+                continue
+            selected.append(source)
+            used += cost
         return selected, excluded
 
     @staticmethod

@@ -147,6 +147,7 @@ def _image_provider(request: Request, settings: Settings):
         settings.image_api_key,
         settings.image_model,
         timeout_seconds=settings.image_timeout_seconds,
+        client=getattr(request.app.state, "http_client", None),
     )
 
 

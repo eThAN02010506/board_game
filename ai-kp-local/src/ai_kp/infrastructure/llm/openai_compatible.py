@@ -14,12 +14,14 @@ class OpenAICompatibleClient:
         *,
         timeout_seconds: float = 300,
         max_tokens: int = 4096,
+        client: httpx.AsyncClient | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_tokens = max_tokens
+        self.client = client
 
     async def complete(self, messages: list[ChatMessage], temperature: float = 0.7) -> str:
         payload = {
@@ -28,23 +30,38 @@ class OpenAICompatibleClient:
             "max_tokens": self.max_tokens,
             "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
         }
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                json=payload,
-                headers=headers,
-            )
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                detail = response.text.replace("\n", " ")[:1000]
-                raise RuntimeError(
-                    f"LLM HTTP {response.status_code} from {self.base_url}: {detail}"
-                ) from exc
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        try:
+            if self.client is None:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                        timeout=self.timeout_seconds,
+                    )
+            else:
+                response = await self.client.post(
+                    f"{self.base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=self.timeout_seconds,
+                )
+        except httpx.RequestError as exc:
+            raise RuntimeError(f"无法连接模型服务 {self.base_url}：{exc}") from exc
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = response.text.replace("\n", " ")[:1000]
+            raise RuntimeError(
+                f"LLM HTTP {response.status_code} from {self.base_url}: {detail}"
+            ) from exc
+        try:
             data = response.json()
-        choice = data["choices"][0]
-        message = choice["message"]
+            choice = data["choices"][0]
+            message = choice["message"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("模型服务返回了无效的 OpenAI-compatible JSON") from exc
         content = message.get("content")
         if not isinstance(content, str) or not content.strip():
             reasoning = message.get("reasoning_content") or message.get("reasoning") or ""

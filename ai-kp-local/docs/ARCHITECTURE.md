@@ -91,6 +91,9 @@ This catalogue is the single source of truth for delivery status, phase, depende
 - `campaign_npcs` records how an NPC relates to one campaign.
 - Global NPC identity is stored once in `npcs`; this allows cross-module reuse.
 - `modules` and `module_chunks` store imported KP material with visibility and spoiler metadata.
+- Module Canon/Anchor remains source-linked knowledge; generated world completion enters the
+  existing proposal boundary and only becomes an append-only runtime fact after confirmation.
+  See [`WORLD_EXPANSION.md`](WORLD_EXPANSION.md).
 - `maps` stores stable identity, publication status, the current revision pointer and the selected public background; `map_revisions` stores canonical MapSpec JSON, validation output and content/layout hashes.
 - `map_locations` and `map_routes` are the current compatible projection used by movement and older API fields. Deterministic SVG is rendered from the role-filtered current MapSpec instead of being trusted as an independent structure source.
 - `map_assets` stores only validated image metadata, generation hash, prompt audit and a path relative to the controlled asset root. PNG/JPEG bytes use content-addressed storage outside SQLite and remain behind authenticated API access.
@@ -188,6 +191,21 @@ aesthetic acceptance remains an explicit KP decision. See
 
 The player-action response does not embed the linked proposal, KP notes, secret context, or final prompt.
 
+## World Fact Ledger
+
+World facts reuse the append-only `events` stream instead of creating a second mutable source of
+truth. Strict `world_fact.asserted` and `world_fact.retconned` envelopes carry a stable fact key,
+revision, current-head link, epistemic category, PC scope, evidence event IDs, and source
+reference. A pure projector validates the chain and derives current heads after role and PC
+filtering.
+
+Generic event writes cannot use the reserved `world_fact.*` namespace. Corrections require the
+caller's expected head event ID, append a new revision, and retain the old event. Character
+beliefs are stored KP-only in the generic event stream because generic readers do not understand
+PC ownership; the fact projector alone exposes them to their owning PC. AI context receives only
+current visible heads and is explicitly told that beliefs, rumors, and AI hypotheses are not
+canonical facts. See [`WORLD_FACT_LEDGER.md`](WORLD_FACT_LEDGER.md).
+
 Proposal approval is split into three boundaries. `platform/resolution/proposals.py` owns the
 ruleset-neutral invariant that unresolved checks cannot carry precommitted world effects.
 `application/play/proposal_approval.py` validates each requested check against the campaign's
@@ -236,6 +254,11 @@ AI_KP_CORS_ORIGINS=https://<frontend-origin>
 ```
 
 The admin token is sent as `X-AI-KP-Admin-Token`. A reverse proxy commonly makes all upstream requests appear loopback, which is why leaving local admin enabled behind a proxy defeats the intended boundary.
+
+An active KP credential can be reissued through the local-administrator recovery endpoint when its
+plaintext token is lost. Recovery rotates the existing KP member's token hash, invalidates the old
+Bearer token, preserves the session/member IDs and campaign data, and emits an audit event. It does
+not create a second KP or close the active session.
 
 TLS is outside the application and is mandatory at the reverse proxy. Without HTTPS, Bearer tokens, join codes, and the admin token are observable on the network. This MVP has no accounts, per-seat invitations, token expiry, rate limiting, brute-force lockout, durable identity bans, or trusted-proxy policy. It is not ready for direct public-internet exposure. Future imported/AI-authored SVG also needs sanitization and a restrictive CSP before it can be treated as untrusted content.
 

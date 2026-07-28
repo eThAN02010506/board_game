@@ -25,6 +25,9 @@ EXPECTED_HTTP_ROUTES = {
     ("GET", "/model-settings"),
     ("PUT", "/model-settings"),
     ("POST", "/model-settings/discover"),
+    ("GET", "/image-model-settings"),
+    ("PUT", "/image-model-settings"),
+    ("POST", "/image-model-settings/discover"),
     ("GET", "/model-runtime"),
     ("POST", "/model-runtime/start"),
     ("POST", "/model-runtime/stop"),
@@ -52,6 +55,7 @@ EXPECTED_HTTP_ROUTES = {
     ("GET", "/campaigns"),
     ("POST", "/campaigns"),
     ("POST", "/campaigns/{campaign_id}/sessions"),
+    ("POST", "/campaigns/{campaign_id}/sessions/recover-kp"),
     ("POST", "/sessions/join"),
     ("GET", "/auth/me"),
     ("GET", "/sessions/{session_id}"),
@@ -77,6 +81,11 @@ EXPECTED_HTTP_ROUTES = {
     ("POST", "/checks/{check_id}/override"),
     ("POST", "/checks/{check_id}/cancel"),
     ("POST", "/checks/{check_id}/push"),
+    ("POST", "/checks/{check_id}/consequence-proposal"),
+    ("POST", "/campaigns/{campaign_id}/facts"),
+    ("GET", "/campaigns/{campaign_id}/facts"),
+    ("GET", "/campaigns/{campaign_id}/facts/{fact_key}"),
+    ("POST", "/campaigns/{campaign_id}/facts/{fact_key}/retcon"),
     ("POST", "/campaigns/{campaign_id}/pcs"),
     ("GET", "/campaigns/{campaign_id}/pcs"),
     ("POST", "/campaigns/{campaign_id}/events"),
@@ -120,18 +129,27 @@ class ApiContractTests(unittest.TestCase):
             app = create_app(Settings(db_path=Path(tmpdir) / "contract.sqlite3"))
 
         actual_routes = [
-            (method, route.path)
-            for route in app.routes
-            for method in (getattr(route, "methods", None) or set())
-            if route.path not in {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
-            and method not in {"HEAD", "OPTIONS"}
+            (method.upper(), path)
+            for path, path_item in app.openapi()["paths"].items()
+            for method in path_item
+            if method.upper() in {"GET", "POST", "PUT", "PATCH", "DELETE"}
         ]
+        actual_routes.extend(
+            (method, route.path)
+            for router in app.state.domain_routers
+            for route in router.routes
+            if route.__class__.__name__ == "APIRoute"
+            and not route.include_in_schema
+            for method in route.methods
+            if method not in {"HEAD", "OPTIONS"}
+        )
         actual = set(actual_routes)
         self.assertEqual(EXPECTED_HTTP_ROUTES, actual)
         self.assertEqual(len(EXPECTED_HTTP_ROUTES), len(actual_routes), "duplicate HTTP route")
         websocket_paths = {
             route.path
-            for route in app.routes
+            for router in app.state.domain_routers
+            for route in router.routes
             if route.__class__.__name__ == "APIWebSocketRoute"
         }
         self.assertEqual({"/ws", "/debug/ws"}, websocket_paths)

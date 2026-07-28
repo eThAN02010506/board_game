@@ -35,7 +35,10 @@ export function ProposalPanel(props: Props) {
             onClick={() => props.onSelectProposal(proposal.id)}
             type="button"
           >
-            <span>{proposal.status}</span>
+            <span>
+              {proposal.status}
+              {proposal.proposal_kind === "check_consequence" ? " · 检定后果" : ""}
+            </span>
             <small>{proposal.player_action}</small>
           </button>
         ))}
@@ -45,6 +48,9 @@ export function ProposalPanel(props: Props) {
           <>
             <span className={`proposal-status ${props.activeProposal.status}`}>
               {props.activeProposal.status}
+              {props.activeProposal.proposal_kind === "check_consequence"
+                ? " · 检定后果"
+                : ""}
             </span>
             <p>{props.activeProposal.public_narration}</p>
             <small>{props.activeProposal.kp_notes}</small>

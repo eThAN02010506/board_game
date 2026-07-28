@@ -17,6 +17,7 @@ from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 from ai_kp.platform.resolution.proposals import (
     validate_proposal_resolution_boundary,
 )
+from ai_kp.platform.resolution import build_check_consequence_snapshot
 
 
 PROPOSAL_JSON_FIELDS = (
@@ -26,6 +27,7 @@ PROPOSAL_JSON_FIELDS = (
     "proposed_npc_updates",
     "proposed_map_moves",
 )
+CHECK_CONSEQUENCE_ACTION_TYPE = "check_consequence_basis"
 
 
 class TurnRepository(SQLiteRepository):
@@ -90,7 +92,7 @@ class TurnRepository(SQLiteRepository):
             raise KeyError(f"Turn proposal not found: {proposal_id}")
         result = self._decode_proposal(row)
         result["actions"] = self.list_proposal_actions(proposal_id)
-        return result
+        return self._decorate_proposal(result, result["actions"])
 
     def list_turn_proposals(self, campaign_id: str, status: str | None = None) -> list[dict]:
         if status:
@@ -111,7 +113,12 @@ class TurnRepository(SQLiteRepository):
                 """,
                 (campaign_id,),
             ).fetchall()
-        return [self._decode_proposal(row) for row in rows]
+        proposals = []
+        for row in rows:
+            proposal = self._decode_proposal(row)
+            actions = self.list_proposal_actions(proposal["id"])
+            proposals.append(self._decorate_proposal(proposal, actions))
+        return proposals
 
     @staticmethod
     def _decode_proposal(row: sqlite3.Row) -> dict:
@@ -169,6 +176,102 @@ class TurnRepository(SQLiteRepository):
             actions.append(action)
         return actions
 
+    @staticmethod
+    def _decorate_proposal(
+        proposal: dict,
+        actions: list[dict] | None = None,
+    ) -> dict:
+        resolved_actions = actions or []
+        consequence = next(
+            (
+                action["payload"]
+                for action in resolved_actions
+                if action["action_type"] == CHECK_CONSEQUENCE_ACTION_TYPE
+            ),
+            None,
+        )
+        proposal["proposal_kind"] = (
+            "check_consequence" if consequence is not None else "standard"
+        )
+        proposal["check_consequence"] = consequence
+        return proposal
+
+    def attach_check_consequence_basis(
+        self,
+        proposal_id: str,
+        *,
+        origin_proposal_id: str,
+        player_action_id: str,
+        check_ids: list[str],
+        result_fingerprint: str,
+    ) -> dict:
+        proposal = self.get_turn_proposal(proposal_id)
+        if proposal["status"] != "draft":
+            raise ValueError("Check consequence metadata requires a draft proposal")
+        if self.get_check_consequence_basis(proposal_id) is not None:
+            raise ValueError("Check consequence metadata is already attached")
+        normalized_check_ids = sorted(set(check_ids))
+        if not normalized_check_ids:
+            raise ValueError("Check consequence metadata requires check IDs")
+        if len(result_fingerprint) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in result_fingerprint
+        ):
+            raise ValueError("Check consequence fingerprint must be SHA-256")
+        payload = {
+            "proposal_kind": "check_consequence",
+            "origin_proposal_id": origin_proposal_id,
+            "player_action_id": player_action_id,
+            "check_ids": normalized_check_ids,
+            "result_fingerprint": result_fingerprint,
+        }
+        self.add_proposal_action(
+            proposal_id,
+            CHECK_CONSEQUENCE_ACTION_TYPE,
+            actor="system",
+            note="verified terminal check basis",
+            payload=payload,
+        )
+        return payload
+
+    def get_check_consequence_basis(self, proposal_id: str) -> dict | None:
+        matches = [
+            action["payload"]
+            for action in self.list_proposal_actions(proposal_id)
+            if action["action_type"] == CHECK_CONSEQUENCE_ACTION_TYPE
+        ]
+        if len(matches) > 1:
+            raise ValueError("A proposal has multiple check consequence bases")
+        return matches[0] if matches else None
+
+    def find_live_check_consequence(
+        self,
+        campaign_id: str,
+        *,
+        player_action_id: str,
+        result_fingerprint: str,
+    ) -> dict | None:
+        rows = self.connection.execute(
+            """
+            SELECT p.id, p.status, pa.payload_json
+            FROM proposal_actions pa
+            JOIN turn_proposals p ON p.id = pa.proposal_id
+            WHERE p.campaign_id = ?
+              AND pa.action_type = ?
+              AND p.status IN ('draft', 'approved')
+            ORDER BY p.created_at, p.id
+            """,
+            (campaign_id, CHECK_CONSEQUENCE_ACTION_TYPE),
+        ).fetchall()
+        for row in rows:
+            payload = decode_json_field(row["payload_json"], {})
+            if (
+                payload.get("player_action_id") == player_action_id
+                and payload.get("result_fingerprint") == result_fingerprint
+            ):
+                return self.get_turn_proposal(str(row["id"]))
+        return None
+
     def approve_turn_proposal(
         self,
         proposal_id: str,
@@ -193,6 +296,9 @@ class TurnRepository(SQLiteRepository):
                     f"current status is {proposal['status']}"
                 )
             validate_proposal_resolution_boundary(
+                self.get_turn_proposal(proposal_id)
+            )
+            self._validate_check_consequence_basis(
                 self.get_turn_proposal(proposal_id)
             )
             result = self._apply_turn_proposal(
@@ -427,8 +533,86 @@ class TurnRepository(SQLiteRepository):
             note=note,
             payload={"applied_event_id": applied_event_id},
         )
-        if not proposal["proposed_checks"]:
+        consequence = self.get_check_consequence_basis(proposal["id"])
+        if consequence is not None:
+            self.resolve_player_action_for_proposal(
+                consequence["origin_proposal_id"],
+                "resolved",
+            )
+        elif not proposal["proposed_checks"]:
             self.resolve_player_action_for_proposal(proposal["id"], "resolved")
+
+    def _validate_check_consequence_basis(self, proposal: dict) -> None:
+        basis = self.get_check_consequence_basis(proposal["id"])
+        if basis is None:
+            return
+        if proposal["proposed_checks"]:
+            raise ValueError("A check consequence cannot request another check")
+        if proposal["proposed_map_moves"]:
+            raise ValueError(
+                "The first check-consequence slice cannot move map tokens"
+            )
+        origin = self.connection.execute(
+            """
+            SELECT id, campaign_id, status FROM turn_proposals
+            WHERE id = ?
+            """,
+            (basis.get("origin_proposal_id"),),
+        ).fetchone()
+        if (
+            origin is None
+            or origin["campaign_id"] != proposal["campaign_id"]
+            or origin["status"] != "approved"
+        ):
+            raise ValueError(
+                "Check consequence origin must be an approved proposal "
+                "in the same campaign"
+            )
+        action = self.connection.execute(
+            """
+            SELECT * FROM player_actions
+            WHERE id = ? AND campaign_id = ? AND proposal_id = ?
+            """,
+            (
+                basis.get("player_action_id"),
+                proposal["campaign_id"],
+                basis.get("origin_proposal_id"),
+            ),
+        ).fetchone()
+        if action is None or action["status"] != "reviewed":
+            raise ValueError(
+                "Check consequence requires its original action to remain reviewed"
+            )
+        checks = self.list_skill_checks_for_action(str(action["id"]))
+        expected_check_scope = (
+            proposal["campaign_id"],
+            action["session_id"],
+            action["id"],
+            basis.get("origin_proposal_id"),
+        )
+        if not checks or any(
+            (
+                check.get("campaign_id"),
+                check.get("session_id"),
+                check.get("player_action_id"),
+                check.get("proposal_id"),
+            )
+            != expected_check_scope
+            for check in checks
+        ):
+            raise ValueError(
+                "Check consequence batch crosses its campaign, session, "
+                "action, or origin proposal boundary"
+            )
+        snapshot = build_check_consequence_snapshot(checks)
+        if sorted(basis.get("check_ids") or []) != sorted(
+            item["id"] for item in checks
+        ):
+            raise ValueError("Check consequence basis no longer matches its check set")
+        if basis.get("result_fingerprint") != snapshot["result_fingerprint"]:
+            raise ValueError(
+                "Check results changed after this consequence draft was created"
+            )
 
     def _require_token_in_campaign(self, token_id: str, campaign_id: str) -> dict:
         row = self.connection.execute(

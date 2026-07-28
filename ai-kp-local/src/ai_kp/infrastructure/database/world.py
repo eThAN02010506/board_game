@@ -6,6 +6,7 @@ from ai_kp.core.ids import new_id
 from ai_kp.platform.memory.npc_candidates import NpcCandidate, NpcCandidateService
 from ai_kp.platform.memory.retrieval import MemoryRetriever, RetrievedMemory
 from ai_kp.platform.modules.ingestion import ModuleChunk
+from ai_kp.platform.facts import RESERVED_FACT_EVENT_PREFIX
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 
@@ -245,6 +246,10 @@ class WorldRepository(SQLiteRepository):
         happened_at: str | None = None,
         payload: dict | None = None,
     ) -> dict:
+        if event_type.startswith(RESERVED_FACT_EVENT_PREFIX):
+            raise ValueError(
+                "Reserved world_fact.* events must use the typed fact service"
+            )
         if actor_id and actor_type == "pc":
             self._require_pc_in_campaign(actor_id, campaign_id)
         if actor_id and actor_type == "npc":

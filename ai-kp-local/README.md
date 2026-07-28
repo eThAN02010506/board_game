@@ -2,12 +2,16 @@
 
 本项目是一个本地优先的 AI 跑团平台 MVP。目标是让玩家导入 KP 本、创建角色、记录团内事件、维护 NPC 与长期记忆，并通过任意 OpenAI-compatible 大模型接口让 AI 扮演 KP。应用与数据库可完全本地运行，大模型是可替换的外部提供者。
 
+KP 本被视为带来源的权威大纲而非完整世界清单。AI 可以为玩家走出原路线后的合理世界
+缺口提出地点、NPC 和支线候选，但不得覆盖模组真相或已经确认的世界事实；详细边界见
+[`docs/WORLD_EXPANSION.md`](docs/WORLD_EXPANSION.md)。
+
 ## 当前可用能力
 
 - FastAPI 后端入口
 - SQLite 本地数据库与事件流
 - Campaign、PC、NPC、Memory、World Time 的基础数据模型
-- KP 本/模组纯文本导入、切块、秘密标签和剧透边界
+- KP 本/模组内部文本切块、秘密标签和剧透边界；面向 KP 的文件导入将只接收 PDF/Word
 - 时代化地图生成；MapSpec、修订、校验报告、SVG、地点、路线、棋子与图片候选均可本地持久化
 - 可选 OpenAI-compatible 图片模型；只接收玩家安全投影，图片失效时自动回退到完整可玩的确定性 SVG
 - 线下跑团式棋子移动，以及基于棋子版本的并发移动冲突保护
@@ -42,6 +46,22 @@ python3 -m venv .venv
 python -m pip install -e ".[dev]"
 cp .env.example .env
 uvicorn ai_kp.api.main:app --reload
+```
+
+仓库同时提供由 Python 3.13、macOS Apple Silicon 环境生成的
+`pylock.toml`，其中包含核心、开发、规则书和本地 MLX 依赖以及完整下载哈希。
+需要在同类机器上严格复现当前解析结果时可使用：
+
+```bash
+uv venv --python 3.13
+uv pip sync pylock.toml
+```
+
+更换 Python 版本或操作系统时应重新生成锁文件，不能把其中的 macOS/MLX
+wheel 当成跨平台解析结果：
+
+```bash
+python -m pip lock ".[dev,rulebook,local-model]" -o pylock.toml
 ```
 
 需要导入和索引规则书时安装独立的本地 MiniRAG 依赖组：
@@ -128,6 +148,7 @@ ai-kp-local/
 目标目录骨架、当前实现与迁移位置的对应关系，以及占位文件启用条件见 [`docs/ARCHITECTURE_SKELETON.md`](docs/ARCHITECTURE_SKELETON.md)。
 规则书 PDF 摄取、MiniRAG 隔离索引、三层校验、权限和真实验收见 [`docs/RULEBOOK_KNOWLEDGE.md`](docs/RULEBOOK_KNOWLEDGE.md)。
 当前仅支持 CoC、上传规则书与可执行插件的区别，以及未来第二规则系统的接入条件见 [`docs/RULESET_BOUNDARY.md`](docs/RULESET_BOUNDARY.md)。
+事件权威的世界事实分类、追加式纠错、角色可见性与 AI 上下文边界见 [`docs/WORLD_FACT_LEDGER.md`](docs/WORLD_FACT_LEDGER.md)。
 地图 MapSpec、时代约束、图片安全投影、版本/缓存和真实验收边界见 [`docs/MAP_GENERATION.md`](docs/MAP_GENERATION.md)。
 
 ## 开发自检
@@ -251,8 +272,10 @@ POST /maps/{map_id}/unpublish
 使用由年份确定性产生的通用时代禁忌，避免负面提示本身泄露“不要画某个秘密地点”。
 `public_architecture` 则是明确的公共字段：玩家和图片模型都能看到，不能填写秘密建筑。
 
-图片模型是独立可选依赖，不复用聊天模型配置。它必须提供
-`/v1/images/generations` 并返回 `b64_json`：
+图片模型是独立可选依赖，不复用聊天模型配置。可以在前端“模型设置 →
+地图图片模型”中检测服务返回的真实模型 ID、保存地址和超时；配置保存在 SQLite，
+API Key 只返回“是否已配置”，不会回传明文。重启后会自动恢复。环境变量仍可作为
+首次启动时的默认值：
 
 ```env
 AI_KP_IMAGE_BASE_URL=http://127.0.0.1:8188/v1
@@ -260,6 +283,10 @@ AI_KP_IMAGE_API_KEY=local
 AI_KP_IMAGE_MODEL=<服务实际暴露的图片模型 ID>
 AI_KP_MAP_ASSET_ROOT=data/map-assets
 ```
+
+图片服务必须同时提供 `/v1/models` 和 `/v1/images/generations`，生成接口需要返回
+`b64_json`。模型列表检测成功只表示协议和模型 ID 可读，真正的图片能力仍会在生成
+第一张候选背景时校验。
 
 当前适配器不跟随模型返回的任意远程图片 URL，只接受经过 Base64 解码、PNG/JPEG
 签名、尺寸、像素和 32 MiB 上限校验的位图。完整设计、权限和 real-case 清单见
@@ -372,7 +399,11 @@ AI_KP_CORS_ORIGINS=https://你的前端域名
 
 ## 模组文本格式
 
-当前支持纯文本导入。每个空行分隔的段落会成为一个 `module_chunk`。
+当前底层 API 支持纯文本导入，用于验证切块和剧透边界；它不是最终面向 KP 的文件
+上传界面。正式 KP 本入口只接受 PDF/Word 文档，并需要同时提取正文与文档内的照片、
+地图和扫描线索。详细边界见 [`docs/MODULE_DOCUMENT_IMPORT.md`](docs/MODULE_DOCUMENT_IMPORT.md)。
+
+内部文本格式中，每个空行分隔的段落会成为一个 `module_chunk`。
 段落首行可以写元数据：
 
 ```text

@@ -1,6 +1,7 @@
 import type { Capability, Role } from "./types";
 
 export const apiBase = "/api";
+const defaultRequestTimeoutMs = 310_000;
 
 type CredentialSnapshot = {
   accessToken: string;
@@ -17,6 +18,51 @@ const credentials: CredentialSnapshot = {
   pcId: null,
   playerToken: ""
 };
+
+async function responseError(response: Response): Promise<Error> {
+  const text = await response.text();
+  if (!text) return new Error(`${response.status} ${response.statusText}`.trim());
+  try {
+    const payload = JSON.parse(text) as { detail?: unknown };
+    if (typeof payload.detail === "string" && payload.detail.trim()) {
+      return new Error(payload.detail);
+    }
+    if (payload.detail !== undefined) {
+      return new Error(JSON.stringify(payload.detail));
+    }
+  } catch {
+    // Non-JSON error bodies are already suitable for display.
+  }
+  return new Error(text);
+}
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = defaultRequestTimeoutMs
+): Promise<Response> {
+  const controller = new AbortController();
+  const upstreamSignal = init.signal;
+  const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+  if (upstreamSignal?.aborted) abortFromUpstream();
+  else upstreamSignal?.addEventListener("abort", abortFromUpstream, { once: true });
+  const timeout = window.setTimeout(
+    () => controller.abort(new DOMException("请求超时", "TimeoutError")),
+    timeoutMs
+  );
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.reason instanceof DOMException &&
+        controller.signal.reason.name === "TimeoutError") {
+      throw new Error("请求超时，请检查后端或模型服务是否仍在运行");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    upstreamSignal?.removeEventListener("abort", abortFromUpstream);
+  }
+}
 
 export const credentialBridge = {
   session(accessToken: string, role: Role | "" = "", pcId: string | null = null) {
@@ -52,10 +98,9 @@ async function sendJson<T>(
   if (credentials.playerToken) {
     headers.set("X-AI-KP-Player-Token", credentials.playerToken);
   }
-  const response = await fetch(`${apiBase}${url}`, { ...init, headers });
+  const response = await fetchWithTimeout(`${apiBase}${url}`, { ...init, headers });
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `${response.status} ${response.statusText}`);
+    throw await responseError(response);
   }
   return response.json() as Promise<T>;
 }
@@ -80,10 +125,9 @@ export async function requestBlob(url: string, signal?: AbortSignal): Promise<Bl
   if (credentials.adminToken) {
     headers.set("X-AI-KP-Admin-Token", credentials.adminToken);
   }
-  const response = await fetch(`${apiBase}${url}`, { headers, signal });
+  const response = await fetchWithTimeout(`${apiBase}${url}`, { headers, signal });
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `${response.status} ${response.statusText}`);
+    throw await responseError(response);
   }
   return response.blob();
 }
@@ -113,10 +157,12 @@ export async function requestBinary<T>(
   if (credentials.playerToken) {
     headers.set("X-AI-KP-Player-Token", credentials.playerToken);
   }
-  const response = await fetch(`${apiBase}${url}`, { method: "POST", headers, body: file });
+  const response = await fetchWithTimeout(
+    `${apiBase}${url}`,
+    { method: "POST", headers, body: file }
+  );
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `${response.status} ${response.statusText}`);
+    throw await responseError(response);
   }
   return response.json() as Promise<T>;
 }

@@ -9,18 +9,21 @@ import shutil
 import sqlite3
 import time
 from typing import Any
-from urllib.parse import unquote
-
 from fastapi import APIRouter, Depends, Header, Query, Request, WebSocket
 from fastapi.responses import HTMLResponse
 from fastapi.routing import APIRoute, APIWebSocketRoute
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
 from ai_kp.api.authz import require_local_admin
 from ai_kp.api.debug_dashboard import DEBUG_DASHBOARD_HTML
 from ai_kp.api.dependencies import get_app_settings, get_repo
-from ai_kp.rulesets.coc7.character.xlsx_import import import_coc_character_xlsx
+from ai_kp.api.uploads import read_limited_body, safe_upload_filename
+from ai_kp.rulesets.coc7.character.xlsx_import import (
+    MAX_XLSX_BYTES,
+    import_coc_character_xlsx,
+)
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.llm.local_runtime import LocalModelRuntime
@@ -172,30 +175,48 @@ def _redact_value(column: str, value: Any) -> Any:
 
 def _route_inventory(request: Request) -> list[dict[str, Any]]:
     routes: list[dict[str, Any]] = []
-    for route in request.app.routes:
-        if isinstance(route, APIRoute):
-            methods = sorted(method for method in route.methods if method not in {"HEAD", "OPTIONS"})
+    for path, path_item in request.app.openapi().get("paths", {}).items():
+        for method, operation in path_item.items():
+            if method.upper() not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                continue
             routes.append(
                 {
-                    "path": route.path,
-                    "methods": methods,
-                    "name": route.name,
-                    "summary": route.summary,
-                    "tags": route.tags,
-                    "response_model": getattr(route.response_model, "__name__", None),
-                }
-            )
-        elif isinstance(route, APIWebSocketRoute):
-            routes.append(
-                {
-                    "path": route.path,
-                    "methods": ["WS"],
-                    "name": route.name,
-                    "summary": "WebSocket endpoint",
-                    "tags": [],
+                    "path": path,
+                    "methods": [method.upper()],
+                    "name": operation.get("operationId"),
+                    "summary": operation.get("summary"),
+                    "tags": operation.get("tags", []),
                     "response_model": None,
                 }
             )
+    for domain_router in request.app.state.domain_routers:
+        for route in domain_router.routes:
+            if isinstance(route, APIRoute) and not route.include_in_schema:
+                routes.append(
+                    {
+                        "path": route.path,
+                        "methods": sorted(
+                            method
+                            for method in route.methods
+                            if method not in {"HEAD", "OPTIONS"}
+                        ),
+                        "name": route.name,
+                        "summary": route.summary,
+                        "tags": route.tags,
+                        "response_model": getattr(route.response_model, "__name__", None),
+                    }
+                )
+            elif isinstance(route, APIWebSocketRoute):
+                routes.append(
+                    {
+                        "path": route.path,
+                        "methods": ["WS"],
+                        "name": route.name,
+                        "summary": "WebSocket endpoint",
+                        "tags": [],
+                        "response_model": None,
+                    }
+                )
     return sorted(routes, key=lambda item: (item["path"], item["methods"]))
 
 
@@ -375,6 +396,7 @@ async def model_probe(
             settings.llm_base_url,
             settings.llm_api_key,
             timeout_seconds=4,
+            client=getattr(request.app.state, "http_client", None),
         )
         return {
             "ok": True,
@@ -417,8 +439,13 @@ async def debug_xlsx_preview(
     x_file_name: str | None = Header(default=None),
     _admin: None = Depends(require_local_admin),
 ) -> dict[str, Any]:
-    data = await request.body()
-    return import_coc_character_xlsx(data, unquote(x_file_name or "character.xlsx"))
+    data = await read_limited_body(
+        request,
+        max_bytes=MAX_XLSX_BYTES,
+        label="调查员 XLSX",
+    )
+    filename = safe_upload_filename(x_file_name, default="character.xlsx")
+    return await run_in_threadpool(import_coc_character_xlsx, data, filename)
 
 
 @router.websocket("/debug/ws")

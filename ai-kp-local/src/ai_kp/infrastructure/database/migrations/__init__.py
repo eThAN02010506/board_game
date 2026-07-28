@@ -18,6 +18,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0011_skill_checks,
     v0012_map_spec_assets,
     v0013_map_revision_backfill,
+    v0014_image_model_configuration,
 )
 
 
@@ -89,6 +90,11 @@ MIGRATIONS = (
         v0013_map_revision_backfill.VERSION,
         v0013_map_revision_backfill.NAME,
         v0013_map_revision_backfill.migrate,
+    ),
+    Migration(
+        v0014_image_model_configuration.VERSION,
+        v0014_image_model_configuration.NAME,
+        v0014_image_model_configuration.migrate,
     ),
 )
 

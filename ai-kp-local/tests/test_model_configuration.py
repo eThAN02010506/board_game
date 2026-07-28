@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -86,6 +87,91 @@ def test_remote_model_configuration_redacts_api_key(tmp_path: Path) -> None:
     assert app.state.settings.llm_api_key == "new-secret"
     assert loaded.json()["api_key_configured"] is True
     assert "api_key" not in loaded.json()
+
+
+def test_image_model_configuration_persists_redacts_and_reloads(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "image-model.sqlite3"
+    headers = {"X-AI-KP-Admin-Token": "model-admin"}
+    app = create_app(_settings(db_path))
+
+    with TestClient(app) as client:
+        saved = client.put(
+            "/image-model-settings",
+            headers=headers,
+            json={
+                "base_url": "http://127.0.0.1:8188",
+                "api_key": "image-secret",
+                "model": "flux-period-map",
+                "timeout_seconds": 420,
+            },
+        )
+        loaded = client.get("/image-model-settings", headers=headers)
+
+    assert saved.status_code == 200
+    assert saved.json()["base_url"] == "http://127.0.0.1:8188/v1"
+    assert saved.json()["api_key_configured"] is True
+    assert "api_key" not in saved.json()
+    assert "api_key" not in loaded.json()
+    assert app.state.settings.image_model == "flux-period-map"
+    assert app.state.settings.image_api_key == "image-secret"
+
+    restarted = create_app(_settings(db_path))
+    assert restarted.state.settings.image_base_url == "http://127.0.0.1:8188/v1"
+    assert restarted.state.settings.image_model == "flux-period-map"
+    assert restarted.state.settings.image_timeout_seconds == 420
+
+
+def test_image_model_configuration_preserves_an_empty_api_key(tmp_path: Path) -> None:
+    db_path = tmp_path / "image-model-no-auth.sqlite3"
+    headers = {"X-AI-KP-Admin-Token": "model-admin"}
+    app = create_app(_settings(db_path))
+
+    with TestClient(app) as client:
+        initial = client.get("/image-model-settings", headers=headers)
+        saved = client.put(
+            "/image-model-settings",
+            headers=headers,
+            json={
+                "base_url": "http://127.0.0.1:8188/v1",
+                "api_key": "",
+                "model": "period-map-test",
+                "timeout_seconds": 300,
+            },
+        )
+
+    assert initial.json()["api_key_configured"] is False
+    assert saved.json()["api_key_configured"] is False
+    assert app.state.settings.image_api_key == ""
+    restarted = create_app(_settings(db_path))
+    assert restarted.state.settings.image_api_key == ""
+
+
+def test_image_model_discovery_uses_actual_provider_ids(tmp_path: Path) -> None:
+    headers = {"X-AI-KP-Admin-Token": "model-admin"}
+    app = create_app(_settings(tmp_path / "image-discovery.sqlite3"))
+
+    with patch(
+        "ai_kp.api.routers.models.discover_openai_models",
+        new=AsyncMock(return_value=["flux-period-map", "sdxl"]),
+    ) as discover:
+        with TestClient(app) as client:
+            response = client.post(
+                "/image-model-settings/discover",
+                headers=headers,
+                json={
+                    "base_url": "http://127.0.0.1:8188",
+                    "api_key": "",
+                    "model": "",
+                    "timeout_seconds": 300,
+                },
+            )
+
+    assert response.status_code == 200
+    assert response.json()["models"] == ["flux-period-map", "sdxl"]
+    assert response.json()["normalized_base_url"] == "http://127.0.0.1:8188/v1"
+    discover.assert_awaited_once()
 
 
 def test_local_model_path_validation_and_url_normalization(tmp_path: Path) -> None:

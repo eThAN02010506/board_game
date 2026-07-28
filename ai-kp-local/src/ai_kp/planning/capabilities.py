@@ -68,6 +68,24 @@ CAPABILITIES: tuple[Capability, ...] = (
         acceptance=("重启后记忆可检索，玩家不能读取其他角色私有记忆。",),
     ),
     Capability(
+        id="world_fact_ledger",
+        label="世界事实账本",
+        status="partial",
+        phase="F2",
+        audience="all",
+        summary=(
+            "已用权威事件流实现 canonical fact、KP secret、角色认知、传闻与 AI 假设的"
+            "严格分型、当前 head 投影、追加式纠错和 AI 上下文注入；"
+            "尚缺事实工作台 UI 与 AI 草稿的 proposed_facts 审批接入。"
+        ),
+        dependencies=("memory_foundation", "proposal_approval"),
+        acceptance=(
+            "事实纠错只追加新事件，不覆盖历史；过期 head 不能形成并发分叉。",
+            "玩家只能看到桌面事实和本人角色认知，KP secret 与 AI hypothesis 不得泄漏。",
+            "AI 上下文明确区分已确认事实、角色认知、传闻和待验证假设。",
+        ),
+    ),
+    Capability(
         id="model_adapter",
         label="本地模型适配",
         status="available",
@@ -120,19 +138,54 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="partial",
         phase="F2",
         audience="kp",
-        summary="纯文本切块和剧透边界已有 API；缺少导入 UI、章节树、搜索和多格式解析。",
+        summary=(
+            "内部纯文本切块和剧透边界已有 API；面向 KP 的文件入口只接受 "
+            "PDF/Word，仍缺少导入 UI、章节树、搜索和文档解析。"
+        ),
         dependencies=("proposal_approval",),
         acceptance=("KP 可导入、预览、标记剧透范围，玩家端不可读取未揭示章节。",),
     ),
     Capability(
         id="module_document_import",
-        label="多格式 KP 本导入",
+        label="PDF/Word KP 本导入",
         status="planned",
         phase="F2",
         audience="kp",
-        summary="在纯文本之外解析 PDF、DOCX、图片 OCR，并保留页码、章节和原文证据。",
+        summary=(
+            "只接收 PDF 与 Word 文档；抽取正文和文档内照片、地图、扫描线索，"
+            "对图片执行可选 OCR/视觉理解并保留原始图像及图文位置关系。"
+        ),
         dependencies=("module_library",),
-        acceptance=("导入后每个切块都能追溯到原文件位置，秘密内容不会进入玩家视图。",),
+        acceptance=(
+            "上传入口拒绝 PDF/Word 以外的文件，并给出明确错误。",
+            "每个文本块和图片都能追溯到原文件页码、段落或锚点。",
+            "没有视觉模型时仍保存原图并标记待解析，不阻断整本导入。",
+            "图片及其 OCR/视觉摘要继承所在章节的秘密级别，不会进入玩家视图。",
+        ),
+    ),
+    Capability(
+        id="world_expansion",
+        label="受约束世界补全与动态支线",
+        status="partial",
+        phase="F3",
+        audience="kp",
+        summary=(
+            "AI KP 已收到 Canon、剧情锚点、运行事实和生成候选的权威顺序约束，"
+            "且生成内容仍受现有草稿审批保护；尚缺结构化模组知识、合理性评分、"
+            "冲突解释、锚点可达性检查和三种自动化模式。"
+        ),
+        dependencies=(
+            "module_library",
+            "world_fact_ledger",
+            "proposal_approval",
+        ),
+        acceptance=(
+            "模组 Canon 不可被 AI 改写，剧情锚点保持可达但不强制固定场景或路线。",
+            "AI 可按时代、地域、聚落规模和现有事实补全合理地点、NPC 与反应性支线。",
+            "补全候选与模组真相、剧情锚点或已确认事实冲突时必须阻止并说明原因。",
+            "生成内容在批准或玩家实际确认前不能升级为世界事实。",
+            "保守、平衡和 AI KP 模式只改变审批强度，不改变事实与剧透边界。",
+        ),
     ),
     Capability(
         id="party_route_planning",
@@ -152,14 +205,15 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="all",
         summary=(
             "已按本地 CoC7 规则来源实现普通/困难/极难检定、数字骰、实体骰、"
-            "奖惩骰、暗骰、孤注一掷、KP 覆盖和重放审计；"
-            "尚缺对抗检定与检定结果驱动的 AI 二阶段草稿。"
+            "奖惩骰、暗骰、孤注一掷、KP 覆盖、重放审计及检定结果驱动的"
+            "指纹化 AI 二阶段草稿；已有纯对抗比较器，尚缺其持久化、API 与 UI。"
         ),
         dependencies=("proposal_approval", "character_sheets"),
         acceptance=(
             "掷骰前不得写入只有成功时才成立的事件或记忆。",
             "每次判定保存规则集版本、章节页码、原始骰值、难度、奖惩骰、结果和角色状态版本。",
             "KP 覆盖必须记录理由；规则判定在关闭模型并重启后仍可重放得到相同结果。",
+            "暗骰后果不得进入公开叙述；过期结果草稿不得产生任何部分世界写入。",
         ),
     ),
     Capability(
@@ -207,7 +261,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         phase="F3",
         audience="all",
         summary="已有后端记忆类型与检索；缺少可解释时间线、人工修正、证据链和团后摘要 UI。",
-        dependencies=("memory_foundation", "character_timeline"),
+        dependencies=("memory_foundation", "world_fact_ledger", "character_timeline"),
         acceptance=("玩家可查看自己的主要/支线事件及其原始事件来源。",),
     ),
     Capability(
@@ -250,11 +304,14 @@ CAPABILITIES: tuple[Capability, ...] = (
         phase="F4",
         audience="kp",
         summary=(
-            "已实现独立 OpenAI-compatible 图片端口、玩家安全提示词投影、候选缓存与 KP 选用；"
-            "尚缺 ComfyUI/ControlNet 适配器与真实图片模型的审美验收。"
+            "已实现可持久化的独立 OpenAI-compatible 图片配置、玩家安全提示词投影、"
+            "候选缓存、KP 选用与发布；尚缺 ComfyUI/ControlNet 适配器和真实模型审美验收。"
         ),
         dependencies=("map_asset_revisions", "model_adapter"),
-        acceptance=("生成失败不破坏旧地图，背景图与棋子状态彼此独立。",),
+        acceptance=(
+            "图片 API Key 不回传前端，配置在后端重启后恢复。",
+            "生成失败不破坏旧地图，背景图与棋子状态彼此独立。",
+        ),
     ),
     Capability(
         id="model_management",
@@ -306,7 +363,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="partial",
         phase="F5",
         audience="kp",
-        summary="已有草稿批准/拒绝；缺少 AI 暂停、人类完全接管、暗骰、揭示与交还控制。",
+        summary="已有草稿批准/拒绝与暗骰裁定；缺少 AI 暂停、人类完全接管、分层揭示与交还控制。",
         dependencies=("proposal_approval", "check_resolution"),
         acceptance=("人类 KP 接管后 AI 停止推进，交还时 AI 从已确认事实继续。",),
     ),

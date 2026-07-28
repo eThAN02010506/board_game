@@ -124,6 +124,11 @@ class CheckStore(CampaignStore, Protocol):
         session_id: str,
     ) -> list[dict[str, Any]]: ...
 
+    def list_skill_checks_for_action(
+        self,
+        player_action_id: str,
+    ) -> list[dict[str, Any]]: ...
+
     def resolve_skill_check(
         self,
         check_id: str,
@@ -267,6 +272,13 @@ class SessionStore(Protocol):
         *,
         display_name: str,
         pc_id: str | None = None,
+    ) -> dict: ...
+
+    def reissue_campaign_kp_access_token(
+        self,
+        campaign_id: str,
+        *,
+        display_name: str,
     ) -> dict: ...
 
     def seat_for_member(self, member_id: str) -> dict | None: ...
@@ -530,6 +542,8 @@ class TurnStore(CheckStore, RealtimeOutbox, Protocol):
         client_action_id: str | None = None,
     ) -> dict: ...
 
+    def get_player_action(self, action_id: str) -> dict: ...
+
     def create_turn_proposal(self, **values: Any) -> dict: ...
 
     def link_player_action_to_proposal(
@@ -544,6 +558,24 @@ class TurnStore(CheckStore, RealtimeOutbox, Protocol):
     def is_session_member_active(self, member_id: str, session_id: str) -> bool: ...
 
     def get_turn_proposal(self, proposal_id: str) -> dict: ...
+
+    def attach_check_consequence_basis(
+        self,
+        proposal_id: str,
+        *,
+        origin_proposal_id: str,
+        player_action_id: str,
+        check_ids: list[str],
+        result_fingerprint: str,
+    ) -> dict: ...
+
+    def find_live_check_consequence(
+        self,
+        campaign_id: str,
+        *,
+        player_action_id: str,
+        result_fingerprint: str,
+    ) -> dict | None: ...
 
     def approve_turn_proposal(
         self,

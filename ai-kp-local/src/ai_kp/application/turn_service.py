@@ -189,6 +189,10 @@ class TurnService:
         campaign = self.repo.get_campaign(campaign_id)
         ruleset = get_ruleset(str(campaign["system"]))
         planned_checks = plan_proposed_checks(pending, ruleset)
+        # Own the request transaction before the repository opens its savepoint.
+        # This keeps proposal effects, concrete checks, and outbox messages in one
+        # unit that the request dependency can commit or roll back together.
+        self.repo.begin_immediate()
         proposal = self.repo.approve_turn_proposal(
             proposal_id,
             actor=f"kp:{identity.member_id}",
@@ -238,6 +242,9 @@ class TurnService:
         *,
         note: str = "",
     ) -> dict:
+        # reject_turn_proposal uses a savepoint for its local state transition;
+        # start the request transaction first so its outbox write is atomic too.
+        self.repo.begin_immediate()
         proposal = self.repo.reject_turn_proposal(
             proposal_id,
             actor=f"kp:{identity.member_id}",

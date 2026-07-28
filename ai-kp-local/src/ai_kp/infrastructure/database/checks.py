@@ -7,6 +7,37 @@ from typing import Any
 from ai_kp.core.ids import new_id
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
+from ai_kp.platform.resolution import build_check_consequence_snapshot
+
+
+_SUCCESS_LEVEL_RANK = {
+    "fumble": -1,
+    "failure": 0,
+    "regular": 1,
+    "hard": 2,
+    "extreme": 3,
+    "critical": 4,
+}
+_DIFFICULTY_RANK = {"regular": 1, "hard": 2, "extreme": 3}
+
+
+def _validate_override_result(
+    *,
+    difficulty: str,
+    success_level: str,
+    passed: bool,
+) -> None:
+    if success_level not in _SUCCESS_LEVEL_RANK:
+        raise ValueError("Unsupported success level")
+    if difficulty not in _DIFFICULTY_RANK:
+        raise ValueError("Unsupported check difficulty")
+    expected_passed = (
+        _SUCCESS_LEVEL_RANK[success_level] >= _DIFFICULTY_RANK[difficulty]
+    )
+    if type(passed) is not bool or passed is not expected_passed:
+        raise ValueError(
+            "Override passed value contradicts its success level and difficulty"
+        )
 
 
 class SkillCheckRepository(SQLiteRepository):
@@ -36,6 +67,12 @@ class SkillCheckRepository(SQLiteRepository):
         pushed_from_check_id: str | None = None,
     ) -> dict[str, Any]:
         self._validate_check_scope(campaign_id, session_id, requested_by_member_id)
+        self._validate_check_origin(
+            campaign_id=campaign_id,
+            session_id=session_id,
+            proposal_id=proposal_id,
+            player_action_id=player_action_id,
+        )
         normalized_skill = skill_name.strip()
         if not normalized_skill:
             raise ValueError("Skill name is required")
@@ -80,6 +117,56 @@ class SkillCheckRepository(SQLiteRepository):
         requester = self.get_session_member(requester_id)
         if requester["session_id"] != session_id or requester["revoked_at"] is not None:
             raise ValueError("Check requester must be active in this session")
+
+    def _validate_check_origin(
+        self,
+        *,
+        campaign_id: str,
+        session_id: str,
+        proposal_id: str | None,
+        player_action_id: str | None,
+    ) -> None:
+        if proposal_id is None and player_action_id is None:
+            return
+        if proposal_id is None:
+            raise ValueError("A linked player action requires its origin proposal")
+        proposal = self.connection.execute(
+            """
+            SELECT campaign_id, status FROM turn_proposals
+            WHERE id = ?
+            """,
+            (proposal_id,),
+        ).fetchone()
+        if (
+            proposal is None
+            or proposal["campaign_id"] != campaign_id
+            or proposal["status"] != "approved"
+        ):
+            raise ValueError(
+                "A linked check requires an approved origin proposal "
+                "in the same campaign"
+            )
+        if player_action_id is None:
+            return
+        action = self.connection.execute(
+            """
+            SELECT campaign_id, session_id, status, proposal_id
+            FROM player_actions
+            WHERE id = ?
+            """,
+            (player_action_id,),
+        ).fetchone()
+        if (
+            action is None
+            or action["campaign_id"] != campaign_id
+            or action["session_id"] != session_id
+            or action["status"] != "reviewed"
+            or action["proposal_id"] != proposal_id
+        ):
+            raise ValueError(
+                "A linked check requires a reviewed player action whose "
+                "campaign, session, and origin proposal all match"
+            )
 
     def _resolve_check_roller(
         self,
@@ -239,7 +326,7 @@ class SkillCheckRepository(SQLiteRepository):
             },
         )
         self._append_check_realtime(check_id, "check.resolved")
-        self._resolve_linked_action_when_checks_complete(check_id)
+        self._notify_consequence_ready_when_checks_terminal(check_id)
         return self.get_skill_check(check_id)
 
     def override_skill_check(
@@ -251,14 +338,28 @@ class SkillCheckRepository(SQLiteRepository):
         passed: bool,
         reason: str,
     ) -> dict[str, Any]:
+        # Serialize the finalized-action check with the override write. Without
+        # this lock, consequence approval could resolve the action between the
+        # read below and the skill-check update.
+        self.begin_immediate()
         check = self.get_skill_check(check_id)
+        self._assert_check_consequence_not_finalized(check)
         if check["status"] not in {"resolved", "overridden"}:
             raise ValueError("A check must be resolved before KP override")
+        pushed_child = self.connection.execute(
+            "SELECT id FROM skill_checks WHERE pushed_from_check_id = ?",
+            (check_id,),
+        ).fetchone()
+        if pushed_child is not None:
+            raise ValueError("A check with a pushed child cannot be overridden")
         normalized_reason = reason.strip()
         if not normalized_reason:
             raise ValueError("KP override reason is required")
-        if success_level not in {"fumble", "failure", "regular", "hard", "extreme", "critical"}:
-            raise ValueError("Unsupported success level")
+        _validate_override_result(
+            difficulty=str(check["difficulty"]),
+            success_level=success_level,
+            passed=passed,
+        )
         original_result = check.get("original_result") or {
             "selected_roll": check["selected_roll"],
             "threshold": check["threshold"],
@@ -290,6 +391,7 @@ class SkillCheckRepository(SQLiteRepository):
             payload={"success_level": success_level, "passed": passed},
         )
         self._append_check_realtime(check_id, "check.overridden")
+        self._notify_consequence_ready_when_checks_terminal(check_id)
         return self.get_skill_check(check_id)
 
     def cancel_skill_check(
@@ -309,13 +411,17 @@ class SkillCheckRepository(SQLiteRepository):
             check_id, "cancelled", actor_member_id, reason=reason.strip()
         )
         self._append_check_realtime(check_id, "check.cancelled")
-        self._resolve_linked_action_when_checks_complete(check_id)
+        self._notify_consequence_ready_when_checks_terminal(check_id)
         return self.get_skill_check(check_id)
 
     def push_skill_check(
         self, check_id: str, *, actor_member_id: str, reason: str
     ) -> dict[str, Any]:
+        # Keep the finalized-action guard and child creation in one serialized
+        # transaction for the same reason as KP override.
+        self.begin_immediate()
         check = self.get_skill_check(check_id)
+        self._assert_check_consequence_not_finalized(check)
         if check["status"] not in {"resolved", "overridden"} or check["passed"]:
             raise ValueError("Only a failed resolved check can be pushed")
         if not check["allow_push"]:
@@ -348,14 +454,6 @@ class SkillCheckRepository(SQLiteRepository):
             player_action_id=check.get("player_action_id"),
             pushed_from_check_id=check_id,
         )
-        if check.get("player_action_id"):
-            self.connection.execute(
-                """
-                UPDATE player_actions SET status = 'reviewed', resolved_at = NULL
-                WHERE id = ?
-                """,
-                (check["player_action_id"],),
-            )
         self._add_check_action(
             check_id,
             "pushed",
@@ -459,39 +557,61 @@ class SkillCheckRepository(SQLiteRepository):
         ).fetchone()
         return str(row["id"]) if row is not None else None
 
-    def _resolve_linked_action_when_checks_complete(self, check_id: str) -> None:
+    def list_skill_checks_for_action(
+        self,
+        player_action_id: str,
+    ) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT id FROM skill_checks
+            WHERE player_action_id = ?
+            ORDER BY created_at, id
+            """,
+            (player_action_id,),
+        ).fetchall()
+        return [self.get_skill_check(str(row["id"])) for row in rows]
+
+    def _assert_check_consequence_not_finalized(self, check: dict[str, Any]) -> None:
+        action_id = check.get("player_action_id")
+        if not action_id:
+            return
+        row = self.connection.execute(
+            "SELECT status FROM player_actions WHERE id = ?",
+            (action_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Linked player action no longer exists")
+        if row["status"] in {"resolved", "rejected"}:
+            raise ValueError(
+                "The check consequence is already finalized and cannot be changed"
+            )
+
+    def _notify_consequence_ready_when_checks_terminal(self, check_id: str) -> None:
         check = self.get_skill_check(check_id)
         action_id = check.get("player_action_id")
         if not action_id:
             return
-        pending = self.connection.execute(
-            """
-            SELECT id FROM skill_checks
-            WHERE player_action_id = ? AND status = 'requested'
-            LIMIT 1
-            """,
+        action = self.connection.execute(
+            "SELECT status FROM player_actions WHERE id = ?",
             (action_id,),
         ).fetchone()
-        if pending is not None:
+        if action is None or action["status"] != "reviewed":
             return
-        updated = self.connection.execute(
-            """
-            UPDATE player_actions
-            SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND status = 'reviewed'
-            """,
-            (action_id,),
-        )
-        if updated.rowcount != 1:
+        checks = self.list_skill_checks_for_action(str(action_id))
+        if not checks or any(item["status"] == "requested" for item in checks):
             return
+        snapshot = build_check_consequence_snapshot(checks)
         self.append_realtime_event(
             session_id=str(check["session_id"]),
             campaign_id=str(check["campaign_id"]),
             audience="kp",
-            event_type="player_action.resolved",
+            event_type="check.consequence_ready",
             resource_type="player_action",
             resource_id=str(action_id),
-            payload={"resolved_by": "skill_checks"},
+            payload={
+                "status": "reviewed",
+                "result_fingerprint": snapshot["result_fingerprint"],
+            },
         )
 
     def _append_check_realtime(self, check_id: str, event_type: str) -> None:

@@ -17,6 +17,7 @@ type Props = {
   onCreate: (input: CreateSkillCheckInput) => void;
   onResolveDigital: (checkId: string) => void;
   onResolvePhysical: (checkId: string, onesDigit: number, tensDigits: number[]) => void;
+  onGenerateConsequence: (checkId: string) => void;
   onReplay: (checkId: string) => void;
   onOverride: (
     checkId: string,
@@ -141,6 +142,13 @@ export function CheckPanel(props: Props) {
           const canResolve = check.status === "requested" && (
             props.identity?.role === "kp" || check.roller_member_id === props.identity?.member_id
           );
+          const linkedChecks = check.player_action_id
+            ? props.checks.filter((item) => item.player_action_id === check.player_action_id)
+            : [];
+          const consequenceReady = linkedChecks.length > 0
+            && linkedChecks.every((item) =>
+              ["resolved", "overridden", "cancelled"].includes(item.status))
+            && !props.checks.some((item) => item.pushed_from_check_id === check.id);
           return (
             <article className={`check-card ${check.status} ${check.passed === true ? "passed" : check.passed === false ? "failed" : ""}`} key={check.id}>
               <div className="check-card-heading">
@@ -177,6 +185,19 @@ export function CheckPanel(props: Props) {
 
               {check.status !== "requested" && check.status !== "cancelled" && (
                 <button className="ghost-button" onClick={() => props.onReplay(check.id)} type="button"><RotateCcw size={14} />重放校验</button>
+              )}
+
+              {props.identity?.role === "kp"
+                && check.player_action_id
+                && consequenceReady && (
+                <button
+                  className="primary-button"
+                  disabled={props.loading}
+                  onClick={() => props.onGenerateConsequence(check.id)}
+                  type="button"
+                >
+                  生成/打开检定后果草稿
+                </button>
               )}
 
               {props.identity?.role === "kp" && (

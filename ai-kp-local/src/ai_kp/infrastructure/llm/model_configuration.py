@@ -94,19 +94,37 @@ async def discover_openai_models(
     api_key: str,
     *,
     timeout_seconds: float = 10,
+    client: httpx.AsyncClient | None = None,
 ) -> list[str]:
     normalized = normalize_openai_base_url(base_url)
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        response = await client.get(f"{normalized}/models", headers=headers)
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            detail = response.text.replace("\n", " ")[:500]
-            raise RuntimeError(
-                f"模型服务返回 HTTP {response.status_code}：{detail}"
-            ) from exc
+    try:
+        if client is None:
+            async with httpx.AsyncClient() as temporary_client:
+                response = await temporary_client.get(
+                    f"{normalized}/models",
+                    headers=headers,
+                    timeout=timeout_seconds,
+                )
+        else:
+            response = await client.get(
+                f"{normalized}/models",
+                headers=headers,
+                timeout=timeout_seconds,
+            )
+    except httpx.RequestError as exc:
+        raise RuntimeError(f"无法连接模型服务 {normalized}：{exc}") from exc
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = response.text.replace("\n", " ")[:500]
+        raise RuntimeError(
+            f"模型服务返回 HTTP {response.status_code}：{detail}"
+        ) from exc
+    try:
         payload = response.json()
+    except ValueError as exc:
+        raise RuntimeError("模型服务返回了无效 JSON") from exc
     models = payload.get("data", []) if isinstance(payload, dict) else []
     return [
         str(item["id"])

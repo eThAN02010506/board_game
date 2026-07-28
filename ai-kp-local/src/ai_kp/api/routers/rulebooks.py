@@ -1,15 +1,15 @@
-from urllib.parse import unquote
-
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from ai_kp.api.authz import require_local_admin
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.schemas import RuleExecuteRequest, RuleQueryRequest
+from ai_kp.api.uploads import read_limited_body, safe_upload_filename
 from ai_kp.application.rulebook_service import RulebookService
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.knowledge.minirag import MiniRagOriginalIndex
-from ai_kp.infrastructure.knowledge.pdf_ingestion import extract_rulebook_pdf
+from ai_kp.infrastructure.knowledge.pdf_ingestion import MAX_PDF_BYTES, extract_rulebook_pdf
 from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
@@ -42,10 +42,14 @@ async def ingest_rulebook(
     _admin: None = Depends(require_local_admin),
     service: RulebookService = Depends(get_rulebook_service),
 ) -> dict:
-    data = await request.body()
-    filename = unquote(x_file_name or "rulebook.pdf")
-    return service.ingest_pdf(
-        data, filename, ruleset_id=ruleset_id, title=title
+    data = await read_limited_body(request, max_bytes=MAX_PDF_BYTES, label="规则书 PDF")
+    filename = safe_upload_filename(x_file_name, default="rulebook.pdf")
+    return await run_in_threadpool(
+        service.ingest_pdf,
+        data,
+        filename,
+        ruleset_id=ruleset_id,
+        title=title,
     )
 
 
@@ -85,6 +89,7 @@ async def index_rulebook(
 @router.post("/rulebooks/sources/{source_id}/extract-rules")
 async def extract_rulebook_rules(
     source_id: str,
+    request: Request,
     limit: int = Query(default=10, ge=1, le=100),
     retry_failed: bool = Query(default=False),
     _admin: None = Depends(require_local_admin),
@@ -96,14 +101,18 @@ async def extract_rulebook_rules(
         settings.llm_api_key,
         settings.llm_model,
         max_tokens=8192,
+        client=getattr(request.app.state, "http_client", None),
     )
-    return await service.extract_rules(
-        source_id,
-        llm,
-        model_name=settings.llm_model,
-        limit=limit,
-        retry_failed=retry_failed,
-    )
+    try:
+        return await service.extract_rules(
+            source_id,
+            llm,
+            model_name=settings.llm_model,
+            limit=limit,
+            retry_failed=retry_failed,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/rules/query")

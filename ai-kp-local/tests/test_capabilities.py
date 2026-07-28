@@ -30,12 +30,14 @@ class CapabilityPlaceholderTests(unittest.TestCase):
         expected = {
             "module_library",
             "module_document_import",
+            "world_expansion",
             "party_route_planning",
             "check_resolution",
             "ruleset_plugins",
             "character_timeline",
             "npc_reappearance",
             "memory_workspace",
+            "world_fact_ledger",
             "semantic_memory_search",
             "map_asset_revisions",
             "map_reveal_editor",
@@ -49,6 +51,19 @@ class CapabilityPlaceholderTests(unittest.TestCase):
         self.assertEqual(expected, set(unfinished))
         self.assertTrue(all(status in {"partial", "planned"} for status in unfinished.values()))
 
+    def test_world_fact_plan_preserves_event_authority_and_epistemic_boundaries(self) -> None:
+        capability = next(
+            item for item in CAPABILITIES if item.id == "world_fact_ledger"
+        )
+        plan_text = " ".join((capability.summary, *capability.acceptance))
+
+        self.assertEqual(capability.status, "partial")
+        self.assertIn("权威事件流", plan_text)
+        self.assertIn("追加", plan_text)
+        self.assertIn("角色认知", plan_text)
+        self.assertIn("AI hypothesis", plan_text)
+        self.assertIn("proposal_approval", capability.dependencies)
+
     def test_quantization_plan_keeps_four_and_eight_bit_profiles_deferred(self) -> None:
         capability = next(
             item for item in CAPABILITIES if item.id == "model_quantization_profiles"
@@ -61,6 +76,38 @@ class CapabilityPlaceholderTests(unittest.TestCase):
         self.assertIn("不实现", plan_text)
         self.assertIn("真实 AI KP 样例", plan_text)
         self.assertIn("model_management", capability.dependencies)
+
+    def test_module_import_is_pdf_word_only_and_preserves_embedded_images(
+        self,
+    ) -> None:
+        capability = next(
+            item for item in CAPABILITIES if item.id == "module_document_import"
+        )
+
+        self.assertEqual("PDF/Word KP 本导入", capability.label)
+        self.assertIn("照片", capability.summary)
+        self.assertTrue(
+            any("PDF/Word 以外" in item for item in capability.acceptance)
+        )
+        self.assertTrue(
+            any("没有视觉模型" in item for item in capability.acceptance)
+        )
+
+    def test_world_expansion_keeps_generated_content_below_authoritative_facts(
+        self,
+    ) -> None:
+        capability = next(
+            item for item in CAPABILITIES if item.id == "world_expansion"
+        )
+        plan_text = " ".join((capability.summary, *capability.acceptance))
+
+        self.assertEqual("partial", capability.status)
+        self.assertIn("Canon", plan_text)
+        self.assertIn("剧情锚点保持可达", plan_text)
+        self.assertIn("生成内容在批准", plan_text)
+        self.assertIn("时代、地域、聚落规模", plan_text)
+        self.assertIn("world_fact_ledger", capability.dependencies)
+        self.assertIn("proposal_approval", capability.dependencies)
 
     def test_public_catalog_endpoint_can_filter_available_features(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -18,6 +18,20 @@ The catalogue covers both current MVP foundations and the complete planned surfa
 
 Source files or placeholder UI alone do not justify `partial` or `available`. A partial implementation must describe exactly what works and what remains in the catalogue summary.
 
+## Current Check-Resolution Boundary
+
+The `check_resolution` capability remains `partial`, but the result-driven second stage is no
+longer a missing backend item. Terminal checks linked to one player action are normalized into a
+leaf-only AI snapshot and a full-chain SHA-256 fingerprint. The KP-only consequence endpoint
+creates an idempotent draft, and ordinary proposal approval revalidates that fingerprint before
+atomically committing supported narration and world effects.
+
+The CoC7 opposed-check comparator is also implemented as a pure, replay-tested ruleset operation.
+What remains for that slice is persistence plus API and UI orchestration. Delivery status and the
+machine-readable summary remain authoritative in `src/ai_kp/planning/capabilities.py`; the
+complete backend state flow is documented in
+[`CHECK_RESOLUTION.md`](CHECK_RESOLUTION.md).
+
 ## Adding or Updating a Capability
 
 1. Add or update one catalogue entry with a stable ID, explicit audience, dependencies, and at least one observable acceptance criterion.

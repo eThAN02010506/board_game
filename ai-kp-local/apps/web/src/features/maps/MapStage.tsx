@@ -264,7 +264,7 @@ export function MapStage({
               {props.activeMap.image_generation?.unavailable_reason ===
               "legacy_map_requires_revision"
                 ? "这张旧地图需要先升级为 MapSpec revision，结构 SVG 仍可正常使用。"
-                : "尚未配置独立图片模型；结构地图与时代 SVG 已可完整使用。配置 AI_KP_IMAGE_BASE_URL / AI_KP_IMAGE_MODEL 后即可生成位图。"}
+                : "尚未配置独立图片模型；结构地图与时代 SVG 已可完整使用。请前往“模型设置 → 地图图片模型”检测并保存服务。"}
             </small>
           )}
           {props.activeMap.assets?.length ? (

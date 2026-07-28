@@ -12,6 +12,14 @@ Use a fixed fixture campaign such as `雾港 1928` to test memory behavior after
 6. Model switch: changing the LLM does not change stored facts.
 7. False recall: the AI should say it has no record when a fact was never stored.
 8. Module boundary correctness: player views cannot read KP-only or secret chunks.
+9. Scope isolation: a player query can include that PC's memories and table-shared memories, but
+   never another PC's private memory or a different campaign's memory.
+10. Empty boundaries: an empty query, empty visibility set, or non-positive limit returns no
+    results without constructing invalid SQL.
+11. Stable replay: equal-score memories and NPC candidates keep the same order across repeated
+    reads.
+12. NPC matching normalization: location and profession hints ignore surrounding whitespace and
+    case, while Chinese action text can overlap Chinese notes without relying on spaces.
 
 ## Real Case Test
 
@@ -26,3 +34,10 @@ Expected:
 - A totally unrelated NPC should not appear.
 - Secret notes must not be shown to the player.
 - KP module chunks tagged `secret` must not enter normal context unless explicitly revealed.
+
+Run the focused deterministic suite with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
+  .venv/bin/python -m unittest tests.test_memory tests.test_context_builder
+```

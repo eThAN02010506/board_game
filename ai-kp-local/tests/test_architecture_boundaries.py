@@ -9,6 +9,7 @@ from ai_kp.api import main as compatibility_main
 from ai_kp.application.world_service import WorldService
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
+from ai_kp.infrastructure.database.facts import FactRepository
 from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
 from ai_kp.infrastructure.database.investigators import InvestigatorRepository
 from ai_kp.infrastructure.database.maps import MapRepository
@@ -162,17 +163,17 @@ def _service_method_calls(path: Path) -> set[tuple[str, str]]:
 
     calls: set[tuple[str, str]] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        if not isinstance(node, ast.Attribute):
             continue
-        receiver = node.func.value
+        receiver = node.value
         if (
             isinstance(receiver, ast.Call)
             and isinstance(receiver.func, ast.Name)
             and receiver.func.id.endswith("Service")
         ):
-            calls.add((receiver.func.id, node.func.attr))
+            calls.add((receiver.func.id, node.attr))
         elif isinstance(receiver, ast.Name) and receiver.id in service_variables:
-            calls.add((service_variables[receiver.id], node.func.attr))
+            calls.add((service_variables[receiver.id], node.attr))
     return calls
 
 
@@ -348,6 +349,7 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
             ("MapService", "move_token"),
         },
         "turns.py": {
+            ("CheckConsequenceService", "generate"),
             ("TurnService", "submit_player_action"),
             ("TurnService", "create_manual_proposal"),
             ("TurnService", "approve"),
@@ -380,6 +382,7 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
 def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     assert Repository.__bases__ == (
         WorldRepository,
+        FactRepository,
         TurnRepository,
         MapRepository,
         ContextAssemblyRepository,
@@ -393,6 +396,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     )
     assert Repository.__mro__.count(SQLiteRepository) == 1
     assert Repository.create_campaign is WorldRepository.create_campaign
+    assert Repository.append_fact_entry is FactRepository.append_fact_entry
     assert Repository.create_turn_proposal is TurnRepository.create_turn_proposal
     assert Repository.create_map is MapRepository.create_map
     assert Repository.create_context_assembly is ContextAssemblyRepository.create_context_assembly
@@ -406,10 +410,14 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         Repository.save_model_configuration
         is ModelConfigurationRepository.save_model_configuration
     )
+    assert (
+        Repository.save_image_model_configuration
+        is ModelConfigurationRepository.save_image_model_configuration
+    )
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 13
+    assert LATEST_SCHEMA_VERSION == 14
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -424,6 +432,7 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (11, "add_replayable_skill_checks"),
         (12, "add_versioned_map_specs_and_assets"),
         (13, "backfill_map_revisions_and_guard_pointers"),
+        (14, "add_image_model_configuration"),
     ]
 
 

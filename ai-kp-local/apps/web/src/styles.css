@@ -358,8 +358,34 @@ h2 {
 }
 
 .model-settings-main,
-.model-runtime-card {
+.model-runtime-card,
+.image-model-settings-card {
   min-width: 0;
+}
+
+.image-model-settings-card {
+  grid-column: 1 / -1;
+}
+
+.model-settings-form.image-model-settings-form {
+  grid-template-columns: minmax(0, 1.5fr) minmax(190px, 0.7fr) minmax(180px, 0.65fr);
+}
+
+.model-settings-form.image-model-settings-form label:first-child {
+  grid-column: auto;
+}
+
+.image-model-safety-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  border: 1px solid #bfd6c9;
+  border-radius: 9px;
+  background: #edf7f1;
+  color: #315f4b;
+  padding: 10px 12px;
+  font-size: 12px;
 }
 
 .model-provider-grid {
@@ -3033,6 +3059,15 @@ pre {
   .seat-create-form,
   .seat-claim-form {
     grid-template-columns: 1fr;
+  }
+
+  .model-settings-form,
+  .model-settings-form.image-model-settings-form {
+    grid-template-columns: 1fr;
+  }
+
+  .model-settings-form.image-model-settings-form label:first-child {
+    grid-column: 1;
   }
 
   .model-runtime-card {

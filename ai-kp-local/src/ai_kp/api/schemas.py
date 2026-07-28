@@ -28,6 +28,10 @@ class SessionJoin(BaseModel):
     pc_id: str | None = None
 
 
+class SessionKpCredentialRecovery(BaseModel):
+    kp_display_name: str = Field(min_length=1, max_length=80)
+
+
 class SessionMemberPcAssign(BaseModel):
     pc_id: str
 
@@ -124,6 +128,13 @@ class ModelConfigurationUpdate(BaseModel):
     model: str = Field(default="", max_length=300)
     local_model_path: str | None = Field(default=None, max_length=2000)
     local_port: int = Field(default=8011, ge=1024, le=65535)
+
+
+class ImageModelConfigurationUpdate(BaseModel):
+    base_url: str = Field(min_length=1, max_length=500)
+    api_key: str | None = Field(default=None, max_length=1000)
+    model: str = Field(default="", max_length=300)
+    timeout_seconds: float = Field(default=300, ge=10, le=1800)
 
 
 class InvestigatorSubmit(BaseModel):

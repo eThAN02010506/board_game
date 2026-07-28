@@ -39,6 +39,58 @@ class StructuredTurnOutputTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(StructuredOutputError):
             parse_kp_turn_output(json.dumps(payload, ensure_ascii=False))
 
+    def test_parser_rejects_whitespace_only_required_text(self) -> None:
+        for field, value in (
+            ("public_narration", " \n\t "),
+            (
+                "proposed_checks",
+                [
+                    {
+                        "skill": "　",
+                        "difficulty": "regular",
+                        "reason": "需要检定",
+                    }
+                ],
+            ),
+        ):
+            with self.subTest(field=field):
+                payload = valid_output()
+                payload[field] = value
+
+                with self.assertRaises(StructuredOutputError):
+                    parse_kp_turn_output(json.dumps(payload, ensure_ascii=False))
+
+    def test_parser_trims_valid_structured_text(self) -> None:
+        payload = valid_output()
+        payload["public_narration"] = "  门后传来钟声。 \n"
+        payload["kp_notes"] = "\t 仅 KP 可见。 "
+
+        output = parse_kp_turn_output(json.dumps(payload, ensure_ascii=False))
+
+        self.assertEqual(output.public_narration, "门后传来钟声。")
+        self.assertEqual(output.kp_notes, "仅 KP 可见。")
+
+    def test_parser_rejects_world_effects_before_a_proposed_check_resolves(self) -> None:
+        payload = valid_output()
+        payload["proposed_checks"] = [
+            {
+                "skill": "侦查",
+                "difficulty": "regular",
+                "reason": "检查窗框",
+            }
+        ]
+        payload["proposed_memories"] = [
+            {
+                "text": "窗框上有黑泥。",
+                "scope": "clue",
+                "importance": 2,
+                "visibility": "table",
+            }
+        ]
+
+        with self.assertRaisesRegex(StructuredOutputError, "unresolved checks"):
+            parse_kp_turn_output(json.dumps(payload, ensure_ascii=False))
+
     async def test_orchestrator_repairs_invalid_model_json_once(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             with db_session(Path(tmpdir) / "test.sqlite3") as connection:

@@ -12,6 +12,9 @@ from pypdf import PdfReader
 from ai_kp.platform.knowledge.sources import ExtractedRulebook
 
 MAX_PDF_BYTES = 64 * 1024 * 1024
+MAX_PDF_PAGES = 1200
+MAX_PAGE_CONTENT_BYTES = 16 * 1024 * 1024
+MAX_EXTRACTED_CHARACTERS = 12_000_000
 MAX_CHUNK_CHARACTERS = 2600
 HEADING_PATTERN = re.compile(r"^(第[一二三四五六七八九十百]+章|\d+(?:\.\d+)+)\s*(.+)?$")
 
@@ -44,7 +47,21 @@ def _split_page(text: str) -> list[str]:
     return blocks
 
 
+def _page_content_size(page: Any, page_number: int) -> int | None:
+    get_contents = getattr(page, "get_contents", None)
+    if get_contents is None:
+        return None
+    try:
+        contents = get_contents()
+        return len(contents.get_data()) if contents is not None else 0
+    except Exception as error:
+        raise ValueError(f"第 {page_number} 页内容流读取失败") from error
+
+
 def _page_blocks(page: Any, page_number: int) -> list[str]:
+    content_size = _page_content_size(page, page_number)
+    if content_size is not None and content_size > MAX_PAGE_CONTENT_BYTES:
+        raise ValueError(f"第 {page_number} 页解压内容超过 16 MiB 限制")
     try:
         return _split_page(_normalize_page_text(page.extract_text() or ""))
     except Exception as error:
@@ -72,8 +89,12 @@ def _extract_chunks(reader: PdfReader, source_hash: str) -> list[dict[str, Any]]
     chunks: list[dict[str, Any]] = []
     chapter: str | None = None
     section: str | None = None
+    extracted_characters = 0
     for page_number, page in enumerate(reader.pages, start=1):
         for block in _page_blocks(page, page_number):
+            extracted_characters += len(block)
+            if extracted_characters > MAX_EXTRACTED_CHARACTERS:
+                raise ValueError("规则书提取文本超过 1200 万字符限制")
             chapter, section = _heading_scope(block, chapter, section)
             order_index = len(chunks)
             chunks.append(
@@ -106,6 +127,9 @@ def extract_rulebook_pdf(data: bytes, filename: str) -> ExtractedRulebook:
         raise ValueError("无法解析规则书 PDF") from exc
     if reader.is_encrypted:
         raise ValueError("不接受加密的规则书 PDF")
+    page_count = len(reader.pages)
+    if page_count > MAX_PDF_PAGES:
+        raise ValueError(f"规则书超过 {MAX_PDF_PAGES} 页限制")
 
     metadata = {
         str(key).lstrip("/"): str(value)
@@ -118,7 +142,7 @@ def extract_rulebook_pdf(data: bytes, filename: str) -> ExtractedRulebook:
         raise ValueError("规则书没有可提取的文本层；需要先执行 OCR")
     return ExtractedRulebook(
         source_hash=source_hash,
-        page_count=len(reader.pages),
+        page_count=page_count,
         title=title,
         metadata=metadata,
         chunks=chunks,

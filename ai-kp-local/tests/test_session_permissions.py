@@ -178,6 +178,30 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(join_code_as_bearer.status_code, 401)
         self.assertEqual(token_as_join_code.status_code, 422)
 
+    async def test_local_admin_can_reissue_existing_kp_without_replacing_session(self) -> None:
+        recovered = await self.client.post(
+            f"/campaigns/{self.campaign_a['id']}/sessions/recover-kp",
+            json={"kp_display_name": "Keeper A"},
+        )
+        self.assertEqual(recovered.status_code, 200)
+        bundle = recovered.json()
+        self.assertEqual(bundle["session"]["id"], self.session_a["session"]["id"])
+        self.assertEqual(bundle["member"]["id"], self.session_a["member"]["id"])
+        self.assertEqual(bundle["member"]["role"], "kp")
+
+        old_auth = await self.client.get("/auth/me", headers=self.kp_a_headers)
+        new_headers = bearer(bundle["access_token"])
+        new_auth = await self.client.get("/auth/me", headers=new_headers)
+        persisted_map = await self.client.get(
+            f"/maps/{self.map_a['id']}",
+            params={"view": "kp"},
+            headers=new_headers,
+        )
+        self.assertEqual(old_auth.status_code, 401)
+        self.assertEqual(new_auth.status_code, 200)
+        self.assertEqual(new_auth.json()["display_name"], "Keeper A")
+        self.assertEqual(persisted_map.status_code, 200)
+
     async def test_player_cannot_read_kp_views_or_cross_campaign_resources(self) -> None:
         proposal = (
             await self.client.post(
@@ -667,7 +691,13 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
                 headers={"X-Forwarded-For": "127.0.0.1"},
                 json={"title": "Spoofed campaign"},
             )
+            recover = await remote_client.post(
+                f"/campaigns/{self.campaign_a['id']}/sessions/recover-kp",
+                headers={"X-Forwarded-For": "127.0.0.1"},
+                json={"kp_display_name": "Keeper A"},
+            )
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(recover.status_code, 403)
 
     async def test_local_bootstrap_can_be_disabled_and_admin_token_is_required_remotely(self) -> None:
         secure_db_path = Path(self.tmpdir.name) / "secure-admin.sqlite3"

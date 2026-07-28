@@ -3,6 +3,8 @@
 import sqlite3
 from dataclasses import dataclass
 
+from ai_kp.platform.memory.retrieval import tokenize
+
 
 @dataclass(frozen=True)
 class NpcCandidate:
@@ -24,6 +26,9 @@ class NpcCandidateService:
         profession_hint: str | None = None,
         limit: int = 3,
     ) -> list[NpcCandidate]:
+        if limit <= 0:
+            return []
+
         rows = self.connection.execute(
             """
             SELECT n.*, cn.relationship_score, cn.notes, cn.last_seen_time
@@ -33,21 +38,32 @@ class NpcCandidateService:
             """,
             (campaign_id,),
         ).fetchall()
-        action_lower = action_text.lower()
+        action_normalized = action_text.casefold()
+        action_tokens = tokenize(action_text)
+        location_normalized = location.strip().casefold() if location else ""
+        profession_normalized = profession_hint.strip().casefold() if profession_hint else ""
         candidates: list[NpcCandidate] = []
         for row in rows:
             score = int(row["relationship_score"] or 0)
             reasons: list[str] = []
-            if profession_hint and row["profession"] and profession_hint in row["profession"]:
+            if (
+                profession_normalized
+                and row["profession"]
+                and profession_normalized in row["profession"].casefold()
+            ):
                 score += 3
-                reasons.append(f"profession matches {profession_hint}")
-            if location and row["home_location"] and location in row["home_location"]:
+                reasons.append(f"profession matches {profession_hint.strip()}")
+            if (
+                location_normalized
+                and row["home_location"]
+                and location_normalized in row["home_location"].casefold()
+            ):
                 score += 2
-                reasons.append(f"location matches {location}")
-            if row["name"].lower() in action_lower:
+                reasons.append(f"location matches {location.strip()}")
+            if row["name"].casefold() in action_normalized:
                 score += 4
                 reasons.append("player named this NPC")
-            if row["notes"] and any(word in row["notes"].lower() for word in action_lower.split()):
+            if row["notes"] and action_tokens & tokenize(row["notes"]):
                 score += 1
                 reasons.append("past notes overlap with action")
             if score > 0:
@@ -59,5 +75,5 @@ class NpcCandidateService:
                         score=score,
                     )
                 )
-        candidates.sort(key=lambda item: item.score, reverse=True)
+        candidates.sort(key=lambda item: (-item.score, item.name.casefold(), item.npc_id))
         return candidates[:limit]

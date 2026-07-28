@@ -134,6 +134,21 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replay.status_code, 200)
         self.assertTrue(replay.json()["matches_recorded_result"])
 
+        contradictory_override = await self.client.post(
+            f"/checks/{check['id']}/override",
+            headers=self.kp_headers,
+            json={
+                "success_level": "regular",
+                "passed": True,
+                "reason": "A regular success does not pass this hard check.",
+            },
+        )
+        self.assertEqual(
+            contradictory_override.status_code,
+            409,
+            contradictory_override.text,
+        )
+
         override = await self.client.post(
             f"/checks/{check['id']}/override",
             headers=self.kp_headers,
@@ -195,6 +210,17 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pushed.status_code, 200, pushed.text)
         self.assertEqual(pushed.json()["pushed_from_check_id"], failed["id"])
         self.assertFalse(pushed.json()["allow_push"])
+
+        parent_override = await self.client.post(
+            f"/checks/{failed['id']}/override",
+            headers=self.kp_headers,
+            json={
+                "success_level": "failure",
+                "passed": False,
+                "reason": "The pushed result must remain authoritative.",
+            },
+        )
+        self.assertEqual(parent_override.status_code, 409, parent_override.text)
 
         pending = await self.create_check(target=50)
         cancelled = await self.client.post(
@@ -262,6 +288,76 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(linked), 1)
         self.assertEqual(linked[0]["status"], "requested")
+
+    async def test_check_origin_cannot_cross_campaign_boundaries(self) -> None:
+        foreign_campaign = (
+            await self.client.post(
+                "/campaigns",
+                json={"title": "Foreign check origin"},
+            )
+        ).json()
+        foreign_session = (
+            await self.client.post(
+                f"/campaigns/{foreign_campaign['id']}/sessions",
+                json={"kp_display_name": "Foreign Keeper"},
+            )
+        ).json()
+        foreign_headers = bearer(foreign_session["access_token"])
+        foreign_proposal_response = await self.client.post(
+            f"/campaigns/{foreign_campaign['id']}/proposals",
+            headers=foreign_headers,
+            json={
+                "player_action": "A different campaign action.",
+                "public_narration": "This proposal belongs elsewhere.",
+            },
+        )
+        self.assertEqual(
+            foreign_proposal_response.status_code,
+            200,
+            foreign_proposal_response.text,
+        )
+        foreign_proposal = foreign_proposal_response.json()
+        approved = await self.client.post(
+            f"/kp/proposals/{foreign_proposal['id']}/approve",
+            headers=foreign_headers,
+            json={"note": "Make the foreign origin approved."},
+        )
+        self.assertEqual(approved.status_code, 200, approved.text)
+
+        crossed = await self.client.post(
+            f"/campaigns/{self.campaign['id']}/checks",
+            headers=self.kp_headers,
+            json={
+                "skill_name": "侦查",
+                "difficulty": "regular",
+                "target": 60,
+                "roller_member_id": self.player["member"]["id"],
+                "pc_id": self.pc["id"],
+                "proposal_id": foreign_proposal["id"],
+            },
+        )
+        self.assertEqual(crossed.status_code, 409, crossed.text)
+
+    async def test_new_campaign_session_cannot_mutate_an_old_session_check(self) -> None:
+        old_check = await self.create_check(target=60)
+        closed = await self.client.post(
+            f"/sessions/{self.session['session']['id']}/close",
+            headers=self.kp_headers,
+        )
+        self.assertEqual(closed.status_code, 200, closed.text)
+        replacement_session = (
+            await self.client.post(
+                f"/campaigns/{self.campaign['id']}/sessions",
+                json={"kp_display_name": "Replacement Keeper"},
+            )
+        ).json()
+
+        crossed = await self.client.post(
+            f"/checks/{old_check['id']}/cancel",
+            headers=bearer(replacement_session["access_token"]),
+            json={"reason": "This check belongs to the previous session."},
+        )
+        self.assertEqual(crossed.status_code, 403, crossed.text)
 
 
 if __name__ == "__main__":

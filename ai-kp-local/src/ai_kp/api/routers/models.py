@@ -1,10 +1,17 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ai_kp.api.authz import require_local_admin
 from ai_kp.api.dependencies import get_app_settings, get_repo
-from ai_kp.api.schemas import ModelConfigurationUpdate
+from ai_kp.api.schemas import (
+    ImageModelConfigurationUpdate,
+    ModelConfigurationUpdate,
+)
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.images.model_configuration import (
+    apply_image_model_configuration,
+    public_image_model_configuration,
+)
 from ai_kp.infrastructure.llm.local_runtime import LocalModelRuntime
 from ai_kp.infrastructure.llm.model_configuration import (
     apply_model_configuration,
@@ -16,6 +23,24 @@ from ai_kp.infrastructure.llm.model_configuration import (
 
 
 router = APIRouter()
+
+
+async def _discover_models_or_502(
+    base_url: str,
+    api_key: str,
+    request: Request,
+    *,
+    timeout_seconds: float = 10,
+) -> list[str]:
+    try:
+        return await discover_openai_models(
+            base_url,
+            api_key,
+            timeout_seconds=timeout_seconds,
+            client=getattr(request.app.state, "http_client", None),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 def _runtime(request: Request) -> LocalModelRuntime:
@@ -34,6 +59,18 @@ def _effective_api_key(
             return str(existing.get("api_key") or "")
         return ""
     return settings.llm_api_key
+
+
+def _effective_image_api_key(
+    payload: ImageModelConfigurationUpdate,
+    existing: dict | None,
+    settings: Settings,
+) -> str:
+    if payload.api_key is not None:
+        return payload.api_key.strip()
+    if existing:
+        return str(existing.get("api_key") or "")
+    return settings.image_api_key
 
 
 @router.get("/model-settings")
@@ -98,20 +135,79 @@ async def discover_models(
         runtime = _runtime(request).status()
         models: list[str] = []
         if runtime["state"] == "running" and runtime["port"] == payload.local_port:
-            models = await discover_openai_models(
+            models = await _discover_models_or_502(
                 f"http://127.0.0.1:{payload.local_port}/v1",
                 "local",
+                request,
                 timeout_seconds=2,
             )
         return {"models": models, "model_path": model_info, "runtime": runtime}
-    models = await discover_openai_models(
+    models = await _discover_models_or_502(
         payload.base_url or "",
         _effective_api_key(payload, existing, settings),
+        request,
     )
     return {
         "models": models,
         "normalized_base_url": normalize_openai_base_url(payload.base_url or ""),
         "runtime": _runtime(request).status(),
+    }
+
+
+@router.get("/image-model-settings")
+def get_image_model_settings(
+    _admin: None = Depends(require_local_admin),
+    settings: Settings = Depends(get_app_settings),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    return public_image_model_configuration(
+        settings,
+        repo.get_image_model_configuration(),
+    )
+
+
+@router.put("/image-model-settings")
+def update_image_model_settings(
+    payload: ImageModelConfigurationUpdate,
+    request: Request,
+    _admin: None = Depends(require_local_admin),
+    settings: Settings = Depends(get_app_settings),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    existing = repo.get_image_model_configuration()
+    model = payload.model.strip()
+    if not model:
+        raise ValueError("请选择或填写图片模型 ID")
+    saved = repo.save_image_model_configuration(
+        base_url=normalize_openai_base_url(payload.base_url),
+        api_key=_effective_image_api_key(payload, existing, settings),
+        model=model,
+        timeout_seconds=payload.timeout_seconds,
+    )
+    request.app.state.settings = apply_image_model_configuration(settings, saved)
+    return public_image_model_configuration(request.app.state.settings, saved)
+
+
+@router.post("/image-model-settings/discover")
+async def discover_image_models(
+    payload: ImageModelConfigurationUpdate,
+    request: Request,
+    _admin: None = Depends(require_local_admin),
+    settings: Settings = Depends(get_app_settings),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    models = await _discover_models_or_502(
+        payload.base_url,
+        _effective_image_api_key(
+            payload,
+            repo.get_image_model_configuration(),
+            settings,
+        ),
+        request,
+    )
+    return {
+        "models": models,
+        "normalized_base_url": normalize_openai_base_url(payload.base_url),
     }
 
 

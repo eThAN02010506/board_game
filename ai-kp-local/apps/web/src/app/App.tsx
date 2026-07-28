@@ -374,6 +374,26 @@ export default function App() {
     ) rememberSession(bundle);
   }
 
+  async function recoverCampaignKp(campaign = activeCampaign) {
+    if (!campaign) {
+      setLog("请先选择需要恢复 KP 的团。");
+      return;
+    }
+    const version = campaignSelectionVersion.current;
+    credentialBridge.session("");
+    const bundle = await run("重签并恢复 KP 凭证", () =>
+      requestJson<SessionBundle>(`/campaigns/${campaign.id}/sessions/recover-kp`, {
+        method: "POST",
+        body: JSON.stringify({ kp_display_name: kpDisplayName })
+      })
+    );
+    if (
+      bundle &&
+      activeCampaignIdRef.current === campaign.id &&
+      campaignSelectionVersion.current === version
+    ) rememberSession(bundle);
+  }
+
   async function joinSession(event: FormEvent) {
     event.preventDefault();
     credentialBridge.session("");
@@ -688,6 +708,25 @@ export default function App() {
       })
     );
     if (result) void loadSkillChecks(activeCampaign);
+  }
+
+  async function generateCheckConsequence(checkId: string) {
+    if (!activeCampaign || credentialBridge.snapshot().role !== "kp") {
+      setLog("只有 KP 可以生成检定后果草稿。");
+      return;
+    }
+    const campaignId = activeCampaign.id;
+    const result = await run("生成检定后果草稿", () =>
+      requestJson<TurnProposal>(`/checks/${checkId}/consequence-proposal`, {
+        method: "POST"
+      })
+    );
+    if (result && activeCampaignIdRef.current === campaignId) {
+      setProposals((items) => [result, ...items.filter((item) => item.id !== result.id)]);
+      setActiveProposalId(result.id);
+      setProposalContext(null);
+      setOverrideText("");
+    }
   }
 
   async function rotateJoinCode() {
@@ -1270,6 +1309,7 @@ export default function App() {
             onRevokeMember={(memberId) => void revokeMember(memberId)}
             onRevokeSeat={(seatId) => void revokeSessionSeat(seatId)}
             onRotateJoinCode={() => void rotateJoinCode()}
+            onRecoverKp={() => void recoverCampaignKp()}
             onStartSession={() => void startCampaignSession()}
             pcName={pcName}
             pcs={pcs}
@@ -1418,6 +1458,7 @@ export default function App() {
             members={sessionMembers}
             onCancel={(checkId, reason) => void decideSkillCheck(checkId, "cancel", reason)}
             onCreate={(input) => void createSkillCheck(input)}
+            onGenerateConsequence={(checkId) => void generateCheckConsequence(checkId)}
             onOverride={(checkId, successLevel, passed, reason) => void overrideSkillCheck(checkId, successLevel, passed, reason)}
             onPush={(checkId, reason) => void decideSkillCheck(checkId, "push", reason)}
             onRefresh={() => void loadSkillChecks()}

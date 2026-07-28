@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
+from ai_kp.infrastructure.database.migrations import LATEST_SCHEMA_VERSION
 
 
 def _app(tmp_path: Path):
@@ -35,7 +36,7 @@ def test_debug_dashboard_and_diagnostics_are_admin_only(tmp_path: Path) -> None:
     assert diagnostics.status_code == 200
     payload = diagnostics.json()
     assert payload["service"]["status"] == "ok"
-    assert payload["database"]["latest_supported_schema"] == 11
+    assert payload["database"]["latest_supported_schema"] == LATEST_SCHEMA_VERSION
     assert payload["settings"]["llm_api_key_configured"] is True
     assert "must-not-leak" not in diagnostics.text
     assert any(route["path"] == "/debug/diagnostics" for route in payload["routes"])

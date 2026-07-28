@@ -34,6 +34,15 @@ class SessionService:
             pc_id=pc_id,
         )
 
+    def recover_kp(self, campaign_id: str, *, display_name: str) -> dict:
+        normalized_name = display_name.strip()
+        if not normalized_name:
+            raise ValueError("KP display name is required")
+        return self.repo.reissue_campaign_kp_access_token(
+            campaign_id,
+            display_name=normalized_name,
+        )
+
     def revoke_member_and_rotate_code(self, session_id: str, member_id: str) -> dict:
         """Revoke a credential and invalidate the shared join code atomically."""
 

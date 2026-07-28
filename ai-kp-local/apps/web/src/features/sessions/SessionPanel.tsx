@@ -55,6 +55,7 @@ type Props = {
   onRecoverSeat: (seatId: string) => void;
   onRevokeMember: (memberId: string) => void;
   onStartSession: () => void;
+  onRecoverKp: () => void;
   onJoinSession: FormEventHandler<HTMLFormElement>;
 };
 
@@ -282,6 +283,12 @@ export function SessionPanel(props: Props) {
               <input value={props.kpDisplayName} onChange={(event) => props.onKpDisplayNameChange(event.target.value)} />
             </label>
             <button className="secondary-button" disabled={!props.activeCampaignPresent} onClick={props.onStartSession} type="button">为当前团开启 KP 会话</button>
+            <button className="ghost-button" disabled={!props.activeCampaignPresent} onClick={props.onRecoverKp} type="button">
+              重签并恢复当前团 KP
+            </button>
+            <small className="permission-hint">
+              仅限本机管理员。重签会使该 KP 的旧访问令牌失效，但不会关闭会话或删除团数据。
+            </small>
             <div className="session-divider">旧版玩家加入</div>
             <form onSubmit={props.onJoinSession}>
               <label>

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { requestJson } from "../../api/client";
+import { ImageModelSettingsPanel } from "./ImageModelSettingsPanel";
 
 type ProviderType = "openai_compatible" | "local_mlx";
 
@@ -254,5 +255,6 @@ export function ModelSettingsPage() {
       {!runtime?.available && <div className="runtime-install-note"><strong>首次使用本地目录前</strong><code>python -m pip install -e ".[local-model]"</code><span>安装完成后重启 FastAPI 后端。</span></div>}
       <p className="permission-hint">本地模型服务只监听后端机器的 127.0.0.1。页面只能提交模型目录，不会执行用户输入的命令。</p>
     </aside>
+    <ImageModelSettingsPanel />
   </div>;
 }

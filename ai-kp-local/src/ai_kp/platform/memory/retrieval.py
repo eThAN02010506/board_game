@@ -42,7 +42,20 @@ class MemoryRetriever:
         visibility: Iterable[str] = ("table", "kp"),
         limit: int = 8,
     ) -> list[RetrievedMemory]:
-        allowed_visibility = tuple(visibility)
+        if limit <= 0:
+            return []
+
+        query_tokens = tokenize(query)
+        if not query_tokens:
+            return []
+
+        if isinstance(visibility, str):
+            allowed_visibility = (visibility,)
+        else:
+            allowed_visibility = tuple(dict.fromkeys(visibility))
+        if not allowed_visibility:
+            return []
+
         placeholders = ",".join("?" for _ in allowed_visibility)
         params: list[object] = [*allowed_visibility]
         filters = [f"visibility IN ({placeholders})"]
@@ -54,11 +67,14 @@ class MemoryRetriever:
             params.append(pc_id)
         where_clause = " AND ".join(filters)
         rows = self.connection.execute(
-            f"SELECT * FROM memories WHERE {where_clause} ORDER BY importance DESC, created_at DESC",
+            f"""
+            SELECT * FROM memories
+            WHERE {where_clause}
+            ORDER BY importance DESC, created_at DESC, id ASC
+            """,
             params,
         ).fetchall()
 
-        query_tokens = tokenize(query)
         ranked: list[RetrievedMemory] = []
         for row in rows:
             text_tokens = tokenize(row["text"])

@@ -12,6 +12,7 @@ from ai_kp.api.dependencies import (
 from ai_kp.api.schemas import (
     SessionCreate,
     SessionJoin,
+    SessionKpCredentialRecovery,
     SessionMemberPcAssign,
     SessionSeatClaim,
     SessionSeatCreate,
@@ -58,6 +59,22 @@ def join_campaign_session(
         payload.join_code,
         display_name=payload.display_name,
         pc_id=payload.pc_id,
+    )
+
+
+@router.post("/campaigns/{campaign_id}/sessions/recover-kp")
+def recover_campaign_kp_credential(
+    campaign_id: str,
+    payload: SessionKpCredentialRecovery,
+    request: Request,
+    x_ai_kp_admin_token: str | None = Header(default=None),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    if not is_local_admin(request, x_ai_kp_admin_token):
+        raise HTTPException(status_code=403, detail="Local administrator access required")
+    return SessionService(repo).recover_kp(
+        campaign_id,
+        display_name=payload.kp_display_name,
     )
 
 

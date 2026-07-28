@@ -23,11 +23,13 @@ class OpenAICompatibleImageProvider:
         model: str,
         *,
         timeout_seconds: float = 300,
+        client: httpx.AsyncClient | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model_id = model
         self.timeout_seconds = timeout_seconds
+        self.client = client
 
     async def generate(self, request: MapImageRequest) -> MapImageResult:
         payload = {
@@ -85,24 +87,35 @@ class OpenAICompatibleImageProvider:
         payload: dict,
         headers: dict[str, str],
     ) -> tuple[bytes, int]:
+        if self.client is not None:
+            return await self._stream_response(self.client, payload, headers)
+        async with httpx.AsyncClient() as client:
+            return await self._stream_response(client, payload, headers)
+
+    async def _stream_response(
+        self,
+        client: httpx.AsyncClient,
+        payload: dict,
+        headers: dict[str, str],
+    ) -> tuple[bytes, int]:
         body = bytearray()
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/images/generations",
-                json=payload,
-                headers=headers,
-            ) as response:
-                content_length = response.headers.get("content-length")
-                if content_length:
-                    try:
-                        declared_size = int(content_length)
-                    except ValueError:
-                        declared_size = 0
-                    if declared_size > self.max_response_bytes:
-                        raise RuntimeError("图片模型响应超过 48 MiB 上限")
-                async for chunk in response.aiter_bytes():
-                    body.extend(chunk)
-                    if len(body) > self.max_response_bytes:
-                        raise RuntimeError("图片模型响应超过 48 MiB 上限")
-                return bytes(body), response.status_code
+        async with client.stream(
+            "POST",
+            f"{self.base_url}/images/generations",
+            json=payload,
+            headers=headers,
+            timeout=self.timeout_seconds,
+        ) as response:
+            content_length = response.headers.get("content-length")
+            if content_length:
+                try:
+                    declared_size = int(content_length)
+                except ValueError:
+                    declared_size = 0
+                if declared_size > self.max_response_bytes:
+                    raise RuntimeError("图片模型响应超过 48 MiB 上限")
+            async for chunk in response.aiter_bytes():
+                body.extend(chunk)
+                if len(body) > self.max_response_bytes:
+                    raise RuntimeError("图片模型响应超过 48 MiB 上限")
+            return bytes(body), response.status_code

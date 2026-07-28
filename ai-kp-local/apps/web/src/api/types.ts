@@ -565,6 +565,14 @@ export type TurnProposal = {
   id: string;
   campaign_id: string;
   status: string;
+  proposal_kind: "standard" | "check_consequence";
+  check_consequence: {
+    proposal_kind: "check_consequence";
+    origin_proposal_id: string;
+    player_action_id: string;
+    check_ids: string[];
+    result_fingerprint: string;
+  } | null;
   player_action: string;
   public_narration: string;
   kp_notes: string;

@@ -19,6 +19,14 @@ def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+class RealtimeDefaultSettingsTests(unittest.TestCase):
+    def test_default_frontend_origins_include_both_loopback_names(self) -> None:
+        origins = set(Settings(_env_file=None).cors_origin_list)
+
+        self.assertIn("http://localhost:5173", origins)
+        self.assertIn("http://127.0.0.1:5173", origins)
+
+
 class RealtimeWebSocketTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()

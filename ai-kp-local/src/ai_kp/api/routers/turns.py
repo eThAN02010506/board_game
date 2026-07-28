@@ -1,8 +1,12 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ai_kp.application.errors import KpSessionEndedError
+from ai_kp.application.check_consequence_service import (
+    CheckConsequenceService,
+    GenerateCheckConsequenceCommand,
+)
 from ai_kp.application.turn_service import KpTurnCommand, ManualProposalCommand, TurnService
 from ai_kp.api.authz import campaign_for_proposal, require_campaign_role
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
@@ -23,7 +27,10 @@ from ai_kp.platform.sessions.models import AuthenticatedMember
 router = APIRouter()
 
 
-def _create_llm_client(settings: Settings) -> OpenAICompatibleClient:
+def _create_llm_client(
+    settings: Settings,
+    request: Request,
+) -> OpenAICompatibleClient:
     # Keep the original monkeypatch seam available while ``api.main`` remains the
     # public compatibility module. New callers should patch this router instead.
     from ai_kp.api import main as compatibility_main
@@ -33,6 +40,7 @@ def _create_llm_client(settings: Settings) -> OpenAICompatibleClient:
         settings.llm_base_url,
         settings.llm_api_key,
         settings.llm_model,
+        client=getattr(request.app.state, "http_client", None),
     )
 
 
@@ -173,6 +181,7 @@ def reject_proposal(
 @router.post("/kp/turn")
 async def kp_turn(
     payload: KpTurnRequest,
+    request: Request,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
     settings: Settings = Depends(get_app_settings),
@@ -191,7 +200,7 @@ async def kp_turn(
                 active_spoiler_tags=tuple(payload.active_spoiler_tags),
             ),
             identity,
-            KpOrchestrator(repo.connection, _create_llm_client(settings)),
+            KpOrchestrator(repo.connection, _create_llm_client(settings, request)),
             source_model=settings.llm_model,
         )
     except StructuredOutputError as exc:
@@ -201,3 +210,31 @@ async def kp_turn(
         ) from exc
     except KpSessionEndedError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/checks/{check_id}/consequence-proposal")
+async def create_check_consequence_proposal(
+    check_id: str,
+    request: Request,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_app_settings),
+) -> dict:
+    try:
+        return await CheckConsequenceService(repo).generate(
+            GenerateCheckConsequenceCommand(check_id=check_id),
+            identity,
+            KpOrchestrator(repo.connection, _create_llm_client(settings, request)),
+            source_model=settings.llm_model,
+        )
+    except StructuredOutputError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Local model returned invalid consequence output: {exc}",
+        ) from exc
+    except KpSessionEndedError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

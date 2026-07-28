@@ -1,6 +1,5 @@
-from urllib.parse import unquote
-
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from ai_kp.api.authz import require_campaign_role
 from ai_kp.api.dependencies import get_identity, get_player_identity, get_repo
@@ -13,12 +12,14 @@ from ai_kp.api.schemas import (
     InvestigatorSubmit,
     PlayerProfileCreate,
 )
+from ai_kp.api.uploads import read_limited_body, safe_upload_filename
 from ai_kp.application.investigator_service import (
     CreateInvestigatorCommand,
     InvestigatorService,
 )
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.rulesets import DEFAULT_RULESET_ID, get_ruleset
+from ai_kp.rulesets.coc7.character.xlsx_import import MAX_XLSX_BYTES
 from ai_kp.platform.sessions.models import AuthenticatedMember, AuthenticatedPlayer
 
 
@@ -64,9 +65,17 @@ async def preview_investigator_excel(
     _player: AuthenticatedPlayer = Depends(get_player_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
-    filename = unquote(x_file_name or "character.xlsx")
-    data = await request.body()
-    return InvestigatorService(repo, x_ruleset_id).preview_excel(data, filename)
+    filename = safe_upload_filename(x_file_name, default="character.xlsx")
+    data = await read_limited_body(
+        request,
+        max_bytes=MAX_XLSX_BYTES,
+        label="调查员 XLSX",
+    )
+    return await run_in_threadpool(
+        InvestigatorService(repo, x_ruleset_id).preview_excel,
+        data,
+        filename,
+    )
 
 
 @router.post("/investigators/preview")

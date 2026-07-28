@@ -149,7 +149,7 @@ class CheckService:
         reason: str,
     ) -> dict:
         check = self.repo.get_skill_check(check_id)
-        self._require_kp(identity, str(check["campaign_id"]))
+        self._require_kp_check(identity, check)
         return self.repo.override_skill_check(
             check_id,
             actor_member_id=identity.member_id,
@@ -162,14 +162,14 @@ class CheckService:
         self, check_id: str, identity: AuthenticatedMember, *, reason: str
     ) -> dict:
         check = self.repo.get_skill_check(check_id)
-        self._require_kp(identity, str(check["campaign_id"]))
+        self._require_kp_check(identity, check)
         return self.repo.cancel_skill_check(
             check_id, actor_member_id=identity.member_id, reason=reason
         )
 
     def push(self, check_id: str, identity: AuthenticatedMember, *, reason: str) -> dict:
         check = self.repo.get_skill_check(check_id)
-        self._require_kp(identity, str(check["campaign_id"]))
+        self._require_kp_check(identity, check)
         return self.repo.push_skill_check(
             check_id, actor_member_id=identity.member_id, reason=reason
         )
@@ -184,6 +184,16 @@ class CheckService:
         cls._require_campaign(identity, campaign_id)
         if identity.role != "kp":
             raise PermissionError("KP access required")
+
+    @classmethod
+    def _require_kp_check(
+        cls,
+        identity: AuthenticatedMember,
+        check: dict,
+    ) -> None:
+        cls._require_kp(identity, str(check["campaign_id"]))
+        if identity.session_id != check["session_id"]:
+            raise PermissionError("Check belongs to another session")
 
     @classmethod
     def _require_visible(

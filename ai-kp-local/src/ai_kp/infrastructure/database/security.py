@@ -148,6 +148,73 @@ class SecurityRepository:
             "access_token": access_token,
         }
 
+    def reissue_campaign_kp_access_token(
+        self,
+        campaign_id: str,
+        *,
+        display_name: str,
+    ) -> dict:
+        rows = self.connection.execute(
+            """
+            SELECT sm.id, sm.session_id
+            FROM session_members sm
+            JOIN campaign_sessions cs ON cs.id = sm.session_id
+            WHERE sm.campaign_id = ?
+              AND sm.role = 'kp'
+              AND sm.revoked_at IS NULL
+              AND cs.status = 'active'
+              AND sm.display_name = ? COLLATE NOCASE
+            ORDER BY sm.joined_at, sm.id
+            """,
+            (campaign_id, display_name),
+        ).fetchall()
+        if not rows:
+            raise KeyError("Active KP not found for this campaign and display name")
+        if len(rows) != 1:
+            raise ValueError("More than one active KP uses this display name")
+
+        member_id = str(rows[0]["id"])
+        session_id = str(rows[0]["session_id"])
+        access_token = generate_access_token()
+        updated = self.connection.execute(
+            """
+            UPDATE session_members
+            SET token_hash = ?, last_seen_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND revoked_at IS NULL
+              AND EXISTS (
+                SELECT 1 FROM campaign_sessions cs
+                WHERE cs.id = session_members.session_id
+                  AND cs.status = 'active'
+              )
+            """,
+            (hash_access_token(access_token), member_id),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("KP credential could not be reissued")
+
+        campaign = self.connection.execute(
+            "SELECT * FROM campaigns WHERE id = ?",
+            (campaign_id,),
+        ).fetchone()
+        if campaign is None:
+            raise KeyError(f"Campaign not found: {campaign_id}")
+        self.append_realtime_event(
+            session_id=session_id,
+            campaign_id=campaign_id,
+            audience="kp",
+            event_type="session.kp_credential_reissued",
+            resource_type="session_member",
+            resource_id=member_id,
+            payload={"member_id": member_id},
+        )
+        return {
+            "session": self.get_campaign_session(session_id),
+            "member": self.get_session_member(member_id),
+            "campaign": dict(campaign),
+            "access_token": access_token,
+        }
+
     def authenticate_access_token(self, access_token: str) -> AuthenticatedMember | None:
         row = self.connection.execute(
             """

@@ -20,7 +20,7 @@ MemoryScope = Literal[
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
 class CheckCandidate(StrictModel):

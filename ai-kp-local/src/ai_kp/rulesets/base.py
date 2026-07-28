@@ -63,5 +63,16 @@ class Ruleset(Protocol):
         raw_dice: Mapping[str, Any],
     ) -> dict[str, Any]: ...
 
+    def resolve_opposed_check(
+        self,
+        *,
+        left_participant_id: str,
+        left_target: int,
+        left_roll: int,
+        right_participant_id: str,
+        right_target: int,
+        right_roll: int,
+    ) -> dict[str, Any]: ...
+
 
 __all__ = ["Ruleset", "RulesetManifest"]

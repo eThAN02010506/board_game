@@ -1,0 +1,157 @@
+import json
+import unittest
+
+from ai_kp.director.check_consequence import (
+    check_consequence_output_instructions,
+    parse_check_consequence_output,
+)
+from ai_kp.director.turn_output import StructuredOutputError
+from ai_kp.platform.resolution import HIDDEN_CHECK_PUBLIC_NARRATION
+
+
+def payload() -> dict:
+    return {
+        "public_narration": "你在档案柜后发现了一张撕碎的收据。",
+        "kp_notes": "检定结果已验证。",
+        "proposed_checks": [],
+        "proposed_events": [
+            {
+                "event_type": "clue_found",
+                "summary": "调查员发现撕碎的收据。",
+                "actor_type": "pc",
+                "actor_id": None,
+                "visibility": "table",
+                "happened_at": None,
+                "payload": {},
+            }
+        ],
+        "proposed_memories": [],
+        "proposed_npc_updates": [],
+        "proposed_map_moves": [],
+    }
+
+
+class CheckConsequenceOutputTests(unittest.TestCase):
+    def test_accepts_effects_after_a_resolved_check(self) -> None:
+        output = parse_check_consequence_output(
+            json.dumps(payload(), ensure_ascii=False)
+        )
+        self.assertEqual(output.proposed_events[0].event_type, "clue_found")
+
+    def test_rejects_new_checks_and_map_moves(self) -> None:
+        with_check = payload()
+        with_check["proposed_checks"] = [
+            {
+                "skill": "侦查",
+                "difficulty": "regular",
+                "reason": "roll forever",
+                "pc_id": None,
+                "hidden": False,
+            }
+        ]
+        with self.assertRaises(StructuredOutputError):
+            parse_check_consequence_output(json.dumps(with_check))
+
+        with_move = payload()
+        with_move["proposed_map_moves"] = [
+            {
+                "token_id": "token-1",
+                "to_location_name": "vault",
+                "reason": "not in the first slice",
+                "require_route": True,
+            }
+        ]
+        with self.assertRaisesRegex(StructuredOutputError, "cannot move map"):
+            parse_check_consequence_output(json.dumps(with_move))
+
+    def test_hidden_batch_redacts_public_text_but_preserves_kp_only_details(
+        self,
+    ) -> None:
+        hidden_payload = payload()
+        hidden_payload["public_narration"] = (
+            "暗骰 D100=04，是极难成功，所以你立刻发现了密门。"
+        )
+        hidden_payload["kp_notes"] = "暗骰 04，极难成功；密门线索暂不公开。"
+        hidden_payload["proposed_events"][0]["visibility"] = "kp"
+        hidden_payload["proposed_events"][0]["summary"] = "暗骰 04 发现密门。"
+        hidden_payload["proposed_memories"] = [
+            {
+                "text": "暗骰 04 发现密门。",
+                "scope": "clue",
+                "importance": 3,
+                "visibility": "kp",
+                "pc_id": None,
+                "npc_id": None,
+                "happened_at": None,
+            }
+        ]
+
+        output = parse_check_consequence_output(
+            json.dumps(hidden_payload, ensure_ascii=False),
+            hidden_batch=True,
+        )
+
+        self.assertEqual(
+            output.public_narration,
+            HIDDEN_CHECK_PUBLIC_NARRATION,
+        )
+        self.assertNotIn("04", output.public_narration)
+        self.assertIn("04", output.kp_notes)
+        self.assertTrue(
+            all(event.visibility == "kp" for event in output.proposed_events)
+        )
+        self.assertTrue(
+            all(memory.visibility == "kp" for memory in output.proposed_memories)
+        )
+
+    def test_hidden_batch_rejects_non_kp_effects_and_npc_updates(self) -> None:
+        leaking_event = payload()
+        leaking_event["proposed_events"][0]["visibility"] = "player"
+        leaking_memory = payload()
+        leaking_memory["proposed_events"] = []
+        leaking_memory["proposed_memories"] = [
+            {
+                "text": "暗骰大成功。",
+                "scope": "campaign_fact",
+                "importance": 1,
+                "visibility": "table",
+                "pc_id": None,
+                "npc_id": None,
+                "happened_at": None,
+            }
+        ]
+        leaking_npc = payload()
+        leaking_npc["proposed_events"] = []
+        leaking_npc["proposed_npc_updates"] = [
+            {
+                "npc_id": "npc-secret",
+                "appeared": False,
+                "relationship_delta": 2,
+                "last_seen_time": None,
+                "note": "因暗骰结果改变关系。",
+            }
+        ]
+
+        cases = (
+            (leaking_event, "KP-visible events"),
+            (leaking_memory, "KP-visible memories"),
+            (leaking_npc, "cannot propose NPC updates"),
+        )
+        for candidate, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(StructuredOutputError, message):
+                    parse_check_consequence_output(
+                        json.dumps(candidate, ensure_ascii=False),
+                        hidden_batch=True,
+                    )
+
+    def test_hidden_prompt_requires_the_fixed_public_placeholder(self) -> None:
+        instructions = check_consequence_output_instructions(hidden_batch=True)
+
+        self.assertIn(HIDDEN_CHECK_PUBLIC_NARRATION, instructions)
+        self.assertIn('visibility 必须全部为 "kp"', instructions)
+        self.assertIn("proposed_npc_updates 必须为空", instructions)
+
+
+if __name__ == "__main__":
+    unittest.main()

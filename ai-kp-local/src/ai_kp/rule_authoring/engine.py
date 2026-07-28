@@ -8,12 +8,19 @@ from ai_kp.rule_authoring.execution_strategies import (
     execute_lookup,
 )
 from ai_kp.rule_authoring.models import RuleObject
-from ai_kp.rule_authoring.runtime import RuleExecutionError, read_field
+from ai_kp.rule_authoring.runtime import (
+    RuleExecutionError,
+    read_field,
+    validate_json_value,
+)
 
 
 def execute_rule(rule: RuleObject, inputs: dict[str, Any]) -> dict[str, Any]:
     """Execute the closed DSL without evaluating Python expressions."""
 
+    if type(inputs) is not dict:
+        raise RuleExecutionError("Rule inputs must be a JSON object")
+    validate_json_value(inputs, label="rule inputs")
     result = deepcopy(inputs)
     execution = rule.execution
     for required in execution.inputs:
