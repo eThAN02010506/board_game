@@ -147,7 +147,7 @@ class WorldService:
                 "table",
             )
             if view == "player"
-            else ("player", "table", "kp")
+            else ("player", "table", "kp", "secret")
         )
         if view == "player":
             spoiler_tags: tuple[str, ...] | None = ()

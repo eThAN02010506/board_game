@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     rulebook_embedding_dimensions: int = Field(default=384, ge=64, le=2048)
     map_asset_root: Path = Field(default=Path("data/map-assets"))
     module_asset_root: Path = Field(default=Path("data/module-assets"))
+    tesseract_command: str = Field(default="tesseract", min_length=1, max_length=500)
+    tesseract_timeout_seconds: float = Field(default=60, ge=5, le=600)
     backup_root: Path = Field(default=Path("data/backups"))
     backup_max_files: int = Field(default=20_000, ge=1, le=100_000)
     backup_max_uncompressed_bytes: int = Field(

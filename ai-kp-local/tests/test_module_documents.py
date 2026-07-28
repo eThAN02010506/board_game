@@ -145,6 +145,77 @@ def test_kp_document_import_realcase_is_durable_retryable_and_private(
         assert chunks.json()[1]["source_locator"] == "docx:paragraph:2"
         assert assets.status_code == 200
         assert assets.json()[0]["analysis_status"] == "pending_analysis"
+        capabilities = client.get(
+            "/module-analysis/capabilities",
+            params={"campaign_id": campaign["id"]},
+            headers=kp_headers,
+        )
+        assert capabilities.status_code == 200
+        assert "languages" in capabilities.json()["tesseract"]
+
+        first_chapter = chunks.json()[1]
+        scoped = client.patch(
+            f"/modules/{job['module_id']}/sections",
+            headers=kp_headers,
+            json={
+                "title": first_chapter["title"],
+                "visibility": "player",
+                "spoiler_tag": "act-2",
+            },
+        )
+        assert scoped.status_code == 200
+        assert scoped.json()["chunk_count"] >= 1
+        hidden_search = client.get(
+            f"/modules/{job['module_id']}/search",
+            params={"q": "旧照片"},
+            headers=player_headers,
+        )
+        assert hidden_search.status_code == 200
+        assert hidden_search.json() == []
+        forced_spoiler_search = client.get(
+            f"/modules/{job['module_id']}/search",
+            params={"q": "旧照片", "spoiler_tag": "act-2"},
+            headers=player_headers,
+        )
+        assert forced_spoiler_search.status_code == 200
+        assert forced_spoiler_search.json() == []
+
+        candidate = client.post(
+            f"/modules/{job['module_id']}/knowledge/candidates",
+            headers=kp_headers,
+            json={
+                "kind": "module_canon",
+                "title": "仓库照片",
+                "statement": "仓库藏有一张旧照片。",
+                "confidence": 1,
+                "visibility": "kp",
+                "citations": [
+                    {
+                        "chunk_id": first_chapter["id"],
+                        "evidence_text": "码头仓库中藏着一张旧照片。",
+                    }
+                ],
+            },
+        )
+        assert candidate.status_code == 200
+        assert candidate.json()["status"] == "pending"
+        reviewed = client.post(
+            f"/module-knowledge/{candidate.json()['id']}/review",
+            headers=kp_headers,
+            json={"decision": "approved"},
+        )
+        assert reviewed.status_code == 200
+        assert reviewed.json()["status"] == "approved"
+        kp_search = client.get(
+            f"/modules/{job['module_id']}/search",
+            params={"q": "旧照片"},
+            headers=kp_headers,
+        )
+        assert kp_search.status_code == 200
+        assert {item["source_type"] for item in kp_search.json()} >= {
+            "chunk",
+            "knowledge",
+        }
         content = client.get(
             f"/module-assets/{assets.json()[0]['id']}/content",
             headers=kp_headers,

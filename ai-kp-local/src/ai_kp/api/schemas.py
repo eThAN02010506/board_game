@@ -181,6 +181,28 @@ class ImageModelConfigurationUpdate(BaseModel):
     timeout_seconds: float = Field(default=300, ge=10, le=1800)
 
 
+class ModuleSectionScopeUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    visibility: Literal["player", "table", "kp", "secret"] = "kp"
+    spoiler_tag: str | None = Field(default=None, max_length=160)
+
+
+class ModuleAssetAnalyzeRequest(BaseModel):
+    mode: Literal["tesseract", "vision"]
+    language: str = Field(default="eng", min_length=2, max_length=80)
+
+
+class ModuleKnowledgeReview(BaseModel):
+    decision: Literal["approved", "rejected"]
+    note: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_rejection_note(self) -> "ModuleKnowledgeReview":
+        if self.decision == "rejected" and not (self.note or "").strip():
+            raise ValueError("Rejected candidates require a review note")
+        return self
+
+
 class InvestigatorSubmit(BaseModel):
     revision_id: str | None = None
 

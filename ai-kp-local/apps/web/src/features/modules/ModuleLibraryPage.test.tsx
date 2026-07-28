@@ -30,6 +30,12 @@ const identity = {
 describe("ModuleLibraryPage", () => {
   beforeEach(() => {
     vi.mocked(requestJson).mockImplementation(async (url) => {
+      if (url.startsWith("/module-analysis/capabilities")) {
+        return {
+          tesseract: { available: true, version: "tesseract 5", languages: ["eng"] },
+          vision: { configured: true, model: "vision-local" }
+        };
+      }
       if (url.endsWith("/module-imports")) return [];
       if (url.endsWith("/modules")) {
         return [{
@@ -60,6 +66,7 @@ describe("ModuleLibraryPage", () => {
         }];
       }
       if (url.endsWith("/assets")) return [];
+      if (url.endsWith("/knowledge/candidates")) return [];
       return {};
     });
     vi.mocked(requestBlob).mockResolvedValue(new Blob());

@@ -5,6 +5,7 @@ from typing import Any, Protocol
 from ai_kp.platform.memory.npc_candidates import NpcCandidate
 from ai_kp.platform.memory.retrieval import RetrievedMemory
 from ai_kp.platform.modules.ingestion import ModuleChunk
+from ai_kp.platform.modules.knowledge import ModuleKnowledgeCandidate
 from ai_kp.platform.scenes.map_generation import GeneratedMap
 
 
@@ -91,6 +92,37 @@ class MapImageStore(Protocol):
     def create_map_asset(self, **values: Any) -> dict[str, Any]: ...
 
     def repair_map_asset(self, asset_id: str, **values: Any) -> dict[str, Any]: ...
+
+
+class ModuleKnowledgeStore(Protocol):
+    def get_module_chunk(self, chunk_id: str) -> dict: ...
+
+    def get_module_asset(self, asset_id: str) -> dict: ...
+
+    def list_module_chunks_for_knowledge(
+        self,
+        module_id: str,
+        *,
+        status: str = "pending",
+        limit: int = 5,
+    ) -> list[dict]: ...
+
+    def mark_module_chunk_knowledge_status(self, chunk_id: str, status: str) -> None: ...
+
+    def reset_failed_module_chunks(self, module_id: str) -> int: ...
+
+    def store_module_knowledge_candidate(
+        self,
+        module_id: str,
+        candidate: ModuleKnowledgeCandidate,
+        *,
+        object_hash: str,
+        created_by: str,
+        source_model: str | None,
+        prompt_version: str | None,
+    ) -> dict: ...
+
+    def commit(self) -> None: ...
 
 
 class CheckStore(CampaignStore, Protocol):

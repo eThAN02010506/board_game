@@ -194,6 +194,8 @@ CREATE TABLE IF NOT EXISTS module_chunks (
   paragraph_start INTEGER,
   paragraph_end INTEGER,
   source_locator TEXT,
+  knowledge_status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (knowledge_status IN ('pending', 'processing', 'completed', 'failed')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -230,12 +232,56 @@ CREATE TABLE IF NOT EXISTS module_assets (
   nearby_heading TEXT,
   visibility TEXT NOT NULL DEFAULT 'kp'
     CHECK (visibility IN ('player', 'table', 'kp', 'secret')),
+  spoiler_tag TEXT,
   analysis_status TEXT NOT NULL DEFAULT 'pending_analysis'
     CHECK (analysis_status IN ('pending_analysis', 'completed', 'failed')),
   ocr_text TEXT,
   visual_summary TEXT,
   analysis_model TEXT,
+  analysis_error TEXT,
+  analysis_prompt_version TEXT,
+  analyzed_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS module_knowledge_candidates (
+  id TEXT PRIMARY KEY,
+  module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('module_canon', 'module_anchor', 'reference')),
+  title TEXT NOT NULL,
+  statement TEXT NOT NULL,
+  rationale TEXT NOT NULL DEFAULT '',
+  confidence REAL NOT NULL DEFAULT 0 CHECK (confidence BETWEEN 0 AND 1),
+  visibility TEXT NOT NULL DEFAULT 'kp'
+    CHECK (visibility IN ('player', 'table', 'kp', 'secret')),
+  spoiler_tag TEXT,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'rejected')),
+  object_hash TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT 'ai' CHECK (created_by IN ('ai', 'human_kp')),
+  source_model TEXT,
+  prompt_version TEXT,
+  review_note TEXT,
+  reviewed_by_member_id TEXT REFERENCES session_members(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(module_id, object_hash)
+);
+
+CREATE TABLE IF NOT EXISTS module_knowledge_citations (
+  candidate_id TEXT NOT NULL
+    REFERENCES module_knowledge_candidates(id) ON DELETE CASCADE,
+  chunk_id TEXT REFERENCES module_chunks(id) ON DELETE CASCADE,
+  asset_id TEXT REFERENCES module_assets(id) ON DELETE CASCADE,
+  evidence_text TEXT NOT NULL,
+  evidence_hash TEXT NOT NULL,
+  source_locator TEXT NOT NULL,
+  PRIMARY KEY (candidate_id, evidence_hash),
+  CHECK (
+    (chunk_id IS NOT NULL AND asset_id IS NULL)
+    OR (chunk_id IS NULL AND asset_id IS NOT NULL)
+  )
 );
 
 CREATE TABLE IF NOT EXISTS maps (
@@ -601,6 +647,12 @@ CREATE INDEX IF NOT EXISTS idx_module_assets_module
   ON module_assets(module_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_module_assets_hash
   ON module_assets(content_hash);
+CREATE INDEX IF NOT EXISTS idx_module_knowledge_status
+  ON module_knowledge_candidates(module_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_module_knowledge_citations_chunk
+  ON module_knowledge_citations(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_module_knowledge_citations_asset
+  ON module_knowledge_citations(asset_id);
 CREATE INDEX IF NOT EXISTS idx_memories_campaign_scope ON memories(campaign_id, scope);
 CREATE INDEX IF NOT EXISTS idx_memories_pc ON memories(pc_id);
 CREATE INDEX IF NOT EXISTS idx_memories_npc ON memories(npc_id);

@@ -9,6 +9,7 @@ from ai_kp.infrastructure.database.investigators import InvestigatorRepository
 from ai_kp.infrastructure.database.maps import MapRepository
 from ai_kp.infrastructure.database.model_configuration import ModelConfigurationRepository
 from ai_kp.infrastructure.database.module_imports import ModuleImportRepository
+from ai_kp.infrastructure.database.module_knowledge import ModuleKnowledgeRepository
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.rulebooks import RulebookRepository
 from ai_kp.infrastructure.database.security import SecurityRepository
@@ -33,6 +34,7 @@ class Repository(
     SkillCheckRepository,
     RulebookRepository,
     ModuleImportRepository,
+    ModuleKnowledgeRepository,
     ModelConfigurationRepository,
 ):
     """Backward-compatible facade over the feature-specific SQLite repositories."""

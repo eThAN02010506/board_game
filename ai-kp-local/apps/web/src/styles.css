@@ -609,6 +609,10 @@ h2 {
   grid-column: 1 / span 2;
 }
 
+.module-knowledge-card {
+  grid-column: 1 / span 2;
+}
+
 .module-job-list,
 .module-source-list,
 .module-reader {
@@ -688,6 +692,28 @@ h2 {
   white-space: pre-wrap;
 }
 
+.module-section-scope {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.45fr) minmax(180px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 10px;
+  padding: 9px;
+  border-radius: 7px;
+  background: #eee8dc;
+}
+
+.module-section-scope label {
+  display: grid;
+  gap: 4px;
+  color: #59645d;
+  font-size: 11px;
+}
+
+.module-section-scope button {
+  min-height: 34px;
+}
+
 .module-asset-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -734,6 +760,101 @@ h2 {
   color: #806c45;
   font-size: 11px;
   font-style: normal;
+}
+
+.module-asset-card p {
+  margin: 4px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.module-analysis-error {
+  color: #a04438;
+}
+
+.module-asset-actions,
+.module-review-actions,
+.module-toolbar {
+  display: flex;
+  gap: 7px;
+}
+
+.module-asset-actions {
+  padding: 0 10px 10px;
+}
+
+.module-asset-actions button,
+.module-review-actions button,
+.module-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid #cabfae;
+  border-radius: 7px;
+  background: #f1eadc;
+  color: #34453c;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.module-toolbar {
+  margin: 13px 0 8px;
+}
+
+.module-toolbar input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.module-search-results,
+.module-candidate-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.module-search-results article,
+.module-candidate-list > article {
+  border: 1px solid #e1d9cc;
+  border-radius: 9px;
+  background: #faf7ef;
+  padding: 10px;
+}
+
+.module-search-results article small,
+.module-candidate-list article small {
+  display: block;
+  color: #68736c;
+  font-size: 11px;
+}
+
+.module-search-results article p,
+.module-candidate-list article p {
+  margin-bottom: 0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.module-candidate-list article > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.module-candidate-list em {
+  color: #806c45;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.module-candidate-list blockquote {
+  border-left: 3px solid #9d8e72;
+  margin: 9px 0;
+  padding-left: 9px;
+  color: #4c554f;
+  font-size: 12px;
 }
 
 .rule-query-card {

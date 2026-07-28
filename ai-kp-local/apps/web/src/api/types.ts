@@ -64,6 +64,8 @@ export type ModuleChunk = {
   paragraph_end: number | null;
   source_locator: string | null;
   order_index: number;
+  spoiler_tag: string | null;
+  knowledge_status: "pending" | "processing" | "completed" | "failed";
 };
 
 export type ModuleAsset = {
@@ -76,7 +78,53 @@ export type ModuleAsset = {
   source_locator: string;
   nearby_heading: string | null;
   visibility: string;
+  spoiler_tag: string | null;
   analysis_status: "pending_analysis" | "completed" | "failed";
+  ocr_text: string | null;
+  visual_summary: string | null;
+  analysis_model: string | null;
+  analysis_error: string | null;
+};
+
+export type ModuleSearchResult = {
+  source_type: "chunk" | "asset" | "knowledge";
+  source_id: string;
+  module_id: string;
+  visibility: string;
+  spoiler_tag: string | null;
+  source_locator: string;
+  title: string;
+  text: string;
+};
+
+export type ModuleKnowledgeCandidate = {
+  id: string;
+  module_id: string;
+  kind: "module_canon" | "module_anchor" | "reference";
+  title: string;
+  statement: string;
+  rationale: string;
+  confidence: number;
+  visibility: string;
+  spoiler_tag: string | null;
+  status: "pending" | "approved" | "rejected";
+  review_note: string | null;
+  citations: Array<{
+    evidence_text: string;
+    source_locator: string;
+  }>;
+};
+
+export type ModuleAnalysisCapabilities = {
+  tesseract: {
+    available: boolean;
+    version: string | null;
+    languages: string[];
+  };
+  vision: {
+    configured: boolean;
+    model: string;
+  };
 };
 
 export type SessionInfo = {

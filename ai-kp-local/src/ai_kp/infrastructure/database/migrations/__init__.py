@@ -21,6 +21,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0014_image_model_configuration,
     v0015_memory_fts,
     v0016_module_documents,
+    v0017_module_knowledge,
 )
 
 
@@ -107,6 +108,11 @@ MIGRATIONS = (
         v0016_module_documents.VERSION,
         v0016_module_documents.NAME,
         v0016_module_documents.migrate,
+    ),
+    Migration(
+        v0017_module_knowledge.VERSION,
+        v0017_module_knowledge.NAME,
+        v0017_module_knowledge.migrate,
     ),
 )
 

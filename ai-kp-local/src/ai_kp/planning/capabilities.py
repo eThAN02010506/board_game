@@ -139,7 +139,8 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="kp",
         summary=(
             "内部纯文本剧透边界继续保留；独立 KP 本页面现可导入 PDF/DOCX、"
-            "查看持久任务、章节正文和私密原图。仍缺少搜索、章节剧透编辑和知识候选审核。"
+            "查看持久任务、章节正文和私密原图，并可做权限过滤检索、章节剧透编辑和"
+            "带逐字证据的知识候选审核。仍缺少实体图谱和自动锚点可达性检查。"
         ),
         dependencies=("proposal_approval",),
         acceptance=("KP 可导入、预览、标记剧透范围，玩家端不可读取未揭示章节。",),
@@ -152,7 +153,8 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="kp",
         summary=(
             "已只接收 PDF/DOCX，并安全抽取正文、表格、照片等内嵌原图，保留页码/段落锚点、"
-            "持久任务、失败重试和完整备份；OCR、视觉摘要与人工修订仍待实现。"
+            "持久任务、失败重试和完整备份；现支持可选本地 Tesseract OCR 与"
+            "OpenAI-compatible 视觉摘要，中文 OCR 仍取决于本机语言数据。"
         ),
         dependencies=("module_library",),
         acceptance=(
@@ -170,8 +172,8 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="kp",
         summary=(
             "AI KP 已收到 Canon、剧情锚点、运行事实和生成候选的权威顺序约束，"
-            "且生成内容仍受现有草稿审批保护；尚缺结构化模组知识、合理性评分、"
-            "冲突解释、锚点可达性检查和三种自动化模式。"
+            "且模组 Canon/Anchor 候选必须通过逐字来源校验与 KP 审批；尚缺实体关系、"
+            "合理性评分、冲突解释、锚点可达性检查和三种自动化模式。"
         ),
         dependencies=(
             "module_library",
