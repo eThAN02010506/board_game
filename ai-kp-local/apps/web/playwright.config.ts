@@ -30,6 +30,7 @@ export default defineConfig({
         AI_KP_BACKUP_ROOT: ".playwright/backups",
         AI_KP_DB_PATH: ".playwright/ai-kp.sqlite3",
         AI_KP_MAP_ASSET_ROOT: ".playwright/map-assets",
+        AI_KP_MODULE_ASSET_ROOT: ".playwright/module-assets",
         AI_KP_RULEBOOK_INDEX_ROOT: ".playwright/rag",
         PYTHONPATH: "src"
       },

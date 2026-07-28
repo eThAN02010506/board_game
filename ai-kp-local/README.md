@@ -11,7 +11,7 @@ KP 本被视为带来源的权威大纲而非完整世界清单。AI 可以为�
 - FastAPI 后端入口
 - SQLite 本地数据库与事件流
 - Campaign、PC、NPC、Memory、World Time 的基础数据模型
-- KP 本/模组内部文本切块、秘密标签和剧透边界；面向 KP 的文件导入将只接收 PDF/Word
+- 独立 KP 本页面与持久导入任务；只接收 PDF/DOCX，提取页码/段落可追溯的正文、表格和内嵌原图，失败可重试
 - 时代化地图生成；MapSpec、修订、校验报告、SVG、地点、路线、棋子与图片候选均可本地持久化
 - 可选 OpenAI-compatible 图片模型；只接收玩家安全投影，图片失效时自动回退到完整可玩的确定性 SVG
 - 线下跑团式棋子移动，以及基于棋子版本的并发移动冲突保护
@@ -36,7 +36,7 @@ KP 本被视为带来源的权威大纲而非完整世界清单。AI 可以为�
 - 地图 `draft -> published` 发布边界
 - API 合同、应用服务、权限、数据库迁移、实时同步与核心域的自动测试
 - 后端根路径 Debug 调试台；集中查看模型、SQLite、路由、请求、日志，并提供 API、Excel 与 WebSocket 探针
-- 可校验的完整本地备份；在线快照 SQLite、地图资产与规则索引，停服后安全恢复
+- 可校验的完整本地备份；在线快照 SQLite、地图/KP 本资产与规则索引，停服后安全恢复
 - SQLite FTS5 trigram 记忆候选索引；短词或非连续中文查询自动回退到原有词法召回
 - `local`/`lan` 部署模式；LAN 模式启用 Host allowlist、敏感操作限流与管理员口令强制校验
 
@@ -405,9 +405,21 @@ AI_KP_CORS_ORIGINS=https://你的前端域名
 
 ## 模组文本格式
 
-当前底层 API 支持纯文本导入，用于验证切块和剧透边界；它不是最终面向 KP 的文件
-上传界面。正式 KP 本入口只接受 PDF/Word 文档，并需要同时提取正文与文档内的照片、
-地图和扫描线索。详细边界见 [`docs/MODULE_DOCUMENT_IMPORT.md`](docs/MODULE_DOCUMENT_IMPORT.md)。
+“KP 本”页面只接受 PDF/DOCX。源文件、任务状态、页码/段落文本块和内嵌原图都会
+持久保存；图片默认仅 KP 可见，没有 OCR/视觉模型也不会阻断导入。任务失败后可从
+页面重试，服务重启会把中断任务转成明确的可重试失败状态。旧式 `.doc` 必须先另存为
+`.docx`。存储根可用 `AI_KP_MODULE_ASSET_ROOT` 配置，且已纳入完整备份。接口为：
+
+```http
+POST /campaigns/{campaign_id}/module-imports
+GET  /campaigns/{campaign_id}/module-imports
+POST /module-imports/{job_id}/retry
+GET  /modules/{module_id}/assets
+GET  /module-assets/{asset_id}/content
+```
+
+OCR、视觉摘要、章节剧透编辑和结构化 Canon/Anchor 候选审核仍属于下一阶段。详细边界
+见 [`docs/MODULE_DOCUMENT_IMPORT.md`](docs/MODULE_DOCUMENT_IMPORT.md)。
 
 内部文本格式中，每个空行分隔的段落会成为一个 `module_chunk`。
 段落首行可以写元数据：

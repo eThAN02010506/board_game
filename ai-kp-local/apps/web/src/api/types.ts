@@ -22,6 +22,63 @@ export type Campaign = {
   current_time: string | null;
 };
 
+export type ModuleImportJob = {
+  id: string;
+  campaign_id: string;
+  title: string;
+  source_filename: string;
+  source_type: "pdf" | "docx";
+  source_hash: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  stage: string;
+  progress_current: number;
+  progress_total: number;
+  attempt_count: number;
+  error_text: string | null;
+  module_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ModuleRecord = {
+  id: string;
+  campaign_id: string;
+  title: string;
+  source_type: string;
+  source_filename: string | null;
+  source_hash: string | null;
+  parser_version: string | null;
+  created_at: string;
+};
+
+export type ModuleChunk = {
+  id: string;
+  module_id: string;
+  title: string;
+  text: string;
+  visibility: string;
+  content_kind: "text" | "table";
+  page_start: number | null;
+  page_end: number | null;
+  paragraph_start: number | null;
+  paragraph_end: number | null;
+  source_locator: string | null;
+  order_index: number;
+};
+
+export type ModuleAsset = {
+  id: string;
+  module_id: string;
+  content_hash: string;
+  mime_type: string;
+  width: number | null;
+  height: number | null;
+  source_locator: string;
+  nearby_heading: string | null;
+  visibility: string;
+  analysis_status: "pending_analysis" | "completed" | "failed";
+};
+
 export type SessionInfo = {
   id: string;
   campaign_id: string;

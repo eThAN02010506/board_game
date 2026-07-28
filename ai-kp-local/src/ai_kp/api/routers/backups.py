@@ -29,6 +29,7 @@ def _service(settings: Settings) -> BackupService:
     return BackupService(
         db_path=settings.db_path,
         map_asset_root=settings.map_asset_root,
+        module_asset_root=settings.module_asset_root,
         rulebook_index_root=settings.rulebook_index_root,
         backup_root=settings.backup_root,
         app_version=_app_version(),

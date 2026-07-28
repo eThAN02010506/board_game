@@ -598,6 +598,144 @@ h2 {
   align-items: start;
 }
 
+.module-library-page {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.78fr) minmax(360px, 1fr) minmax(300px, 0.82fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.module-reader-card {
+  grid-column: 1 / span 2;
+}
+
+.module-job-list,
+.module-source-list,
+.module-reader {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.module-job {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #e1d9cc;
+  border-left: 4px solid #8a948e;
+  border-radius: 9px;
+  background: #faf7ef;
+  padding: 11px;
+}
+
+.module-job.completed {
+  border-left-color: #2f6d50;
+}
+
+.module-job.failed {
+  border-left-color: #a04438;
+}
+
+.module-job > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.module-job span,
+.module-job small {
+  color: #68736c;
+  font-size: 12px;
+}
+
+.module-job progress {
+  width: 100%;
+  accent-color: #2f6d50;
+}
+
+.module-job p {
+  margin: 0;
+  color: #8a342d;
+  font-size: 12px;
+}
+
+.module-reader details {
+  border: 1px solid #e1d9cc;
+  border-radius: 9px;
+  background: #faf7ef;
+  padding: 11px;
+}
+
+.module-reader summary {
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.module-reader summary small,
+.module-reader article small {
+  color: #68736c;
+  font-weight: 400;
+}
+
+.module-reader article {
+  border-top: 1px solid #e7e0d5;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.module-reader article p {
+  margin-bottom: 0;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.module-asset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.module-asset-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #e1d9cc;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #faf7ef;
+}
+
+.module-asset-card > svg {
+  margin: 32px auto;
+  color: #68736c;
+}
+
+.module-asset-card img {
+  width: 100%;
+  height: 150px;
+  object-fit: contain;
+  background: #eae5da;
+}
+
+.module-asset-card div {
+  display: grid;
+  gap: 3px;
+  padding: 0 10px;
+}
+
+.module-asset-card small,
+.module-asset-card span {
+  overflow-wrap: anywhere;
+  color: #68736c;
+  font-size: 11px;
+}
+
+.module-asset-card em {
+  margin: 0 10px 10px;
+  color: #806c45;
+  font-size: 11px;
+  font-style: normal;
+}
+
 .rule-query-card {
   grid-column: 1 / -1;
 }
@@ -3049,11 +3187,16 @@ pre {
   .investigator-page,
   .model-settings-page,
   .rulebook-page,
+  .module-library-page,
   .play-page,
   .play-action-column,
   .form-grid,
   .attribute-entry-grid {
     grid-template-columns: 1fr;
+  }
+
+  .module-reader-card {
+    grid-column: auto;
   }
 
   .seat-create-form,

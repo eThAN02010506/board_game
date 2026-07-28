@@ -20,6 +20,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0013_map_revision_backfill,
     v0014_image_model_configuration,
     v0015_memory_fts,
+    v0016_module_documents,
 )
 
 
@@ -101,6 +102,11 @@ MIGRATIONS = (
         v0015_memory_fts.VERSION,
         v0015_memory_fts.NAME,
         v0015_memory_fts.migrate,
+    ),
+    Migration(
+        v0016_module_documents.VERSION,
+        v0016_module_documents.NAME,
+        v0016_module_documents.migrate,
     ),
 )
 

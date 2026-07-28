@@ -172,6 +172,10 @@ CREATE TABLE IF NOT EXISTS modules (
   campaign_id TEXT REFERENCES campaigns(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   source_type TEXT NOT NULL DEFAULT 'plaintext',
+  source_filename TEXT,
+  source_hash TEXT,
+  source_storage_path TEXT,
+  parser_version TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -184,6 +188,53 @@ CREATE TABLE IF NOT EXISTS module_chunks (
   spoiler_tag TEXT,
   scene_key TEXT,
   order_index INTEGER NOT NULL,
+  content_kind TEXT NOT NULL DEFAULT 'text',
+  page_start INTEGER,
+  page_end INTEGER,
+  paragraph_start INTEGER,
+  paragraph_end INTEGER,
+  source_locator TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS module_import_jobs (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  source_filename TEXT NOT NULL,
+  source_type TEXT NOT NULL CHECK (source_type IN ('pdf', 'docx')),
+  source_hash TEXT NOT NULL,
+  source_storage_path TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'processing', 'completed', 'failed')),
+  stage TEXT NOT NULL DEFAULT 'queued',
+  progress_current INTEGER NOT NULL DEFAULT 0,
+  progress_total INTEGER NOT NULL DEFAULT 0,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  error_text TEXT,
+  module_id TEXT REFERENCES modules(id) ON DELETE SET NULL,
+  parser_version TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS module_assets (
+  id TEXT PRIMARY KEY,
+  module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+  content_hash TEXT NOT NULL,
+  storage_path TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  width INTEGER,
+  height INTEGER,
+  source_locator TEXT NOT NULL,
+  nearby_heading TEXT,
+  visibility TEXT NOT NULL DEFAULT 'kp'
+    CHECK (visibility IN ('player', 'table', 'kp', 'secret')),
+  analysis_status TEXT NOT NULL DEFAULT 'pending_analysis'
+    CHECK (analysis_status IN ('pending_analysis', 'completed', 'failed')),
+  ocr_text TEXT,
+  visual_summary TEXT,
+  analysis_model TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -542,6 +593,14 @@ CREATE INDEX IF NOT EXISTS idx_map_tokens_map ON map_tokens(map_id);
 CREATE INDEX IF NOT EXISTS idx_map_token_moves_token ON map_token_moves(token_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_module_chunks_module_order ON module_chunks(module_id, order_index);
 CREATE INDEX IF NOT EXISTS idx_module_chunks_visibility ON module_chunks(visibility);
+CREATE INDEX IF NOT EXISTS idx_module_import_jobs_campaign_created
+  ON module_import_jobs(campaign_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_module_import_jobs_status
+  ON module_import_jobs(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_module_assets_module
+  ON module_assets(module_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_module_assets_hash
+  ON module_assets(content_hash);
 CREATE INDEX IF NOT EXISTS idx_memories_campaign_scope ON memories(campaign_id, scope);
 CREATE INDEX IF NOT EXISTS idx_memories_pc ON memories(pc_id);
 CREATE INDEX IF NOT EXISTS idx_memories_npc ON memories(npc_id);

@@ -15,6 +15,7 @@ from ai_kp.api.routers import (
     investigators,
     maps,
     models,
+    modules,
     realtime,
     rulebooks,
     sessions,
@@ -55,6 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     try:
         init_db(initialization_connection)
         repository = Repository(initialization_connection)
+        repository.recover_interrupted_module_imports()
         persisted_model_configuration = repository.get_model_configuration()
         persisted_image_model_configuration = (
             repository.get_image_model_configuration()
@@ -111,6 +113,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sessions.router,
         world.router,
         maps.router,
+        modules.router,
         turns.router,
     )
     app.state.domain_routers = domain_routers

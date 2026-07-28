@@ -64,6 +64,11 @@ const RulebookPage = lazy(() =>
     default: module.RulebookPage
   }))
 );
+const ModuleLibraryPage = lazy(() =>
+  import("../features/modules/ModuleLibraryPage").then((module) => ({
+    default: module.ModuleLibraryPage
+  }))
+);
 
 function stringifyForLog(value: unknown) {
   const secretFields = new Set([
@@ -1266,6 +1271,12 @@ export default function App() {
         {activeNav === "rules" && (
           <Suspense fallback={<section className="page-card">正在载入规则知识……</section>}>
             <RulebookPage identity={authIdentity} />
+          </Suspense>
+        )}
+
+        {activeNav === "modules" && (
+          <Suspense fallback={<section className="page-card">正在载入 KP 本库……</section>}>
+            <ModuleLibraryPage campaign={activeCampaign} identity={authIdentity} />
           </Suspense>
         )}
 

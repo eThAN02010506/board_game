@@ -5,14 +5,14 @@
 The backend has explicit composition, transport, application, domain, ruleset, and adapter layers:
 
 - `src/ai_kp/bootstrap/composition.py` is the composition root. It initializes the database once, installs CORS and error handlers, and mounts the domain routers. `bootstrap/settings.py` owns runtime settings. `api/main.py` remains the stable compatibility ASGI entry point.
-- `src/ai_kp/api/routers/{system,campaigns,sessions,world,maps,turns,realtime}.py` owns HTTP/WebSocket transport only. `dependencies.py`, `authz.py`, `errors.py`, and `schemas.py` centralize per-request repository lifetime, authentication, authorization, error mapping, and transport DTOs.
+- `src/ai_kp/api/routers/{system,campaigns,sessions,world,maps,modules,turns,realtime}.py` owns HTTP/WebSocket transport only. `dependencies.py`, `authz.py`, `errors.py`, and `schemas.py` centralize per-request repository lifetime, authentication, authorization, error mapping, and transport DTOs.
 - `src/ai_kp/application/{campaign,world,session,map,map_image,turn}_service.py` owns use cases that coordinate validation, domain components, multiple writes, the transactional realtime outbox, and the local-model boundary. It has no FastAPI dependency.
 - `src/ai_kp/application/ports/` defines the narrow persistence and AI-director contracts used by
   each service. Application code must not import `api`, `bootstrap`, or `infrastructure`;
   concrete adapters are supplied at the composition/delivery boundary.
 - `src/ai_kp/platform/` owns ruleset-neutral memory, module, and scene logic. `director/` owns AI KP context and proposal orchestration. `rule_authoring/` owns extracted rule objects and deterministic validation/execution.
 - `src/ai_kp/infrastructure/database/` owns SQLite mechanics, schema, ordered migrations, and feature repositories. Its `Repository` facade intentionally supplies one shared transaction boundary to current application services.
-- `src/ai_kp/infrastructure/{knowledge,llm,images,realtime,security}/` owns external and persistence adapters. These layers may depend inward on domain contracts; domain packages do not depend on these adapters.
+- `src/ai_kp/infrastructure/{knowledge,llm,images,modules,realtime,security}/` owns external and persistence adapters. These layers may depend inward on domain contracts; domain packages do not depend on these adapters.
 - `src/ai_kp/application/realtime/` owns the authenticated connection lifecycle and pure wire-message
   decisions. `platform/realtime/ports.py` defines channel and event-store contracts;
   `infrastructure/realtime/` contains only Starlette, worker-thread, SQLite, and origin-check
@@ -35,7 +35,7 @@ The React workspace follows the same separation:
 - `apps/web/src/app/App.tsx` currently composes workspace state and feature callbacks. Further
   feature extraction must preserve current behavior and gain focused acceptance tests; the former
   root path is only a compatibility export.
-- Top-level product areas use distinct history-backed paths (`/play`, `/campaigns`, `/investigators`, `/maps`, `/memory`, `/npcs`, `/rules`, and `/planning`). `/play` is the intentional composite exception: it places the controlled investigator and public party summaries beside the central map, with a separately scrollable action/chat column.
+- Top-level product areas use distinct history-backed paths (`/play`, `/campaigns`, `/investigators`, `/maps`, `/memory`, `/npcs`, `/rules`, `/modules`, and `/planning`). `/play` is the intentional composite exception: it places the controlled investigator and public party summaries beside the central map, with a separately scrollable action/chat column.
 
 Future package boundaries are documented without pre-creating comment-only source files. Their
 activation and incremental migration rules are tracked in
@@ -90,7 +90,10 @@ This catalogue is the single source of truth for delivery status, phase, depende
 - `memories` is the curated recall layer.
 - `campaign_npcs` records how an NPC relates to one campaign.
 - Global NPC identity is stored once in `npcs`; this allows cross-module reuse.
-- `modules` and `module_chunks` store imported KP material with visibility and spoiler metadata.
+- `modules` and `module_chunks` store imported KP material with visibility, spoiler metadata and
+  PDF page or DOCX paragraph provenance. `module_import_jobs` is the durable queued/processing/
+  completed/failed lifecycle; `module_assets` records every private image occurrence while
+  content-addressed storage deduplicates identical bytes outside SQLite.
 - Module Canon/Anchor remains source-linked knowledge; generated world completion enters the
   existing proposal boundary and only becomes an append-only runtime fact after confirmation.
   See [`WORLD_EXPANSION.md`](WORLD_EXPANSION.md).

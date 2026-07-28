@@ -15,6 +15,7 @@ def _settings(tmp_path: Path) -> Settings:
     return Settings(
         db_path=tmp_path / "data" / "ai_kp.sqlite3",
         map_asset_root=tmp_path / "data" / "map-assets",
+        module_asset_root=tmp_path / "data" / "module-assets",
         rulebook_index_root=tmp_path / "data" / "rag" / "rulesets",
         backup_root=tmp_path / "data" / "backups",
         local_admin_enabled=False,
@@ -26,6 +27,7 @@ def _service(settings: Settings) -> BackupService:
     return BackupService(
         db_path=settings.db_path,
         map_asset_root=settings.map_asset_root,
+        module_asset_root=settings.module_asset_root,
         rulebook_index_root=settings.rulebook_index_root,
         backup_root=settings.backup_root,
         app_version="test",
@@ -39,9 +41,12 @@ def test_online_backup_round_trip_restores_database_and_file_stores(
     app = create_app(settings)
     headers = {"X-AI-KP-Admin-Token": "backup-admin"}
     settings.map_asset_root.mkdir(parents=True)
+    settings.module_asset_root.mkdir(parents=True)
     settings.rulebook_index_root.mkdir(parents=True)
     (settings.map_asset_root / "sha256" / "ab").mkdir(parents=True)
     (settings.map_asset_root / "sha256" / "ab" / "map.png").write_bytes(b"map-image")
+    (settings.module_asset_root / "sources").mkdir(parents=True)
+    (settings.module_asset_root / "sources" / "module.pdf").write_bytes(b"module-source")
     (settings.rulebook_index_root / "rules.json").write_text(
         '{"rule": "sanity"}',
         encoding="utf-8",
@@ -72,6 +77,7 @@ def test_online_backup_round_trip_restores_database_and_file_stores(
 
     settings.db_path.unlink()
     (settings.map_asset_root / "sha256" / "ab" / "map.png").write_bytes(b"corrupt")
+    (settings.module_asset_root / "sources" / "module.pdf").unlink()
     (settings.rulebook_index_root / "rules.json").unlink()
     archive = settings.backup_root / created.json()["filename"]
     manifest = _service(settings).restore_offline(archive)
@@ -87,6 +93,9 @@ def test_online_backup_round_trip_restores_database_and_file_stores(
         connection.close()
     assert row["title"] == "Backup campaign"
     assert (settings.map_asset_root / "sha256" / "ab" / "map.png").read_bytes() == b"map-image"
+    assert (
+        settings.module_asset_root / "sources" / "module.pdf"
+    ).read_bytes() == b"module-source"
     assert json.loads(
         (settings.rulebook_index_root / "rules.json").read_text(encoding="utf-8")
     ) == {"rule": "sanity"}

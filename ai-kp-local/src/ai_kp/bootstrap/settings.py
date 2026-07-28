@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     rulebook_index_root: Path = Field(default=Path("data/rag/rulesets"))
     rulebook_embedding_dimensions: int = Field(default=384, ge=64, le=2048)
     map_asset_root: Path = Field(default=Path("data/map-assets"))
+    module_asset_root: Path = Field(default=Path("data/module-assets"))
     backup_root: Path = Field(default=Path("data/backups"))
     backup_max_files: int = Field(default=20_000, ge=1, le=100_000)
     backup_max_uncompressed_bytes: int = Field(

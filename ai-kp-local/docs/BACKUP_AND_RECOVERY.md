@@ -5,6 +5,7 @@ AI KP backups are self-contained ZIP archives stored under
 
 - an online SQLite snapshot created with `Connection.backup`;
 - content-addressed map assets;
+- immutable module source documents and content-addressed extracted images;
 - local rulebook indexes;
 - a manifest with format, application and schema versions;
 - the uncompressed size and SHA-256 digest of every packaged file.
@@ -37,6 +38,6 @@ but they should still be handled as secrets and never committed to Git or
 shared with players.
 
 After recovery, start the API and run `/debug/database/check`, then inspect one
-campaign, investigator, NPC, memory, map image and token position. Keep at
+campaign, investigator, NPC, memory, module source/image, map image and token position. Keep at
 least one copy outside the application data directory so disk loss does not
 remove both live data and backups.

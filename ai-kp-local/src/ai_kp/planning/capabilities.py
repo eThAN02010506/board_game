@@ -138,8 +138,8 @@ CAPABILITIES: tuple[Capability, ...] = (
         phase="F2",
         audience="kp",
         summary=(
-            "内部纯文本切块和剧透边界已有 API；面向 KP 的文件入口只接受 "
-            "PDF/Word，仍缺少导入 UI、章节树、搜索和文档解析。"
+            "内部纯文本剧透边界继续保留；独立 KP 本页面现可导入 PDF/DOCX、"
+            "查看持久任务、章节正文和私密原图。仍缺少搜索、章节剧透编辑和知识候选审核。"
         ),
         dependencies=("proposal_approval",),
         acceptance=("KP 可导入、预览、标记剧透范围，玩家端不可读取未揭示章节。",),
@@ -147,12 +147,12 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="module_document_import",
         label="PDF/Word KP 本导入",
-        status="planned",
+        status="partial",
         phase="F2",
         audience="kp",
         summary=(
-            "只接收 PDF 与 Word 文档；抽取正文和文档内照片、地图、扫描线索，"
-            "对图片执行可选 OCR/视觉理解并保留原始图像及图文位置关系。"
+            "已只接收 PDF/DOCX，并安全抽取正文、表格、照片等内嵌原图，保留页码/段落锚点、"
+            "持久任务、失败重试和完整备份；OCR、视觉摘要与人工修订仍待实现。"
         ),
         dependencies=("module_library",),
         acceptance=(

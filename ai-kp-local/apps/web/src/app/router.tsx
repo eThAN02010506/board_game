@@ -3,6 +3,7 @@ import {
   Cpu,
   Dice5,
   LayoutDashboard,
+  Library,
   ListChecks,
   Map,
   UserRound,
@@ -18,6 +19,7 @@ export const workspaceRoutes = [
   { id: "memory", label: "角色记忆", icon: Brain, path: "/memory", planned: false },
   { id: "npcs", label: "NPC", icon: Users, path: "/npcs", planned: true },
   { id: "rules", label: "规则知识", icon: Dice5, path: "/rules", planned: false },
+  { id: "modules", label: "KP 本", icon: Library, path: "/modules", planned: false },
   { id: "models", label: "模型设置", icon: Cpu, path: "/models", planned: false },
   { id: "planning", label: "功能规划", icon: ListChecks, path: "/planning", planned: true }
 ] as const;

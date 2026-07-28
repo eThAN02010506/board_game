@@ -95,6 +95,7 @@ class BackupService:
         *,
         db_path: Path,
         map_asset_root: Path,
+        module_asset_root: Path,
         rulebook_index_root: Path,
         backup_root: Path,
         app_version: str,
@@ -102,6 +103,7 @@ class BackupService:
     ):
         self.db_path = db_path.resolve()
         self.map_asset_root = map_asset_root.resolve()
+        self.module_asset_root = module_asset_root.resolve()
         self.rulebook_index_root = rulebook_index_root.resolve()
         self.backup_root = backup_root.resolve()
         self.app_version = app_version
@@ -120,6 +122,7 @@ class BackupService:
             self._snapshot_database(snapshot_path)
             files = [(snapshot_path, DATABASE_ARCHIVE_PATH)]
             files.extend(self._tree_files(self.map_asset_root, "map-assets"))
+            files.extend(self._tree_files(self.module_asset_root, "module-assets"))
             files.extend(self._tree_files(self.rulebook_index_root, "rulebook-index"))
             if len(files) > self.limits.max_files:
                 raise BackupVerificationError("Backup contains too many files")
@@ -234,6 +237,7 @@ class BackupService:
         manifest = self.verify(archive_path)
         targets = {
             "map-assets": self.map_asset_root,
+            "module-assets": self.module_asset_root,
             "rulebook-index": self.rulebook_index_root,
         }
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
