@@ -13,7 +13,7 @@ from ai_kp.director.context_builder import ContextAssembly, ContextBuilder, esti
 from ai_kp.director.turn_output import KpTurnOutput, StructuredOutputError, parse_kp_turn_output
 from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
-CHECK_CONSEQUENCE_CONTEXT_BUDGET = 8000
+CHECK_CONSEQUENCE_CONTEXT_BUDGET = 12000
 
 
 @dataclass(frozen=True)

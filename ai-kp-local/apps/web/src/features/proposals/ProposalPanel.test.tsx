@@ -109,17 +109,17 @@ describe("ProposalPanel", () => {
     const { onSelectProposal } = renderPanel();
 
     expect(
-      screen.getByRole("button", { name: /draft 检查窗框上的泥土/ })
+      screen.getByRole("button", { name: /草稿 检查窗框上的泥土/ })
     ).toHaveClass("selected");
     expect(
-      screen.getByRole("button", { name: /approved 询问值班警员/ })
+      screen.getByRole("button", { name: /已批准 询问值班警员/ })
     ).not.toHaveClass("selected");
     expect(screen.getByText("窗框边缘沾着尚未干透的黑泥。")).toBeVisible();
     expect(screen.getByText(/"skill_name": "侦查"/)).toBeVisible();
     expect(screen.getByText("待检定")).toHaveTextContent("1");
 
     fireEvent.click(
-      screen.getByRole("button", { name: /approved 询问值班警员/ })
+      screen.getByRole("button", { name: /已批准 询问值班警员/ })
     );
     expect(onSelectProposal).toHaveBeenCalledWith("proposal_approved");
   });
@@ -202,9 +202,9 @@ describe("ProposalPanel", () => {
     });
 
     expect(
-      screen.getByRole("button", { name: /draft · 检定后果 检查档案柜/ })
+      screen.getByRole("button", { name: /草稿 · 检定后果 检查档案柜/ })
     ).toBeVisible();
-    expect(screen.getAllByText("draft · 检定后果")).toHaveLength(2);
+    expect(screen.getAllByText("草稿 · 检定后果")).toHaveLength(2);
   });
 
   it("shows a context snapshot only when it belongs to the active proposal", () => {

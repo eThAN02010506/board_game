@@ -24,6 +24,11 @@ from ai_kp.infrastructure.database.migrations import (
     v0017_module_knowledge,
     v0018_module_graph,
     v0019_module_document_structure,
+    v0020_campaign_module_runs,
+    v0021_module_run_version,
+    v0022_knowledge_extraction_attempts,
+    v0023_session_assignment_uniqueness,
+    v0024_rule_source_ruleset_hash,
 )
 
 
@@ -32,6 +37,7 @@ class Migration:
     version: int
     name: str
     migrate: Callable[[sqlite3.Connection], None]
+    requires_foreign_keys_off: bool = False
 
 
 MIGRATIONS = (
@@ -126,6 +132,32 @@ MIGRATIONS = (
         v0019_module_document_structure.NAME,
         v0019_module_document_structure.migrate,
     ),
+    Migration(
+        v0020_campaign_module_runs.VERSION,
+        v0020_campaign_module_runs.NAME,
+        v0020_campaign_module_runs.migrate,
+    ),
+    Migration(
+        v0021_module_run_version.VERSION,
+        v0021_module_run_version.NAME,
+        v0021_module_run_version.migrate,
+    ),
+    Migration(
+        v0022_knowledge_extraction_attempts.VERSION,
+        v0022_knowledge_extraction_attempts.NAME,
+        v0022_knowledge_extraction_attempts.migrate,
+    ),
+    Migration(
+        v0023_session_assignment_uniqueness.VERSION,
+        v0023_session_assignment_uniqueness.NAME,
+        v0023_session_assignment_uniqueness.migrate,
+    ),
+    Migration(
+        v0024_rule_source_ruleset_hash.VERSION,
+        v0024_rule_source_ruleset_hash.NAME,
+        v0024_rule_source_ruleset_hash.migrate,
+        requires_foreign_keys_off=True,
+    ),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
@@ -168,18 +200,55 @@ def apply_migrations(connection: sqlite3.Connection) -> None:
             continue
 
         savepoint = f"schema_migration_{migration.version:04d}"
-        connection.execute(f"SAVEPOINT {savepoint}")
+        foreign_keys_were_enabled = False
         try:
-            migration.migrate(connection)
-            connection.execute(
-                "INSERT INTO schema_migrations (version, name) VALUES (?, ?)",
-                (migration.version, migration.name),
-            )
-            connection.execute(f"RELEASE SAVEPOINT {savepoint}")
-        except Exception:
-            connection.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
-            connection.execute(f"RELEASE SAVEPOINT {savepoint}")
-            raise
+            if migration.requires_foreign_keys_off:
+                foreign_keys_were_enabled = bool(
+                    connection.execute("PRAGMA foreign_keys").fetchone()[0]
+                )
+                if foreign_keys_were_enabled:
+                    if connection.in_transaction:
+                        raise RuntimeError(
+                            f"schema migration {migration.version} requires foreign "
+                            "keys to be disabled before starting its savepoint"
+                        )
+                    connection.execute("PRAGMA foreign_keys = OFF")
+                    if connection.execute("PRAGMA foreign_keys").fetchone()[0]:
+                        raise RuntimeError(
+                            f"could not disable foreign keys for schema migration "
+                            f"{migration.version}"
+                        )
+
+            connection.execute(f"SAVEPOINT {savepoint}")
+            try:
+                migration.migrate(connection)
+                if migration.requires_foreign_keys_off:
+                    violations = connection.execute(
+                        "PRAGMA foreign_key_check"
+                    ).fetchmany(5)
+                    if violations:
+                        details = [tuple(row) for row in violations]
+                        raise RuntimeError(
+                            f"schema migration {migration.version} failed foreign "
+                            f"key validation: {details}"
+                        )
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, name) VALUES (?, ?)",
+                    (migration.version, migration.name),
+                )
+                connection.execute(f"RELEASE SAVEPOINT {savepoint}")
+            except Exception:
+                connection.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                connection.execute(f"RELEASE SAVEPOINT {savepoint}")
+                raise
+        finally:
+            if foreign_keys_were_enabled:
+                connection.execute("PRAGMA foreign_keys = ON")
+                if not connection.execute("PRAGMA foreign_keys").fetchone()[0]:
+                    raise RuntimeError(
+                        f"could not restore foreign keys after schema migration "
+                        f"{migration.version}"
+                    )
 
 
 def _validate_registry() -> None:

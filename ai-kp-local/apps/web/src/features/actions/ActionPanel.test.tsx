@@ -102,7 +102,7 @@ describe("ActionPanel", () => {
     } = renderPanel(kpIdentity, true);
 
     const submittedButton = screen.getByRole("button", {
-      name: /林若川 · submitted 检查窗框上的泥土/
+      name: /林若川 · 已提交 检查窗框上的泥土/
     });
     const processedButton = screen.getByRole("button", {
       name: /周闻 · processed 询问值班警员/

@@ -1,5 +1,6 @@
 import { Brain, MessageSquare, RefreshCw, Send } from "lucide-react";
 import type { AuthIdentity, PlayerActionRecord } from "../../api/types";
+import { statusLabel } from "../../ui/statusLabels";
 
 type Props = {
   identity: AuthIdentity | null;
@@ -72,7 +73,8 @@ export function ActionPanel(props: Props) {
                   type="button"
                 >
                   <span>
-                    {action.display_name ?? action.pc_id ?? "未绑定玩家"} · {action.status}
+                    {action.display_name ?? action.pc_id ?? "未绑定玩家"} ·{" "}
+                    {statusLabel(action.status)}
                   </span>
                   <small>{action.action_text}</small>
                 </button>

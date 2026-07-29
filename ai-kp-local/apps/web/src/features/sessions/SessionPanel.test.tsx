@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   AuthIdentity,
-  PlayerCharacter,
   SessionInfo,
   SessionMember,
   SessionSeat
@@ -35,19 +34,6 @@ const playerIdentity: AuthIdentity = {
   pc_id: "pc_luo",
   seat_id: "seat_claimed"
 };
-
-const pcs: PlayerCharacter[] = [
-  {
-    id: "pc_luo",
-    campaign_id: session.campaign_id,
-    name: "林若川"
-  },
-  {
-    id: "pc_zhou",
-    campaign_id: session.campaign_id,
-    name: "周闻"
-  }
-];
 
 const seats: SessionSeat[] = [
   {
@@ -106,34 +92,26 @@ function renderPanel({
     onJoinCodeInputChange: vi.fn(),
     onSeatInvitationInputChange: vi.fn(),
     onSeatLabelChange: vi.fn(),
-    onSeatPcIdChange: vi.fn(),
     onPlayerDisplayNameChange: vi.fn(),
-    onJoinPcIdChange: vi.fn(),
-    onPcNameChange: vi.fn(),
-    onMemberPcDraftChange: vi.fn(),
     onRefreshIdentity: vi.fn(),
     onRotateJoinCode: vi.fn(),
     onRefreshMembers: vi.fn(),
     onRefreshSeats: vi.fn(),
     onRefreshRecoverableSeats: vi.fn(),
     onCloseSession: vi.fn(),
-    onCreatePc: vi.fn((event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-    }),
     onCreateSeat: vi.fn((event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
     }),
     onClaimSeat: vi.fn((event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
     }),
-    onAssignMemberPc: vi.fn(),
-    onAssignSeatPc: vi.fn(),
     onReissueSeat: vi.fn(),
     onRevokeSeat: vi.fn(),
     onRecoverSeat: vi.fn(),
     onRevokeMember: vi.fn(),
     onStartSession: vi.fn(),
     onRecoverKp: vi.fn(),
+    onOpenInvestigators: vi.fn(),
     onJoinSession: vi.fn((event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
     })
@@ -144,19 +122,14 @@ function renderPanel({
       activeCampaignPresent={activeCampaignPresent}
       identity={identity}
       joinCodeInput=""
-      joinPcId=""
       kpDisplayName="守密人"
-      memberPcDrafts={{}}
       members={members}
-      pcName=""
-      pcs={pcs}
       playerDisplayName=""
       realtimeNote="实时连接正常"
       realtimeStatus="live"
       recoverableSeats={recoverableSeats}
       seatInvitationInput=""
       seatLabel=""
-      seatPcId=""
       seats={seats}
       session={identity ? session : null}
       visibleJoinCode=""
@@ -239,32 +212,26 @@ describe("SessionPanel", () => {
     expect(onRecoverKp).toHaveBeenCalledTimes(1);
   });
 
-  it("gives a KP seat creation, assignment, reissue, and revocation controls", () => {
+  it("gives a KP seat creation, investigator-flow guidance, reissue, and revocation controls", () => {
     const {
-      onAssignSeatPc,
       onCreateSeat,
+      onOpenInvestigators,
       onRefreshSeats,
       onReissueSeat,
       onRevokeSeat,
-      onSeatLabelChange,
-      onSeatPcIdChange
+      onSeatLabelChange
     } = renderPanel({ identity: kpIdentity });
 
     fireEvent.change(screen.getByLabelText("席位名称"), {
       target: { value: "调查员二席" }
     });
-    fireEvent.change(screen.getByLabelText("预留角色（可选）"), {
-      target: { value: "pc_zhou" }
-    });
     fireEvent.click(screen.getByRole("button", { name: "创建单席邀请" }));
 
     expect(onSeatLabelChange).toHaveBeenCalledWith("调查员二席");
-    expect(onSeatPcIdChange).toHaveBeenCalledWith("pc_zhou");
     expect(onCreateSeat).toHaveBeenCalledTimes(1);
-
-    const seatSelectors = screen.getAllByLabelText("该席位角色");
-    fireEvent.change(seatSelectors[0], { target: { value: "pc_zhou" } });
-    expect(onAssignSeatPc).toHaveBeenCalledWith("seat_open", "pc_zhou");
+    expect(screen.getByText(/尚未绑定调查员；请在角色卡页完成审批与绑定/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "前往角色卡审核与绑定" }));
+    expect(onOpenInvestigators).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "重新签发" }));
     expect(onReissueSeat).toHaveBeenCalledWith("seat_open");

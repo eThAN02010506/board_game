@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from ai_kp.infrastructure.llm.model_configuration import validate_local_model_pa
 class LocalModelRuntime:
     def __init__(self, log_path: Path):
         self.log_path = log_path
+        self._secure_log_location()
         self._process: subprocess.Popen[bytes] | None = None
         self._log_handle: IO[bytes] | None = None
         self._model_path: str | None = None
@@ -58,8 +60,14 @@ class LocalModelRuntime:
                 raise RuntimeError("已有本地模型正在运行，请先停止后再切换")
             self._close_log()
             path = Path(str(model_info["resolved_path"]))
-            self.log_path.parent.mkdir(parents=True, exist_ok=True)
-            self._log_handle = self.log_path.open("ab")
+            self._secure_log_location()
+            descriptor = os.open(
+                self.log_path,
+                os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+                0o600,
+            )
+            os.chmod(self.log_path, 0o600)
+            self._log_handle = os.fdopen(descriptor, "ab")
             self._process = subprocess.Popen(
                 [
                     sys.executable,
@@ -100,6 +108,14 @@ class LocalModelRuntime:
             self._port = None
             self._close_log()
         return self.status()
+
+    def _secure_log_location(self) -> None:
+        directory_was_missing = not self.log_path.parent.exists()
+        self.log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory_was_missing:
+            os.chmod(self.log_path.parent, 0o700)
+        if self.log_path.exists():
+            os.chmod(self.log_path, 0o600)
 
     def _close_log(self) -> None:
         if self._log_handle is not None:

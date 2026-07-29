@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,8 @@ import httpx
 
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
+from ai_kp.core.db import connect, init_db
+from ai_kp.core.repository import Repository
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -15,7 +18,8 @@ def bearer(token: str) -> dict[str, str]:
 class SessionSeatTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
-        self.app = create_app(Settings(db_path=Path(self.tmpdir.name) / "seats.sqlite3"))
+        self.db_path = Path(self.tmpdir.name) / "seats.sqlite3"
+        self.app = create_app(Settings(db_path=self.db_path))
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app, client=("127.0.0.1", 43100)),
             base_url="http://127.0.0.1",
@@ -36,20 +40,67 @@ class SessionSeatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session_response.status_code, 200)
         return campaign, session_response.json()
 
-    async def create_seat(
-        self,
-        session: dict,
-        label: str,
-        *,
-        pc_id: str | None = None,
-    ) -> dict:
+    async def create_seat(self, session: dict, label: str) -> dict:
         response = await self.client.post(
             f"/sessions/{session['session']['id']}/seats",
             headers=bearer(session["access_token"]),
-            json={"label": label, "pc_id": pc_id},
+            json={"label": label},
         )
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
+
+    async def test_legacy_direct_pc_assignment_contract_is_rejected(self) -> None:
+        campaign, session = await self.create_campaign_session("Approval boundary")
+        session_id = session["session"]["id"]
+        kp_headers = bearer(session["access_token"])
+
+        create_with_pc = await self.client.post(
+            f"/sessions/{session_id}/seats",
+            headers=kp_headers,
+            json={"label": "Legacy seat", "pc_id": "pc-legacy"},
+        )
+        self.assertEqual(create_with_pc.status_code, 422, create_with_pc.text)
+        self.assertTrue(
+            any(
+                error.get("type") == "extra_forbidden"
+                and error.get("loc") == ["body", "pc_id"]
+                for error in create_with_pc.json()["detail"]
+            )
+        )
+
+        seat = await self.create_seat(session, "Approved investigator required")
+        connection = connect(self.db_path)
+        try:
+            init_db(connection)
+            legacy_pc = Repository(connection).create_pc(
+                campaign["id"],
+                "未经审核的旧角色",
+                {},
+            )
+            connection.execute(
+                "UPDATE session_seats SET assigned_pc_id = ? WHERE id = ?",
+                (legacy_pc["id"], seat["seat"]["id"]),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        legacy_claim = await self.client.post(
+            "/session-seats/claim",
+            json={
+                "invitation_code": seat["invitation_code"],
+                "display_name": "Legacy claimant",
+            },
+        )
+        self.assertEqual(legacy_claim.status_code, 409, legacy_claim.text)
+        self.assertIn("KP-approved investigator", legacy_claim.json()["detail"])
+
+        direct_assign = await self.client.patch(
+            f"/sessions/{session_id}/seats/{seat['seat']['id']}/pc",
+            headers=kp_headers,
+            json={"pc_id": "pc-legacy"},
+        )
+        self.assertEqual(direct_assign.status_code, 410, direct_assign.text)
+        self.assertIn("approved investigator", direct_assign.json()["detail"])
 
     async def test_single_use_invitations_stable_recovery_and_isolated_revocation(self) -> None:
         _campaign_a, session_a = await self.create_campaign_session("Mist Harbour")
@@ -202,6 +253,68 @@ class SessionSeatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertNotIn("invitation_code", listed.json()[0])
         self.assertEqual(listed.json()[0]["status"], "revoked")
+
+    async def test_one_profile_cannot_concurrently_claim_two_session_seats(self) -> None:
+        _campaign, session = await self.create_campaign_session("Concurrent Seats")
+        first = await self.create_seat(session, "First")
+        second = await self.create_seat(session, "Second")
+        profile_bundle = (
+            await self.client.post(
+                "/player-profiles",
+                json={"display_name": "Stable Player"},
+            )
+        ).json()
+        profile_headers = {
+            "X-AI-KP-Player-Token": profile_bundle["player_token"]
+        }
+
+        async def claim(invitation_code: str) -> httpx.Response:
+            return await self.client.post(
+                "/session-seats/claim",
+                headers=profile_headers,
+                json={
+                    "invitation_code": invitation_code,
+                    "display_name": "Ignored Alias",
+                },
+            )
+
+        responses = await asyncio.gather(
+            claim(first["invitation_code"]),
+            claim(second["invitation_code"]),
+        )
+        self.assertEqual(sorted(response.status_code for response in responses), [200, 409])
+
+        listed = await self.client.get(
+            f"/sessions/{session['session']['id']}/seats",
+            headers=bearer(session["access_token"]),
+        )
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(
+            sorted(seat["status"] for seat in listed.json()),
+            ["claimed", "open"],
+        )
+        claimed = next(seat for seat in listed.json() if seat["status"] == "claimed")
+        self.assertEqual(
+            claimed["player_profile_id"],
+            profile_bundle["profile"]["id"],
+        )
+
+        failed_index = next(
+            index for index, response in enumerate(responses) if response.status_code == 409
+        )
+        still_active_code = (
+            first["invitation_code"]
+            if failed_index == 0
+            else second["invitation_code"]
+        )
+        recovered_claim = await self.client.post(
+            "/session-seats/claim",
+            json={
+                "invitation_code": still_active_code,
+                "display_name": "Another Player",
+            },
+        )
+        self.assertEqual(recovered_claim.status_code, 200, recovered_claim.text)
 
 
 if __name__ == "__main__":

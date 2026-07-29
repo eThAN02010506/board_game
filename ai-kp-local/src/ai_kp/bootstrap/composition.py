@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 import httpx
@@ -16,6 +17,7 @@ from ai_kp.api.routers import (
     maps,
     models,
     module_graph,
+    module_runs,
     modules,
     realtime,
     rulebooks,
@@ -26,6 +28,7 @@ from ai_kp.api.routers import (
 )
 from ai_kp.api.routers.debug import DebugTelemetry, DebugTelemetryMiddleware
 from ai_kp.api.security import (
+    RequestBodyLimitMiddleware,
     SecurityHeadersMiddleware,
     SensitiveOperationRateLimitMiddleware,
 )
@@ -37,31 +40,41 @@ from ai_kp.infrastructure.images.model_configuration import (
 )
 from ai_kp.infrastructure.llm.local_runtime import LocalModelRuntime
 from ai_kp.infrastructure.llm.model_configuration import apply_model_configuration
+from ai_kp.infrastructure.modules.document_sandbox import DocumentParsePolicy
+from ai_kp.infrastructure.modules.import_worker import ModuleImportWorker
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """Own shared outbound HTTP resources and the local model process."""
+    """Own shared HTTP resources, the import worker, and local model process."""
 
-    async with httpx.AsyncClient() as http_client:
-        app.state.http_client = http_client
-        try:
+    app.state.module_import_worker.start()
+    try:
+        async with httpx.AsyncClient() as http_client:
+            app.state.http_client = http_client
             yield
-        finally:
-            app.state.local_model_runtime.stop()
+    finally:
+        await asyncio.to_thread(app.state.module_import_worker.stop)
+        app.state.local_model_runtime.stop()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
-    initialization_connection = connect(resolved_settings.db_path)
+    initialization_connection = connect(
+        resolved_settings.db_path,
+        synchronous=resolved_settings.sqlite_synchronous,
+    )
     try:
         init_db(initialization_connection)
         repository = Repository(initialization_connection)
-        repository.recover_interrupted_module_imports()
+        repository.recover_interrupted_rule_extractions()
+        repository.recover_interrupted_rule_ingestion_runs()
+        repository.recover_interrupted_module_knowledge_extractions()
         persisted_model_configuration = repository.get_model_configuration()
         persisted_image_model_configuration = (
             repository.get_image_model_configuration()
         )
+        initialization_connection.commit()
     finally:
         initialization_connection.close()
     resolved_settings = apply_model_configuration(
@@ -76,6 +89,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved_settings
     app.state.local_model_runtime = LocalModelRuntime(
         resolved_settings.db_path.parent / "model-runtime.log"
+    )
+    app.state.module_import_worker = ModuleImportWorker(
+        resolved_settings.db_path,
+        resolved_settings.module_asset_root,
+        synchronous=resolved_settings.sqlite_synchronous,
+        parse_policy=DocumentParsePolicy(
+            timeout_seconds=resolved_settings.module_parse_timeout_seconds,
+            memory_limit_mib=resolved_settings.module_parse_memory_limit_mib,
+            cpu_seconds=resolved_settings.module_parse_cpu_seconds,
+            legacy_doc_converter_command=(
+                resolved_settings.legacy_doc_converter_command
+            ),
+            legacy_doc_converter_timeout_seconds=(
+                resolved_settings.legacy_doc_converter_timeout_seconds
+            ),
+        ),
     )
     app.state.debug_telemetry = DebugTelemetry()
     if resolved_settings.deployment_mode == "lan":
@@ -95,6 +124,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_json_bytes=resolved_settings.json_body_max_bytes,
     )
     # Add last so security headers wrap CORS, host rejection, rate limits, and route errors.
     app.add_middleware(SecurityHeadersMiddleware)
@@ -116,6 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         maps.router,
         modules.router,
         module_graph.router,
+        module_runs.router,
         turns.router,
     )
     app.state.domain_routers = domain_routers

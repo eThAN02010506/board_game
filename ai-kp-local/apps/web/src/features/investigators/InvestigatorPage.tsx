@@ -12,7 +12,12 @@ import {
   XCircle
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { credentialBridge, requestFile, requestJson } from "../../api/client";
+import {
+  credentialBridge,
+  isApiError,
+  requestFile,
+  requestJson
+} from "../../api/client";
 import type {
   AuthIdentity,
   Campaign,
@@ -352,6 +357,8 @@ export function InvestigatorPage({ campaign, identity }: Props) {
   const [stateDrafts, setStateDrafts] = useState<Record<string, Record<string, string>>>({});
   const [message, setMessage] = useState("正在读取本地玩家档案……");
   const [busy, setBusy] = useState(false);
+  const libraryRequestVersion = useRef(0);
+  const campaignRecordsRequestVersion = useRef(0);
 
   const previewSheet = preview?.canonical_sheet;
   const strongestSkills = useMemo(
@@ -473,28 +480,41 @@ export function InvestigatorPage({ campaign, identity }: Props) {
   }
 
   async function loadLibrary(silent = false) {
-    if (!credentialBridge.snapshot().playerToken) return;
+    const playerToken = credentialBridge.snapshot().playerToken;
+    if (!playerToken) return;
+    const requestVersion = ++libraryRequestVersion.current;
     if (!silent) setBusy(true);
     try {
       const [nextProfile, library] = await Promise.all([
         requestJson<PlayerProfile>("/player-profile"),
         requestJson<Investigator[]>("/investigators")
       ]);
+      if (
+        libraryRequestVersion.current !== requestVersion ||
+        credentialBridge.snapshot().playerToken !== playerToken
+      ) return;
       setProfile(nextProfile);
       setInvestigators(library);
       setMessage(library.length ? `已读取 ${library.length} 名调查员。` : "档案已就绪，可以建卡或导入 Excel。");
     } catch (error) {
-      credentialBridge.player("");
-      writePlayerProfileToken("");
-      setProfile(null);
-      setInvestigators([]);
+      if (
+        libraryRequestVersion.current !== requestVersion ||
+        credentialBridge.snapshot().playerToken !== playerToken
+      ) return;
+      if (isApiError(error, 401)) {
+        credentialBridge.player("");
+        writePlayerProfileToken("");
+        setProfile(null);
+        setInvestigators([]);
+      }
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
-      if (!silent) setBusy(false);
+      if (!silent && libraryRequestVersion.current === requestVersion) setBusy(false);
     }
   }
 
   async function loadCampaignRecords(silent = false) {
+    const requestVersion = ++campaignRecordsRequestVersion.current;
     if (!campaign || !identity) {
       setCampaignRecords([]);
       setMembers([]);
@@ -507,6 +527,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
           requestJson<CampaignInvestigator[]>(`/campaigns/${campaign.id}/investigator-submissions`),
           requestJson<SessionMember[]>(`/sessions/${identity.session_id}/members`)
         ]);
+        if (campaignRecordsRequestVersion.current !== requestVersion) return;
         setCampaignRecords(records);
         setMembers(sessionMembers.filter((member) => member.role === "player" && !member.revoked_at));
         setStateDrafts(Object.fromEntries(records.filter((record) => record.campaign_state).map((record) => [
@@ -519,12 +540,18 @@ export function InvestigatorPage({ campaign, identity }: Props) {
           }
         ])));
       } else if (profile) {
-        setCampaignRecords(await requestJson<CampaignInvestigator[]>(`/campaigns/${campaign.id}/my-investigators`));
+        const records = await requestJson<CampaignInvestigator[]>(
+          `/campaigns/${campaign.id}/my-investigators`
+        );
+        if (campaignRecordsRequestVersion.current !== requestVersion) return;
+        setCampaignRecords(records);
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      if (campaignRecordsRequestVersion.current === requestVersion) {
+        setMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      if (!silent) setBusy(false);
+      if (!silent && campaignRecordsRequestVersion.current === requestVersion) setBusy(false);
     }
   }
 
@@ -538,6 +565,9 @@ export function InvestigatorPage({ campaign, identity }: Props) {
 
   useEffect(() => {
     void loadCampaignRecords(true);
+    return () => {
+      campaignRecordsRequestVersion.current += 1;
+    };
   }, [campaign?.id, identity?.member_id, profile?.id]);
 
   async function createProfile(event: FormEvent) {
@@ -788,6 +818,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
           <section className="page-card manual-character-card">
             <div className="page-intro"><div><p className="eyebrow">完整手工建卡</p><h2>调查员编辑器</h2></div><UserRound size={24} /></div>
             <form onSubmit={saveManual}>
+              <fieldset className="manual-character-fields" disabled={busy}>
               <div className="form-grid compact-fields">
                 <label>姓名<input required value={manual.name} onChange={(event) => patchManual({ name: event.target.value })} /></label><label>玩家名<input value={manual.playerName} onChange={(event) => patchManual({ playerName: event.target.value })} /></label><label>职业<input value={manual.occupation} onChange={(event) => patchManual({ occupation: event.target.value })} /></label><label>时代<input value={manual.era} onChange={(event) => patchManual({ era: event.target.value })} /></label><label>年龄<input max="89" min="15" type="number" value={manual.age} onChange={(event) => patchManual({ age: event.target.value })} /></label><label>性别描述<input value={manual.gender} onChange={(event) => patchManual({ gender: event.target.value })} /></label><label>居住地<input value={manual.residence} onChange={(event) => patchManual({ residence: event.target.value })} /></label><label>出生地<input value={manual.birthplace} onChange={(event) => patchManual({ birthplace: event.target.value })} /></label>
               </div>
@@ -844,6 +875,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
               {manualPreview && <div className="import-preview"><div className="derived-grid"><span>HP <strong>{manualPreview.canonical_sheet.derived.max_hp}</strong></span><span>SAN <strong>{manualPreview.canonical_sheet.derived.initial_san}</strong></span><span>MP <strong>{manualPreview.canonical_sheet.derived.max_mp}</strong></span><span>MOV <strong>{manualPreview.canonical_sheet.derived.mov}</strong></span><span>DB <strong>{manualPreview.canonical_sheet.derived.damage_bonus}</strong></span><span>体格 <strong>{manualPreview.canonical_sheet.derived.build}</strong></span></div>{manualPreview.warnings.length > 0 && <ul>{manualPreview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}</div>}
               <label>保存方式<select value={manualTargetId} onChange={(event) => setManualTargetId(event.target.value)}><option value="">保存为新调查员</option>{investigators.map((investigator) => <option key={investigator.id} value={investigator.id}>作为“{investigator.name}”的新版本</option>)}</select></label>
               <div className="inline-actions"><button className="secondary-button" disabled={busy || !manual.name.trim()} onClick={() => void validateManual()} type="button"><ShieldCheck size={16} />规则预览</button><button className="primary-button" disabled={busy || !manual.name.trim()} type="submit"><Save size={16} />保存不可变草稿</button></div>
+              </fieldset>
             </form>
           </section>
         </>

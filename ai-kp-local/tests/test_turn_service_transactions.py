@@ -7,6 +7,7 @@ from ai_kp.application.session_service import SessionService
 from ai_kp.application.turn_service import ManualProposalCommand, TurnService
 from ai_kp.core.db import connect, init_db
 from ai_kp.core.repository import Repository
+from tests.support_investigators import coc7_sheet
 
 
 class TurnServiceTransactionTests(unittest.TestCase):
@@ -20,17 +21,41 @@ class TurnServiceTransactionTests(unittest.TestCase):
         init_db(connection)
         repo = Repository(connection)
         campaign = repo.create_campaign("Atomic turn service")
-        pc = repo.create_pc(
-            campaign["id"],
-            "Investigator",
-            {"侦查": 60, "聆听": 55},
-        )
         sessions = SessionService(repo)
         kp_bundle = sessions.create(campaign["id"])
         player_bundle = sessions.join(
             kp_bundle["join_code"],
             display_name="Player",
-            pc_id=pc["id"],
+        )
+        profile_bundle = repo.create_player_profile("Player")
+        investigator = repo.create_investigator(
+            str(profile_bundle["profile"]["id"]),
+            coc7_sheet(
+                "Investigator",
+                skills={"侦查": 60, "聆听": 55},
+            ),
+            source_type="manual",
+        )
+        repo.submit_investigator_to_campaign(
+            campaign_id=str(campaign["id"]),
+            investigator_id=str(investigator["id"]),
+            revision_id=str(investigator["current_revision_id"]),
+            owner_profile_id=str(profile_bundle["profile"]["id"]),
+            member_id=str(player_bundle["member"]["id"]),
+            session_id=str(kp_bundle["session"]["id"]),
+        )
+        repo.review_campaign_investigator(
+            campaign_id=str(campaign["id"]),
+            investigator_id=str(investigator["id"]),
+            action="approved",
+            comment="transaction test approval",
+            kp_member_id=str(kp_bundle["member"]["id"]),
+            session_id=str(kp_bundle["session"]["id"]),
+        )
+        repo.assign_approved_investigator(
+            session_id=str(kp_bundle["session"]["id"]),
+            member_id=str(player_bundle["member"]["id"]),
+            investigator_id=str(investigator["id"]),
         )
         kp_identity = repo.authenticate_access_token(kp_bundle["access_token"])
         player_identity = repo.authenticate_access_token(player_bundle["access_token"])

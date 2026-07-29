@@ -7,6 +7,7 @@ import httpx
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
 from ai_kp.rules.dice import resolve_d100, success_level
+from tests.support_investigators import coc7_sheet, create_approved_player
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -65,20 +66,17 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
             json={"kp_display_name": "Keeper"},
         )).json()
         self.kp_headers = bearer(self.session["access_token"])
-        self.pc = (await self.client.post(
-            f"/campaigns/{self.campaign['id']}/pcs",
-            headers=self.kp_headers,
-            json={"name": "Investigator", "sheet": {"侦查": 60}},
-        )).json()
-        self.player = (await self.client.post(
-            "/sessions/join",
-            json={
-                "join_code": self.session["join_code"],
-                "display_name": "Player",
-                "pc_id": self.pc["id"],
-            },
-        )).json()
-        self.player_headers = bearer(self.player["access_token"])
+        approved_player = await create_approved_player(
+            self.client,
+            campaign=self.campaign,
+            session=self.session,
+            kp_headers=self.kp_headers,
+            display_name="Player",
+            sheet=coc7_sheet("Investigator", skills={"侦查": 60}),
+        )
+        self.pc = approved_player["pc"]
+        self.player = approved_player["bundle"]
+        self.player_headers = approved_player["headers"]
 
     async def asyncTearDown(self) -> None:
         await self.client.aclose()
@@ -107,7 +105,7 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_physical_roll_visibility_override_and_restart_replay(self) -> None:
         check = await self.create_check()
         self.assertEqual(check["target"], 60)
-        self.assertEqual(check["target_source"], "legacy_pc_sheet")
+        self.assertEqual(check["target_source"], "approved_investigator_revision")
         self.assertEqual(check["source_reference"]["page_start"], 77)
 
         player_list = await self.client.get(

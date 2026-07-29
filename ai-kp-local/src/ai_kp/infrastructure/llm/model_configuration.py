@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -9,6 +10,9 @@ from urllib.parse import urlparse
 import httpx
 
 from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.http_limits import request_bounded_bytes
+
+MAX_MODEL_DISCOVERY_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
 def normalize_openai_base_url(value: str) -> str:
@@ -101,29 +105,36 @@ async def discover_openai_models(
     try:
         if client is None:
             async with httpx.AsyncClient() as temporary_client:
-                response = await temporary_client.get(
+                response_content, status_code = await request_bounded_bytes(
+                    temporary_client,
+                    "GET",
                     f"{normalized}/models",
+                    max_bytes=MAX_MODEL_DISCOVERY_RESPONSE_BYTES,
+                    limit_error="模型列表响应超过 2 MiB 上限",
                     headers=headers,
                     timeout=timeout_seconds,
                 )
         else:
-            response = await client.get(
+            response_content, status_code = await request_bounded_bytes(
+                client,
+                "GET",
                 f"{normalized}/models",
+                max_bytes=MAX_MODEL_DISCOVERY_RESPONSE_BYTES,
+                limit_error="模型列表响应超过 2 MiB 上限",
                 headers=headers,
                 timeout=timeout_seconds,
             )
     except httpx.RequestError as exc:
         raise RuntimeError(f"无法连接模型服务 {normalized}：{exc}") from exc
-    try:
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        detail = response.text.replace("\n", " ")[:500]
+    if status_code < 200 or status_code >= 300:
+        detail = response_content.decode("utf-8", errors="replace")
         raise RuntimeError(
-            f"模型服务返回 HTTP {response.status_code}：{detail}"
-        ) from exc
+            f"模型服务返回 HTTP {status_code}："
+            f"{detail.replace(chr(10), ' ')[:500]}"
+        )
     try:
-        payload = response.json()
-    except ValueError as exc:
+        payload = json.loads(response_content)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise RuntimeError("模型服务返回了无效 JSON") from exc
     models = payload.get("data", []) if isinstance(payload, dict) else []
     return [

@@ -84,8 +84,11 @@ class SecurityRepository:
         join_code: str,
         *,
         display_name: str,
-        pc_id: str | None = None,
     ) -> dict:
+        # The code check and member creation are one linearizable operation.
+        # Otherwise a concurrent rotation can commit after this SELECT but
+        # before the INSERT, allowing the retired code to create a live token.
+        self.begin_immediate()
         session = self.connection.execute(
             """
             SELECT * FROM campaign_sessions
@@ -95,37 +98,19 @@ class SecurityRepository:
         ).fetchone()
         if session is None:
             raise KeyError("Active session not found for join code")
-        if pc_id:
-            pc = self.connection.execute(
-                "SELECT id FROM player_characters WHERE id = ? AND campaign_id = ?",
-                (pc_id, session["campaign_id"]),
-            ).fetchone()
-            if pc is None:
-                raise ValueError("Selected PC does not belong to this campaign")
-            existing_pc = self.connection.execute(
-                """
-                SELECT id FROM session_members
-                WHERE session_id = ? AND pc_id = ? AND revoked_at IS NULL
-                """,
-                (session["id"], pc_id),
-            ).fetchone()
-            if existing_pc is not None:
-                raise ValueError("Selected PC is already controlled by another session member")
-
         member_id = new_id("member")
         access_token = generate_access_token()
         self.connection.execute(
             """
             INSERT INTO session_members
-              (id, session_id, campaign_id, role, display_name, pc_id, token_hash)
-            VALUES (?, ?, ?, 'player', ?, ?, ?)
+              (id, session_id, campaign_id, role, display_name, token_hash)
+            VALUES (?, ?, ?, 'player', ?, ?)
             """,
             (
                 member_id,
                 session["id"],
                 session["campaign_id"],
                 display_name,
-                pc_id,
                 hash_access_token(access_token),
             ),
         )
@@ -347,14 +332,21 @@ class SecurityRepository:
         return session
 
     def rotate_session_join_code(self, session_id: str) -> dict:
+        self.begin_immediate()
         session = self.get_campaign_session(session_id)
         if session["status"] != "active":
             raise ValueError("Only active sessions can rotate their join code")
         join_code = generate_join_code()
-        self.connection.execute(
-            "UPDATE campaign_sessions SET join_code_hash = ? WHERE id = ?",
+        updated = self.connection.execute(
+            """
+            UPDATE campaign_sessions
+            SET join_code_hash = ?
+            WHERE id = ? AND status = 'active'
+            """,
             (hash_join_code(join_code), session_id),
         )
+        if updated.rowcount != 1:
+            raise ValueError("Only active sessions can rotate their join code")
         return {"session": self.get_campaign_session(session_id), "join_code": join_code}
 
     def revoke_session_member(self, session_id: str, member_id: str) -> dict:
@@ -388,53 +380,6 @@ class SecurityRepository:
             resource_id=member_id,
         )
         return revoked
-
-    def assign_member_pc(self, session_id: str, member_id: str, pc_id: str) -> dict:
-        member = self.get_session_member(member_id)
-        if member["session_id"] != session_id or member["role"] != "player":
-            raise ValueError("Target must be a player in this session")
-        if member["revoked_at"] is not None:
-            raise ValueError("Cannot assign a PC to a revoked player")
-        pc = self.connection.execute(
-            "SELECT id FROM player_characters WHERE id = ? AND campaign_id = ?",
-            (pc_id, member["campaign_id"]),
-        ).fetchone()
-        if pc is None:
-            raise ValueError("PC does not belong to this campaign")
-        assigned = self.connection.execute(
-            """
-            SELECT id FROM session_members
-            WHERE session_id = ? AND pc_id = ? AND revoked_at IS NULL AND id != ?
-            """,
-            (session_id, pc_id, member_id),
-        ).fetchone()
-        if assigned is not None:
-            raise ValueError("PC is already controlled by another active member")
-        self.connection.execute(
-            "UPDATE session_members SET pc_id = ? WHERE id = ?",
-            (pc_id, member_id),
-        )
-        assigned_member = self.get_session_member(member_id)
-        self.append_realtime_event(
-            session_id=session_id,
-            campaign_id=str(member["campaign_id"]),
-            audience="kp",
-            event_type="session.member_updated",
-            resource_type="session_member",
-            resource_id=member_id,
-            payload={"pc_id": pc_id},
-        )
-        self.append_realtime_event(
-            session_id=session_id,
-            campaign_id=str(member["campaign_id"]),
-            audience="member",
-            member_id=member_id,
-            event_type="session.identity_updated",
-            resource_type="session_member",
-            resource_id=member_id,
-            payload={"pc_id": pc_id},
-        )
-        return assigned_member
 
     def create_player_action(
         self,

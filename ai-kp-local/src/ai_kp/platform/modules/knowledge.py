@@ -11,6 +11,28 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 KnowledgeKind = Literal["module_canon", "module_anchor", "reference"]
 Visibility = Literal["player", "table", "kp", "secret"]
+VISIBILITY_RANK: dict[str, int] = {
+    "player": 0,
+    "table": 0,
+    "kp": 1,
+    "secret": 2,
+}
+
+
+def validate_derived_scope(
+    *,
+    source_visibility: str,
+    source_spoiler_tag: str | None,
+    derived_visibility: str,
+    derived_spoiler_tag: str | None,
+    label: str,
+) -> None:
+    """Reject knowledge projections that weaken their source security scope."""
+
+    if VISIBILITY_RANK[derived_visibility] < VISIBILITY_RANK[source_visibility]:
+        raise ValueError(f"{label} visibility cannot be wider than its source")
+    if source_spoiler_tag and derived_spoiler_tag != source_spoiler_tag:
+        raise ValueError(f"{label} must preserve its source spoiler tag")
 
 
 class ModuleCitation(BaseModel):
@@ -70,6 +92,13 @@ def validate_module_candidate(
             )
         if source["module_id"] != module_id:
             raise ValueError("Citation belongs to another module")
+        validate_derived_scope(
+            source_visibility=str(source.get("visibility") or "kp"),
+            source_spoiler_tag=source.get("spoiler_tag"),
+            derived_visibility=candidate.visibility,
+            derived_spoiler_tag=candidate.spoiler_tag,
+            label="Candidate",
+        )
         if normalize_evidence(citation.evidence_text) not in normalize_evidence(source_text):
             raise ValueError("Citation evidence is not present in its source")
         citation.source_locator = str(source.get("source_locator") or "")

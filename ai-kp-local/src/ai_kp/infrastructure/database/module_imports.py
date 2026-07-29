@@ -11,6 +11,10 @@ from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 from ai_kp.platform.modules.documents import DocumentAsset, DocumentChunk
 
 
+class ModuleImportClaimLost(ValueError):
+    """The durable job was recovered or claimed by a newer worker attempt."""
+
+
 class ModuleImportRepository(SQLiteRepository):
     def create_module_import_job(
         self,
@@ -75,13 +79,27 @@ class ModuleImportRepository(SQLiteRepository):
                 attempt_count = attempt_count + 1,
                 error_text = NULL,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND status IN ('queued', 'failed')
+            WHERE id = ? AND status = 'queued'
             """,
             (job_id,),
         )
         if cursor.rowcount != 1:
             return None
         return self.get_module_import_job(job_id)
+
+    def claim_next_module_import_job(self) -> dict | None:
+        row = self.connection.execute(
+            """
+            SELECT id
+            FROM module_import_jobs
+            WHERE status = 'queued'
+            ORDER BY created_at, id
+            LIMIT 1
+            """
+        ).fetchone()
+        if row is None:
+            return None
+        return self.claim_module_import_job(str(row["id"]))
 
     def retry_module_import_job(self, job_id: str) -> dict:
         cursor = self.connection.execute(
@@ -106,30 +124,48 @@ class ModuleImportRepository(SQLiteRepository):
         self,
         job_id: str,
         *,
+        expected_attempt: int,
         stage: str,
         current: int = 0,
         total: int = 0,
     ) -> None:
-        self.connection.execute(
+        cursor = self.connection.execute(
             """
             UPDATE module_import_jobs
             SET stage = ?, progress_current = ?, progress_total = ?,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND status = 'processing'
+            WHERE id = ? AND status = 'processing' AND attempt_count = ?
             """,
-            (stage, current, total, job_id),
+            (stage, current, total, job_id, expected_attempt),
         )
+        if cursor.rowcount != 1:
+            raise ModuleImportClaimLost("Module import claim is no longer current")
 
     def complete_module_document_import(
         self,
         job_id: str,
         *,
+        expected_attempt: int,
         chunks: tuple[DocumentChunk, ...],
         assets: tuple[tuple[DocumentAsset, str, str], ...],
     ) -> dict:
-        job = self.get_module_import_job(job_id)
-        if job["status"] != "processing":
-            raise ValueError("Module import job is not processing")
+        # Completion is a compare-and-swap transaction. Startup recovery may
+        # requeue a processing job while its former worker is still parsing in
+        # another process. The attempt generation prevents that stale worker
+        # from inserting an orphan module after ownership has moved on.
+        if not self.connection.in_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")
+        row = self.connection.execute(
+            """
+            SELECT * FROM module_import_jobs
+            WHERE id = ? AND status = 'processing' AND attempt_count = ?
+              AND module_id IS NULL
+            """,
+            (job_id, expected_attempt),
+        ).fetchone()
+        if row is None:
+            raise ModuleImportClaimLost("Module import claim is no longer current")
+        job = row_to_dict(row)
         module_id = new_id("mod")
         self.connection.execute(
             """
@@ -202,27 +238,37 @@ class ModuleImportRepository(SQLiteRepository):
                 ),
             )
         total = len(chunks) + len(assets)
-        self.connection.execute(
+        cursor = self.connection.execute(
             """
             UPDATE module_import_jobs
             SET status = 'completed', stage = 'completed',
                 progress_current = ?, progress_total = ?, module_id = ?,
                 error_text = NULL, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND status = 'processing'
+            WHERE id = ? AND status = 'processing' AND attempt_count = ?
             """,
-            (total, total, module_id, job_id),
+            (total, total, module_id, job_id, expected_attempt),
         )
+        if cursor.rowcount != 1:
+            raise ModuleImportClaimLost(
+                "Module import claim was lost during completion"
+            )
         return self.get_module_import_job(job_id)
 
-    def fail_module_import_job(self, job_id: str, error_text: str) -> dict:
+    def fail_module_import_job(
+        self,
+        job_id: str,
+        error_text: str,
+        *,
+        expected_attempt: int,
+    ) -> dict:
         self.connection.execute(
             """
             UPDATE module_import_jobs
             SET status = 'failed', stage = 'failed', error_text = ?,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND status = 'processing'
+            WHERE id = ? AND status = 'processing' AND attempt_count = ?
             """,
-            (error_text[:4000], job_id),
+            (error_text[:4000], job_id, expected_attempt),
         )
         return self.get_module_import_job(job_id)
 
@@ -230,8 +276,9 @@ class ModuleImportRepository(SQLiteRepository):
         cursor = self.connection.execute(
             """
             UPDATE module_import_jobs
-            SET status = 'failed', stage = 'failed',
-                error_text = '服务在解析完成前中断；请重试此任务',
+            SET status = 'queued', stage = 'queued',
+                progress_current = 0, progress_total = 0,
+                error_text = '服务在解析完成前中断；任务已自动重新排队',
                 updated_at = CURRENT_TIMESTAMP
             WHERE status = 'processing'
             """

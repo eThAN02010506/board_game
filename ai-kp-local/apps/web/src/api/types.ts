@@ -51,6 +51,40 @@ export type ModuleRecord = {
   created_at: string;
 };
 
+export type ModuleRunStatus = "active" | "paused" | "completed";
+
+export type ModuleRun = {
+  id: string;
+  campaign_id: string;
+  module_id: string;
+  module_title: string;
+  module_source_hash: string | null;
+  status: ModuleRunStatus;
+  current_scene_key: string | null;
+  active_spoiler_tags: string[];
+  state: Record<string, unknown>;
+  version: number;
+  started_by_member_id: string | null;
+  started_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type ModuleRunStart = {
+  module_id: string;
+  current_scene_key?: string | null;
+  active_spoiler_tags?: string[];
+  state?: Record<string, unknown>;
+};
+
+export type ModuleRunUpdate = {
+  expected_version: number;
+  status?: ModuleRunStatus;
+  current_scene_key?: string | null;
+  active_spoiler_tags?: string[];
+  state?: Record<string, unknown>;
+};
+
 export type ModuleChunk = {
   id: string;
   module_id: string;
@@ -517,6 +551,40 @@ export type RuleQueryResult = {
       summary?: string;
       execution?: { kind?: string };
     };
+  }>;
+};
+
+export type RuleReviewCandidate = {
+  id: string;
+  source_id: string;
+  rule_key: string;
+  version: number;
+  rule_type: string;
+  title: string;
+  status: "candidate" | "validated" | "review_required" | "quarantined";
+  object_hash: string;
+  confidence: number;
+  object: {
+    [key: string]: unknown;
+    summary?: string;
+    execution?: { [key: string]: unknown; kind?: string };
+    citations?: Array<{
+      chunk_id: string;
+      page: number;
+      evidence_text: string;
+      evidence_hash?: string | null;
+    }>;
+  };
+  validation: Record<string, unknown>;
+};
+
+export type RuleReviewSubmission = {
+  decision: "approved" | "rejected";
+  note?: string | null;
+  golden_cases: Array<{
+    name: string;
+    inputs: Record<string, unknown>;
+    expected_output: Record<string, unknown>;
   }>;
 };
 

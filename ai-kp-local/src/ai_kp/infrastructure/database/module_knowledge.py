@@ -10,7 +10,11 @@ from ai_kp.core.ids import new_id
 from ai_kp.infrastructure.database.rows import row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 from ai_kp.platform.memory.retrieval import tokenize
-from ai_kp.platform.modules.knowledge import ModuleKnowledgeCandidate
+from ai_kp.platform.modules.knowledge import (
+    ModuleKnowledgeCandidate,
+    validate_derived_scope,
+    validate_module_candidate,
+)
 
 _WORD_RE = re.compile(r"[a-zA-Z0-9_]+")
 _CJK_RE = re.compile(r"[\u3400-\u9fff]+")
@@ -37,6 +41,61 @@ class ModuleKnowledgeRepository(SQLiteRepository):
         normalized_title = title.strip()
         if not normalized_title:
             raise ValueError("Section title cannot be blank")
+        section_exists = self.connection.execute(
+            """
+            SELECT 1 FROM module_chunks
+            WHERE module_id = ? AND title = ?
+            LIMIT 1
+            """,
+            (module_id, normalized_title),
+        ).fetchone()
+        if section_exists is None:
+            raise KeyError(f"Module section not found: {normalized_title}")
+        revoked_cursor = self.connection.execute(
+            """
+            UPDATE module_knowledge_candidates
+            SET status = 'pending',
+                review_note = NULL,
+                reviewed_by_member_id = NULL,
+                reviewed_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE module_id = ? AND status = 'approved'
+              AND EXISTS (
+                SELECT 1
+                FROM module_knowledge_citations citation
+                WHERE citation.candidate_id = module_knowledge_candidates.id
+                  AND (
+                    citation.chunk_id IN (
+                      SELECT id FROM module_chunks
+                      WHERE module_id = ? AND title = ?
+                        AND (
+                          visibility <> ?
+                          OR spoiler_tag IS NOT ?
+                        )
+                    )
+                    OR citation.asset_id IN (
+                      SELECT id FROM module_assets
+                      WHERE module_id = ? AND nearby_heading = ?
+                        AND (
+                          visibility <> ?
+                          OR spoiler_tag IS NOT ?
+                        )
+                    )
+                  )
+              )
+            """,
+            (
+                module_id,
+                module_id,
+                normalized_title,
+                visibility,
+                spoiler_tag,
+                module_id,
+                normalized_title,
+                visibility,
+                spoiler_tag,
+            ),
+        )
         cursor = self.connection.execute(
             """
             UPDATE module_chunks
@@ -45,8 +104,6 @@ class ModuleKnowledgeRepository(SQLiteRepository):
             """,
             (visibility, spoiler_tag, module_id, normalized_title),
         )
-        if cursor.rowcount == 0:
-            raise KeyError(f"Module section not found: {normalized_title}")
         asset_cursor = self.connection.execute(
             """
             UPDATE module_assets
@@ -62,6 +119,7 @@ class ModuleKnowledgeRepository(SQLiteRepository):
             "spoiler_tag": spoiler_tag,
             "chunk_count": cursor.rowcount,
             "asset_count": asset_cursor.rowcount,
+            "revoked_candidate_count": revoked_cursor.rowcount,
         }
 
     def update_module_asset_analysis(
@@ -120,11 +178,55 @@ class ModuleKnowledgeRepository(SQLiteRepository):
         ).fetchall()
         return [row_to_dict(row) for row in rows]
 
-    def mark_module_chunk_knowledge_status(self, chunk_id: str, status: str) -> None:
-        self.connection.execute(
-            "UPDATE module_chunks SET knowledge_status = ? WHERE id = ?",
-            (status, chunk_id),
+    def claim_module_chunk_for_knowledge(self, chunk_id: str) -> int | None:
+        row = self.connection.execute(
+            """
+            UPDATE module_chunks
+            SET knowledge_status = 'processing',
+                attempt_count = attempt_count + 1
+            WHERE id = ? AND knowledge_status = 'pending'
+            RETURNING attempt_count
+            """,
+            (chunk_id,),
+        ).fetchone()
+        return None if row is None else int(row["attempt_count"])
+
+    def module_chunk_knowledge_claim_is_current(
+        self,
+        chunk_id: str,
+        *,
+        expected_attempt: int,
+    ) -> bool:
+        row = self.connection.execute(
+            """
+            SELECT 1
+            FROM module_chunks
+            WHERE id = ? AND knowledge_status = 'processing'
+              AND attempt_count = ?
+            """,
+            (chunk_id, expected_attempt),
+        ).fetchone()
+        return row is not None
+
+    def mark_module_chunk_knowledge_status(
+        self,
+        chunk_id: str,
+        status: str,
+        *,
+        expected_attempt: int,
+    ) -> bool:
+        if status not in {"completed", "failed"}:
+            raise ValueError("Knowledge claims may only finalize as completed or failed")
+        cursor = self.connection.execute(
+            """
+            UPDATE module_chunks
+            SET knowledge_status = ?
+            WHERE id = ? AND knowledge_status = 'processing'
+              AND attempt_count = ?
+            """,
+            (status, chunk_id, expected_attempt),
         )
+        return cursor.rowcount == 1
 
     def reset_failed_module_chunks(self, module_id: str) -> int:
         cursor = self.connection.execute(
@@ -133,6 +235,17 @@ class ModuleKnowledgeRepository(SQLiteRepository):
             WHERE module_id = ? AND knowledge_status = 'failed'
             """,
             (module_id,),
+        )
+        return cursor.rowcount
+
+    def recover_interrupted_module_knowledge_extractions(self) -> int:
+        """Return process-local LLM claims to the durable pending queue."""
+
+        cursor = self.connection.execute(
+            """
+            UPDATE module_chunks SET knowledge_status = 'pending'
+            WHERE knowledge_status = 'processing'
+            """
         )
         return cursor.rowcount
 
@@ -251,9 +364,16 @@ class ModuleKnowledgeRepository(SQLiteRepository):
         candidate_id: str,
         *,
         decision: str,
-        member_id: str,
+        member_id: str | None,
         note: str | None,
     ) -> dict:
+        candidate = self.get_module_knowledge_candidate(candidate_id)
+        if decision == "approved":
+            validate_module_candidate(
+                self,
+                str(candidate["module_id"]),
+                _candidate_validation_payload(candidate),
+            )
         cursor = self.connection.execute(
             """
             UPDATE module_knowledge_candidates
@@ -264,7 +384,6 @@ class ModuleKnowledgeRepository(SQLiteRepository):
             (decision, note, member_id, candidate_id),
         )
         if cursor.rowcount != 1:
-            candidate = self.get_module_knowledge_candidate(candidate_id)
             raise ValueError(
                 f"Only pending candidates can be reviewed; current status is "
                 f"{candidate['status']}"
@@ -298,6 +417,7 @@ class ModuleKnowledgeRepository(SQLiteRepository):
         where = " AND ".join(filters)
         terms = _trigram_terms(query)
         rows: list[sqlite3.Row] = []
+        fetch_limit = max(limit * 4, limit)
         if terms:
             match_query = " OR ".join(
                 f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms
@@ -312,7 +432,7 @@ class ModuleKnowledgeRepository(SQLiteRepository):
                     ORDER BY score, source_type, source_id
                     LIMIT ?
                     """,
-                    [match_query, *params, limit],
+                    [match_query, *params, fetch_limit],
                 ).fetchall()
             except sqlite3.OperationalError:
                 rows = []
@@ -333,20 +453,141 @@ class ModuleKnowledgeRepository(SQLiteRepository):
                 if overlap:
                     scored.append((overlap, row))
             scored.sort(key=lambda item: (-item[0], item[1]["source_id"]))
-            rows = [item[1] for item in scored[:limit]]
-        return [
-            {
-                "source_type": row["source_type"],
-                "source_id": row["source_id"],
-                "module_id": row["module_id"],
-                "visibility": row["visibility"],
-                "spoiler_tag": row["spoiler_tag"],
-                "source_locator": row["source_locator"],
-                "title": row["title"],
-                "text": str(row["text"])[:2000],
-            }
-            for row in rows
-        ]
+            rows = [item[1] for item in scored[:fetch_limit]]
+        results: list[dict] = []
+        for row in rows:
+            if row["source_type"] == "knowledge" and not (
+                self._module_candidate_sources_are_visible(
+                    str(row["source_id"]),
+                    module_id=module_id,
+                    allowed_visibility=visibility,
+                    spoiler_tags=spoiler_tags,
+                )
+            ):
+                continue
+            results.append(
+                {
+                    "source_type": row["source_type"],
+                    "source_id": row["source_id"],
+                    "module_id": row["module_id"],
+                    "visibility": row["visibility"],
+                    "spoiler_tag": row["spoiler_tag"],
+                    "source_locator": row["source_locator"],
+                    "title": row["title"],
+                    "text": str(row["text"])[:2000],
+                }
+            )
+            if len(results) >= limit:
+                break
+        return results
+
+    def _module_candidate_sources_are_visible(
+        self,
+        candidate_id: str,
+        *,
+        module_id: str,
+        allowed_visibility: tuple[str, ...],
+        spoiler_tags: tuple[str, ...] | None,
+    ) -> bool:
+        return (
+            get_current_module_candidate_scope(
+                self.connection,
+                candidate_id,
+                module_id=module_id,
+                allowed_visibility=allowed_visibility,
+                spoiler_tags=spoiler_tags,
+            )
+            is not None
+        )
+
+    def module_candidate_sources_are_current(
+        self,
+        candidate_id: str,
+        *,
+        module_id: str,
+    ) -> bool:
+        return (
+            get_current_module_candidate_scope(
+                self.connection,
+                candidate_id,
+                module_id=module_id,
+                allowed_visibility=("player", "table", "kp", "secret"),
+                spoiler_tags=None,
+            )
+            is not None
+        )
+
+
+def get_current_module_candidate_scope(
+    connection: sqlite3.Connection,
+    candidate_id: str,
+    *,
+    module_id: str,
+    allowed_visibility: tuple[str, ...],
+    spoiler_tags: tuple[str, ...] | None,
+) -> dict | None:
+    """Return an approved candidate scope only while every source is still valid."""
+
+    candidate = connection.execute(
+        """
+        SELECT module_id, status, visibility, spoiler_tag
+        FROM module_knowledge_candidates
+        WHERE id = ?
+        """,
+        (candidate_id,),
+    ).fetchone()
+    if (
+        candidate is None
+        or candidate["module_id"] != module_id
+        or candidate["status"] != "approved"
+        or candidate["visibility"] not in allowed_visibility
+        or not _spoiler_visible(candidate["spoiler_tag"], spoiler_tags)
+    ):
+        return None
+    citations = connection.execute(
+        """
+        SELECT citation.chunk_id,
+               citation.asset_id,
+               CASE
+                 WHEN citation.chunk_id IS NOT NULL THEN chunk.module_id
+                 ELSE asset.module_id
+               END AS source_module_id,
+               CASE
+                 WHEN citation.chunk_id IS NOT NULL THEN chunk.visibility
+                 ELSE asset.visibility
+               END AS source_visibility,
+               CASE
+                 WHEN citation.chunk_id IS NOT NULL THEN chunk.spoiler_tag
+                 ELSE asset.spoiler_tag
+               END AS source_spoiler_tag
+        FROM module_knowledge_citations citation
+        LEFT JOIN module_chunks chunk ON chunk.id = citation.chunk_id
+        LEFT JOIN module_assets asset ON asset.id = citation.asset_id
+        WHERE citation.candidate_id = ?
+        """,
+        (candidate_id,),
+    ).fetchall()
+    if not citations:
+        return None
+    for citation in citations:
+        source_visibility = citation["source_visibility"]
+        if (
+            citation["source_module_id"] != module_id
+            or source_visibility not in allowed_visibility
+            or not _spoiler_visible(citation["source_spoiler_tag"], spoiler_tags)
+        ):
+            return None
+        try:
+            validate_derived_scope(
+                source_visibility=str(source_visibility),
+                source_spoiler_tag=citation["source_spoiler_tag"],
+                derived_visibility=str(candidate["visibility"]),
+                derived_spoiler_tag=candidate["spoiler_tag"],
+                label="Candidate",
+            )
+        except (KeyError, ValueError):
+            return None
+    return row_to_dict(candidate)
 
 
 def _trigram_terms(text: str) -> tuple[str, ...]:
@@ -358,3 +599,34 @@ def _trigram_terms(text: str) -> tuple[str, ...]:
         if len(sequence) >= 3:
             terms.extend(sequence[index : index + 3] for index in range(len(sequence) - 2))
     return tuple(dict.fromkeys(terms))
+
+
+def _spoiler_visible(
+    spoiler_tag: str | None,
+    active_spoiler_tags: tuple[str, ...] | None,
+) -> bool:
+    return (
+        active_spoiler_tags is None
+        or not spoiler_tag
+        or spoiler_tag in active_spoiler_tags
+    )
+
+
+def _candidate_validation_payload(candidate: dict) -> dict:
+    return {
+        "kind": candidate["kind"],
+        "title": candidate["title"],
+        "statement": candidate["statement"],
+        "rationale": candidate["rationale"],
+        "confidence": candidate["confidence"],
+        "visibility": candidate["visibility"],
+        "spoiler_tag": candidate["spoiler_tag"],
+        "citations": [
+            {
+                "chunk_id": citation["chunk_id"],
+                "asset_id": citation["asset_id"],
+                "evidence_text": citation["evidence_text"],
+            }
+            for citation in candidate.get("citations", ())
+        ],
+    }

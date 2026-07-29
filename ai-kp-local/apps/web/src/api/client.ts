@@ -1,4 +1,12 @@
-import type { Capability, Role } from "./types";
+import type {
+  Capability,
+  ModuleRun,
+  ModuleRunStart,
+  ModuleRunUpdate,
+  RuleReviewCandidate,
+  RuleReviewSubmission,
+  Role
+} from "./types";
 
 export const apiBase = "/api";
 const defaultRequestTimeoutMs = 310_000;
@@ -19,21 +27,43 @@ const credentials: CredentialSnapshot = {
   playerToken: ""
 };
 
-async function responseError(response: Response): Promise<Error> {
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+
+  constructor(message: string, status: number, code: string | null = null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export function isApiError(error: unknown, status?: number): error is ApiError {
+  return error instanceof ApiError && (status === undefined || error.status === status);
+}
+
+async function responseError(response: Response): Promise<ApiError> {
   const text = await response.text();
-  if (!text) return new Error(`${response.status} ${response.statusText}`.trim());
+  if (!text) {
+    return new ApiError(
+      `${response.status} ${response.statusText}`.trim(),
+      response.status
+    );
+  }
   try {
-    const payload = JSON.parse(text) as { detail?: unknown };
+    const payload = JSON.parse(text) as { detail?: unknown; code?: unknown };
+    const code = typeof payload.code === "string" ? payload.code : null;
     if (typeof payload.detail === "string" && payload.detail.trim()) {
-      return new Error(payload.detail);
+      return new ApiError(payload.detail, response.status, code);
     }
     if (payload.detail !== undefined) {
-      return new Error(JSON.stringify(payload.detail));
+      return new ApiError(JSON.stringify(payload.detail), response.status, code);
     }
   } catch {
     // Non-JSON error bodies are already suitable for display.
   }
-  return new Error(text);
+  return new ApiError(text, response.status);
 }
 
 async function fetchWithTimeout(
@@ -134,6 +164,63 @@ export async function requestBlob(url: string, signal?: AbortSignal): Promise<Bl
 
 export function fetchCapabilities(): Promise<Capability[]> {
   return requestJson<Capability[]>("/capabilities");
+}
+
+export function listModuleRuns(
+  campaignId: string,
+  options: { limit?: number; offset?: number } = {}
+): Promise<ModuleRun[]> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  if (options.offset !== undefined) params.set("offset", String(options.offset));
+  const query = params.size ? `?${params.toString()}` : "";
+  return requestJson<ModuleRun[]>(
+    `/campaigns/${encodeURIComponent(campaignId)}/module-runs${query}`
+  );
+}
+
+export function getCurrentModuleRun(campaignId: string): Promise<ModuleRun | null> {
+  return requestJson<ModuleRun | null>(
+    `/campaigns/${encodeURIComponent(campaignId)}/module-runs/current`
+  );
+}
+
+export function startModuleRun(
+  campaignId: string,
+  payload: ModuleRunStart
+): Promise<ModuleRun> {
+  return requestJson<ModuleRun>(
+    `/campaigns/${encodeURIComponent(campaignId)}/module-runs`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function updateModuleRun(
+  runId: string,
+  payload: ModuleRunUpdate
+): Promise<ModuleRun> {
+  return requestJson<ModuleRun>(
+    `/module-runs/${encodeURIComponent(runId)}`,
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
+}
+
+export function listRuleReviewCandidates(
+  sourceId: string
+): Promise<RuleReviewCandidate[]> {
+  return requestJson<RuleReviewCandidate[]>(
+    `/rulebooks/sources/${encodeURIComponent(sourceId)}/rules?status=review_required`
+  );
+}
+
+export function reviewRuleCandidate(
+  candidateId: string,
+  payload: RuleReviewSubmission
+): Promise<RuleReviewCandidate> {
+  return requestJson<RuleReviewCandidate>(
+    `/rulebooks/rules/${encodeURIComponent(candidateId)}/review`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
 }
 
 export async function requestFile<T>(url: string, file: File): Promise<T> {

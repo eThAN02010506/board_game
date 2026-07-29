@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 
+from ai_kp.api.authz import require_approved_pc_binding, require_campaign_role
 from ai_kp.api.dependencies import get_identity, get_repo
 from ai_kp.api.schemas import (
     SkillCheckCreate,
@@ -25,6 +26,20 @@ def create_skill_check(
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp",))
+    effective_pc_id = payload.pc_id
+    owner_profile_id = None
+    if payload.roller_member_id:
+        roller = repo.get_session_member(payload.roller_member_id)
+        effective_pc_id = effective_pc_id or roller.get("pc_id")
+        owner_profile_id = roller.get("player_profile_id")
+    if effective_pc_id:
+        require_approved_pc_binding(
+            repo,
+            campaign_id,
+            effective_pc_id,
+            owner_profile_id=owner_profile_id,
+        )
     return CheckService(repo).create(
         campaign_id,
         identity,

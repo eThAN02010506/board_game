@@ -55,9 +55,30 @@ Plain read-only or single-table use cases still pass through a service when a do
 
 ## SQLite Lifecycle and Migrations
 
-`bootstrap/composition.py` runs `init_db()` at application construction. Request dependencies call `connect()` but do not rerun schema initialization. File-backed databases use foreign keys, a 5-second busy timeout, WAL journal mode, and `synchronous=NORMAL`; in-memory test databases skip WAL.
+`bootstrap/composition.py` runs `init_db()` at application construction. Request dependencies call
+`connect()` but do not rerun schema initialization. File-backed databases use foreign keys, a
+5-second busy timeout, WAL journal mode, and authoritative-data default `synchronous=FULL`;
+`AI_KP_SQLITE_SYNCHRONOUS=NORMAL` is an explicit performance tradeoff. In-memory test databases
+skip WAL. The default `data` directory and application-created runtime directories are restricted
+to `0700`; SQLite files are repaired to `0600` whenever a connection is opened. Existing
+user-selected parent directories, including a custom directory merely named `data`, are not
+chmodded as a whole.
 
 `infrastructure/database/schema.py:SCHEMA` creates the current schema for a new database. Existing databases are advanced by the numbered, ordered migrations under `infrastructure/database/migrations/`. Applied versions and names are recorded in `schema_migrations`; migration names are checked, future database versions fail closed, and each migration runs inside its own savepoint. Running `init_db()` again is idempotent.
+
+At process construction, interrupted rule-object and module-knowledge LLM claims move from
+`processing` back to `pending`. Both chunk types use monotonically increasing `attempt_count`
+generations. Once an external LLM call returns, claim verification, extracted result writes,
+failure audit writes, and the final status CAS occur under a short `BEGIN IMMEDIATE` transaction;
+an older process cannot publish into a recovered and newly claimed attempt. Unexpected local
+persistence failures roll back and best-effort fail the still-current generation. Startup closes
+leftover running rule ingestion records as interrupted as well as recovering chunk claims. The
+rule pipeline permits one running lease per source and stage: extraction claims atomically require
+that lease, and extraction/index completion uses a `running` status CAS before publishing results.
+Stale success and failure paths therefore cannot revive a recovered run or overwrite a replacement
+index's source state. The module document worker separately recovers durable import jobs. Its own
+`attempt_count` likewise guards progress, failure, and its single completion transaction, so a
+stale worker cannot insert a module after another process has recovered the job.
 
 ## Rulebook knowledge boundary
 
@@ -67,8 +88,11 @@ Plain read-only or single-table use cases still pass through a service when a do
 source chunks and MiniRAG files are deliberately dual
 storage: the index can be rebuilt, while page evidence and validated objects remain authoritative.
 The model can create candidates only. Schema, exact source citation and conflict checks determine
-status, and only `validated` objects reach the executor. This namespace must not contain campaign
-memory, module spoilers, NPC state or character history. See `docs/RULEBOOK_KNOWLEDGE.md`.
+whether a candidate may be shown for review; they never promote model output by themselves.
+Only an object reviewed by a local administrator who is also an authenticated KP, bound to its
+exact source and ruleset identity, becomes `validated` and can reach the executor. This namespace
+must not contain campaign memory, module spoilers, NPC state or character history. See
+`docs/RULEBOOK_KNOWLEDGE.md`.
 
 Rulebook knowledge is not an executable ruleset. `GET /rulesets` lists the explicit local
 allow-list of deterministic engines. Campaign and investigator services resolve that registry;
@@ -97,6 +121,10 @@ This catalogue is the single source of truth for delivery status, phase, depende
   Every graph write references an approved module knowledge candidate; recursive traversal is a
   deterministic diagnostic and never mutates module source or world facts.
   content-addressed storage deduplicates identical bytes outside SQLite.
+- `campaign_module_runs` is the campaign's explicit playthrough cursor. A partial unique index
+  permits at most one active run per campaign. Scene, unlocked spoiler tags and a bounded 4 KiB
+  state snapshot use optimistic `version` checks so two KP clients cannot silently overwrite
+  one another.
 - Module Canon/Anchor remains source-linked knowledge; generated world completion enters the
   existing proposal boundary and only becomes an append-only runtime fact after confirmation.
   See [`WORLD_EXPANSION.md`](WORLD_EXPANSION.md).
@@ -108,6 +136,11 @@ This catalogue is the single source of truth for delivery status, phase, depende
 - `campaign_sessions` stores one active/closed play session per campaign and only the hash of its shared join code.
 - `session_members` stores the server-authoritative `kp`/`player` role, optional controlled PC, revocation time, and only the hash of each Bearer access token.
 - `session_seats` is the durable bridge between one campaign session, one stable `player_profile`, one current session member, and an optional reserved PC. Revoking it never deletes the profile or its investigators.
+- Seat claims and investigator submit/review/assignment acquire a SQLite `BEGIN IMMEDIATE`
+  write transaction before their first authoritative read. Conditional updates then verify the
+  exact live status/revision being changed. Partial unique indexes enforce one active member and
+  one claimed seat per stable profile in a session, plus one active member/seat reservation per PC.
+  Migration refuses conflicting legacy live rows instead of silently revoking or reassigning them.
 - `seat_invitations` stores only purpose-separated hashes. Each plaintext code belongs to exactly one seat and transitions once from `active` to `consumed` or `revoked`.
 - `skill_checks` stores requested and resolved checks, raw percentile digits, selected result, difficulty threshold, precise ruleset/source identity, character state version and any original pre-override result. Replays dispatch by that stored identity rather than a current UI choice. `skill_check_actions` is its append-only transition audit.
 - `player_actions` stores a player's queued action and the server-derived session/member/PC/map/location context. Its lifecycle is `submitted -> reviewed -> resolved/rejected`.
@@ -141,6 +174,11 @@ The current campaign-bound `player_characters` table remains a compatibility pla
 5. Clients send the access token as `Authorization: Bearer ...`. API dependencies authenticate its hash against an active, non-revoked member in an active session.
 6. Resource endpoints derive authority from server state; client-supplied view, actor, PC, campaign, location, and movement metadata never grant authority.
 7. Revoking one seat invalidates only its member and invitation. Other players and codes are unaffected; closing the session invalidates every member token.
+
+An approved investigator can only be assigned to an active member that already carries the same
+stable `player_profile_id` as the investigator owner. KP cannot use an anonymous legacy join-code
+member to take over a player-owned investigator. When that member owns a claimed seat, assignment
+updates the member PC and `session_seats.assigned_pc_id` in the same transaction.
 
 Join codes and access tokens use different domain-separated SHA-256 hashes, so the two credential types are not interchangeable. The server never returns stored hashes through public repository responses. Plaintext credentials exist only in create/join and explicit or revoke-triggered rotate responses; the browser keeps the active values in `sessionStorage`, never in a URL.
 
@@ -223,11 +261,19 @@ proposal and all affected world state.
 
 ## AI Turn Flow
 
-1. `ContextBuilder` reads campaign time, relevant memories, eligible old NPCs, recent events, and active module chunks.
-2. Visibility, spoiler activation, relevance, item limits, and context budget determine which sources are included.
-3. The model produces strict JSON. One repair attempt is allowed when a local model returns malformed output.
-4. A `turn_proposal` and its `context_assembly` are saved together for inspection.
-5. Human KP approval atomically applies events, curated memories, NPC relationship updates, and validated map moves. Any invalid cross-campaign reference rolls the entire approval back.
+1. `ContextBuilder` reads campaign time, the exact investigator revision approved for this
+   campaign plus its mutable runtime state, relevant memories, eligible old NPCs, recent events,
+   the explicitly active module run, and only that module's reviewed knowledge and chunks.
+2. The active run pins scene, spoiler tags and bounded runtime state. A caller may narrow its
+   spoiler set but cannot widen it. Knowledge, graph entities and graph relations must preserve
+   every source visibility/spoiler boundary; retrieval repeats those checks for legacy data.
+3. Player-scope projections require an identity-bound PC and only use published maps. Visibility,
+   spoiler activation, relevance, item limits, and context budget determine which optional
+   sources are included; campaign time, approved character core and current module-run core are
+   never silently dropped.
+4. The model produces strict JSON. One repair attempt is allowed when a local model returns malformed output.
+5. A `turn_proposal` and its `context_assembly` are saved together for inspection.
+6. Human KP approval atomically applies events, curated memories, NPC relationship updates, and validated map moves. Any invalid cross-campaign reference rolls the entire approval back.
 
 For a real local-model test, first query the provider's OpenAI-compatible `/v1/models` endpoint and use an ID returned in `data[].id` as `AI_KP_LLM_MODEL`. A guessed `.gguf` filename is not an API capability check. The provider is considered verified only after model discovery, `/v1/chat/completions`, and a complete validated KP proposal flow all succeed.
 
@@ -251,10 +297,12 @@ Core rules, book-optional rules, campaign house rules, one-off Keeper rulings, a
 
 Campaign sessions now enforce `kp`/`player` authorization on the server. Frontend role-specific controls are only usability; the API remains the security boundary. Cross-campaign resources, KP notes, proposal/context inspection, inactive spoilers, draft maps, other PCs' private sheets, and other players' actions are denied or filtered independently of the UI.
 
-`AI_KP_LOCAL_ADMIN_ENABLED=true` is strictly a loopback development bootstrap. It checks the actual socket peer and ignores forwarded-address headers. For LAN, container, tunnel, or reverse-proxy use, set:
+`AI_KP_LOCAL_ADMIN_ENABLED=true` is strictly a loopback development bootstrap. It checks the
+actual socket peer and ignores forwarded-address headers. `deployment_mode=lan` forcibly disables
+this bypass even if the environment still says `LOCAL_ADMIN_ENABLED=true`, because a reverse proxy
+commonly appears as loopback. For LAN, container, tunnel, or reverse-proxy use, configure:
 
 ```env
-AI_KP_LOCAL_ADMIN_ENABLED=false
 AI_KP_ADMIN_TOKEN=<long-random-secret>
 AI_KP_CORS_ORIGINS=https://<frontend-origin>
 ```
@@ -266,7 +314,13 @@ plaintext token is lost. Recovery rotates the existing KP member's token hash, i
 Bearer token, preserves the session/member IDs and campaign data, and emits an audit event. It does
 not create a second KP or close the active session.
 
-TLS is outside the application and is mandatory at the reverse proxy. Without HTTPS, Bearer tokens, join codes, and the admin token are observable on the network. This MVP has no accounts, per-seat invitations, token expiry, rate limiting, brute-force lockout, durable identity bans, or trusted-proxy policy. It is not ready for direct public-internet exposure. Future imported/AI-authored SVG also needs sanitization and a restrictive CSP before it can be treated as untrusted content.
+TLS is outside the application and is mandatory at the reverse proxy. Without HTTPS, Bearer
+tokens, seat invitations, compatibility join codes, and the admin token are observable on the
+network. Stable local player identities and per-seat invitations are implemented, but this MVP
+still has no password accounts, token expiry, brute-force lockout, durable identity bans, or
+trusted-proxy policy. It is not ready for direct public-internet exposure. Future imported or
+AI-authored SVG also needs sanitization and a restrictive CSP before it can be treated as
+untrusted content.
 
 The first token estimator is intentionally local and model-independent. A provider-specific tokenizer can replace it without changing the stored audit format.
 

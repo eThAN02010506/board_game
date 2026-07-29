@@ -1,4 +1,6 @@
+import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -7,7 +9,9 @@ import httpx
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
 from ai_kp.core.db import connect, init_db
+from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.security.tokens import hash_access_token, hash_join_code
+from tests.support_investigators import coc7_sheet, create_approved_player
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -39,29 +43,33 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
             )
         ).json()
         self.kp_a_headers = bearer(self.session_a["access_token"])
-        self.pc_a = (
-            await self.client.post(
-                f"/campaigns/{self.campaign_a['id']}/pcs",
-                headers=self.kp_a_headers,
-                json={"name": "Investigator A", "sheet": {"侦查": 60}},
-            )
-        ).json()
-        self.pc_other = (
-            await self.client.post(
-                f"/campaigns/{self.campaign_a['id']}/pcs",
-                headers=self.kp_a_headers,
-                json={
-                    "name": "Investigator B",
-                    "sheet": {
-                        "图书馆使用": 70,
-                        "public_summary": {
-                            "cash": 18,
-                            "attributes": {"dex": 55, "app": 60},
-                        },
-                    },
-                },
-            )
-        ).json()
+        approved_a = await create_approved_player(
+            self.client,
+            campaign=self.campaign_a,
+            session=self.session_a,
+            kp_headers=self.kp_a_headers,
+            display_name="Player A",
+            sheet=coc7_sheet("Investigator A", skills={"侦查": 60}),
+        )
+        approved_other = await create_approved_player(
+            self.client,
+            campaign=self.campaign_a,
+            session=self.session_a,
+            kp_headers=self.kp_a_headers,
+            display_name="Player B",
+            sheet=coc7_sheet(
+                "Investigator B",
+                skills={"图书馆使用": 70},
+                characteristics={"dex": 55, "app": 60},
+                assets={"cash": 18},
+            ),
+            assign=False,
+        )
+        self.pc_a = approved_a["pc"]
+        self.pc_other = approved_other["pc"]
+        self.other_investigator = approved_other["investigator"]
+        self.player_a = approved_a["bundle"]
+        self.player_a_headers = approved_a["headers"]
         self.map_a = (
             await self.client.post(
                 f"/campaigns/{self.campaign_a['id']}/maps/generate",
@@ -107,18 +115,6 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(publish_map.status_code, 200)
-        self.player_a = (
-            await self.client.post(
-                "/sessions/join",
-                json={
-                    "join_code": self.session_a["join_code"],
-                    "display_name": "Player A",
-                    "pc_id": self.pc_a["id"],
-                },
-            )
-        ).json()
-        self.player_a_headers = bearer(self.player_a["access_token"])
-
         self.campaign_b = (
             await self.client.post("/campaigns", json={"title": "Campaign B"})
         ).json()
@@ -520,7 +516,9 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rejected.status_code, 200)
         self.assertEqual(rejected_action["status"], "rejected")
 
-    async def test_unassigned_player_has_no_character_memory_and_pc_claims_are_unique(self) -> None:
+    async def test_unassigned_player_cannot_bypass_investigator_approval_and_ownership(
+        self,
+    ) -> None:
         memory = await self.client.post(
             f"/campaigns/{self.campaign_a['id']}/memories",
             headers=self.kp_a_headers,
@@ -533,11 +531,11 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(memory.status_code, 200)
 
-        duplicate_claim = await self.client.post(
+        legacy_pc_claim = await self.client.post(
             "/sessions/join",
             json={
                 "join_code": self.session_a["join_code"],
-                "display_name": "Duplicate claimant",
+                "display_name": "Legacy claimant",
                 "pc_id": self.pc_a["id"],
             },
         )
@@ -554,11 +552,17 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
             params={"q": "lighthouse", "view": "player"},
             headers=unassigned_headers,
         )
-        assign = await self.client.post(
+        legacy_assign = await self.client.post(
             f"/sessions/{self.session_a['session']['id']}/members/"
             f"{unassigned.json()['member']['id']}/assign-pc",
             headers=self.kp_a_headers,
             json={"pc_id": self.pc_other["id"]},
+        )
+        wrong_owner_assign = await self.client.post(
+            f"/sessions/{self.session_a['session']['id']}/members/"
+            f"{unassigned.json()['member']['id']}/assign-investigator",
+            headers=self.kp_a_headers,
+            json={"investigator_id": self.other_investigator["id"]},
         )
         refreshed_identity = await self.client.get("/auth/me", headers=unassigned_headers)
         player_pc_list = await self.client.get(
@@ -566,17 +570,30 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
             headers=self.player_a_headers,
         )
 
-        self.assertEqual(duplicate_claim.status_code, 409)
+        self.assertEqual(legacy_pc_claim.status_code, 422)
         self.assertEqual(unassigned.status_code, 200)
         self.assertEqual(memory_attempt.status_code, 403)
-        self.assertEqual(assign.status_code, 200)
-        self.assertEqual(refreshed_identity.json()["pc_id"], self.pc_other["id"])
+        self.assertEqual(legacy_assign.status_code, 410)
+        self.assertEqual(wrong_owner_assign.status_code, 409)
+        self.assertIsNone(refreshed_identity.json()["pc_id"])
         pcs_by_id = {pc["id"]: pc for pc in player_pc_list.json()}
-        self.assertEqual(pcs_by_id[self.pc_a["id"]]["sheet"], {"侦查": 60})
-        self.assertNotIn("sheet", pcs_by_id[self.pc_other["id"]])
         self.assertEqual(
-            pcs_by_id[self.pc_other["id"]]["public_summary"],
-            {"cash": 18, "attributes": {"dex": 55, "app": 60}},
+            next(
+                skill["current_value"]
+                for skill in pcs_by_id[self.pc_a["id"]]["sheet"]["skills"]
+                if skill["display_name"] == "侦查"
+            ),
+            60,
+        )
+        self.assertNotIn("sheet", pcs_by_id[self.pc_other["id"]])
+        self.assertEqual(pcs_by_id[self.pc_other["id"]]["public_summary"]["cash"], 18)
+        self.assertEqual(
+            pcs_by_id[self.pc_other["id"]]["public_summary"]["attributes"]["dex"],
+            55,
+        )
+        self.assertEqual(
+            pcs_by_id[self.pc_other["id"]]["public_summary"]["attributes"]["app"],
+            60,
         )
 
     async def test_draft_maps_are_invisible_until_published_and_move_history_is_sanitized(self) -> None:
@@ -718,6 +735,119 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(allowed.status_code, 200)
+
+
+class SessionJoinConcurrencyTests(unittest.TestCase):
+    def test_join_code_rotation_cannot_overtake_an_authenticated_join(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "join-rotation.sqlite3"
+            join_connection = connect(db_path)
+            rotate_connection = connect(db_path)
+            try:
+                init_db(join_connection)
+                init_db(rotate_connection)
+                setup_repo = Repository(join_connection)
+                campaign = setup_repo.create_campaign("Join race")
+                session_bundle = setup_repo.create_campaign_session(campaign["id"])
+                join_connection.commit()
+                rotate_connection.commit()
+
+                join_read = threading.Event()
+                release_join = threading.Event()
+                rotation_attempted = threading.Event()
+                rotation_lock_acquired = threading.Event()
+                join_result: dict = {}
+                rotate_result: dict = {}
+                errors: list[BaseException] = []
+
+                def join_row_factory(
+                    cursor: sqlite3.Cursor,
+                    row: tuple[object, ...],
+                ) -> sqlite3.Row:
+                    result = sqlite3.Row(cursor, row)
+                    column_names = result.keys()
+                    if "join_code_hash" in column_names and not join_read.is_set():
+                        join_read.set()
+                        if not release_join.wait(timeout=15):
+                            raise TimeoutError("join concurrency test was not released")
+                    return result
+
+                def rotate_row_factory(
+                    cursor: sqlite3.Cursor,
+                    row: tuple[object, ...],
+                ) -> sqlite3.Row:
+                    result = sqlite3.Row(cursor, row)
+                    column_names = result.keys()
+                    if "join_code_hash" in column_names:
+                        rotation_lock_acquired.set()
+                    return result
+
+                def trace_rotation(sql: str) -> None:
+                    if sql.strip().upper().startswith("BEGIN IMMEDIATE"):
+                        rotation_attempted.set()
+
+                join_connection.row_factory = join_row_factory
+                rotate_connection.row_factory = rotate_row_factory
+                rotate_connection.set_trace_callback(trace_rotation)
+
+                def join() -> None:
+                    try:
+                        join_result.update(
+                            Repository(join_connection).join_campaign_session(
+                                session_bundle["join_code"],
+                                display_name="Linearized player",
+                            )
+                        )
+                        join_connection.commit()
+                    except BaseException as exc:  # noqa: BLE001 - thread handoff
+                        errors.append(exc)
+                        join_connection.rollback()
+
+                def rotate() -> None:
+                    try:
+                        rotate_result.update(
+                            Repository(rotate_connection).rotate_session_join_code(
+                                session_bundle["session"]["id"]
+                            )
+                        )
+                        rotate_connection.commit()
+                    except BaseException as exc:  # noqa: BLE001 - thread handoff
+                        errors.append(exc)
+                        rotate_connection.rollback()
+
+                join_thread = threading.Thread(target=join)
+                rotate_thread = threading.Thread(target=rotate)
+                join_thread.start()
+                self.assertTrue(join_read.wait(timeout=10))
+                rotate_thread.start()
+                try:
+                    self.assertTrue(rotation_attempted.wait(timeout=10))
+                    self.assertFalse(rotation_lock_acquired.wait(timeout=0.25))
+                finally:
+                    release_join.set()
+                join_thread.join(timeout=10)
+                rotate_thread.join(timeout=10)
+
+                self.assertFalse(join_thread.is_alive())
+                self.assertFalse(rotate_thread.is_alive())
+                self.assertEqual(errors, [])
+                self.assertTrue(join_result["access_token"])
+                self.assertTrue(rotate_result["join_code"])
+                self.assertIsNotNone(
+                    Repository(join_connection).authenticate_access_token(
+                        join_result["access_token"]
+                    )
+                )
+
+                join_connection.rollback()
+                with self.assertRaises(KeyError):
+                    Repository(join_connection).join_campaign_session(
+                        session_bundle["join_code"],
+                        display_name="Retired code",
+                    )
+            finally:
+                join_connection.close()
+                rotate_connection.close()
 
 
 class DatabaseMigrationTests(unittest.TestCase):

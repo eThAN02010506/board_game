@@ -7,6 +7,7 @@ import type {
   SessionMember,
   SkillCheck
 } from "../../api/types";
+import { statusLabel } from "../../ui/statusLabels";
 
 type Props = {
   identity: AuthIdentity | null;
@@ -153,7 +154,11 @@ export function CheckPanel(props: Props) {
             <article className={`check-card ${check.status} ${check.passed === true ? "passed" : check.passed === false ? "failed" : ""}`} key={check.id}>
               <div className="check-card-heading">
                 <div><strong>{check.skill_name}</strong><small>{difficultyLabels[check.difficulty]} · 目标 {check.target} / 门槛 {check.status === "requested" ? "待掷骰" : check.threshold}</small></div>
-                <span>{check.hidden ? <><EyeOff size={13} /> 暗骰</> : check.status}</span>
+                <span>
+                  {check.hidden
+                    ? <><EyeOff size={13} /> 暗骰</>
+                    : statusLabel(check.status)}
+                </span>
               </div>
               <div className="check-facts">
                 <span>{check.bonus_dice > 0 ? `${check.bonus_dice} 奖励骰` : check.bonus_dice < 0 ? `${Math.abs(check.bonus_dice)} 惩罚骰` : "普通百分骰"}</span>

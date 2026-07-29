@@ -12,19 +12,108 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 SENSITIVE_POST_PATHS = (
-    re.compile(r"^/sessions/join$"),
-    re.compile(r"^/session-seats/claim$"),
-    re.compile(r"^/session-seats/[^/]+/recover$"),
-    re.compile(r"^/campaigns/[^/]+/sessions/recover-kp$"),
-    re.compile(r"^/campaigns/[^/]+/maps/generate$"),
-    re.compile(r"^/maps/[^/]+/image-assets/generate$"),
-    re.compile(r"^/kp/turn$"),
-    re.compile(r"^/model-settings/discover$"),
-    re.compile(r"^/image-model-settings/discover$"),
+    ("session-join", re.compile(r"^/sessions/join$")),
+    ("seat-claim", re.compile(r"^/session-seats/claim$")),
+    ("seat-recover", re.compile(r"^/session-seats/[^/]+/recover$")),
+    ("kp-recover", re.compile(r"^/campaigns/[^/]+/sessions/recover-kp$")),
+    ("map-generate", re.compile(r"^/campaigns/[^/]+/maps/generate$")),
+    ("map-image-generate", re.compile(r"^/maps/[^/]+/image-assets/generate$")),
+    ("kp-turn", re.compile(r"^/kp/turn$")),
+    ("model-discover", re.compile(r"^/model-settings/discover$")),
+    ("image-model-discover", re.compile(r"^/image-model-settings/discover$")),
+    ("player-profile-write", re.compile(r"^/player-profiles$")),
+    ("player-profile-write", re.compile(r"^/investigators(?:/preview)?$")),
+    (
+        "player-profile-write",
+        re.compile(r"^/investigators/[^/]+/revisions$"),
+    ),
 )
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+JSON_MEDIA_TYPES = {"application/json", "application/ld+json", "application/problem+json"}
+BODY_METHODS = {"POST", "PUT", "PATCH"}
+
+
+class RequestBodyLimitMiddleware:
+    """Bound JSON bodies while reading ASGI chunks, independent of Content-Length."""
+
+    def __init__(self, app: ASGIApp, *, max_json_bytes: int):
+        self.app = app
+        self.max_json_bytes = max_json_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method") not in BODY_METHODS:
+            await self.app(scope, receive, send)
+            return
+
+        headers = {
+            key.lower(): value
+            for key, value in scope.get("headers", ())
+        }
+        media_type = (
+            headers.get(b"content-type", b"")
+            .decode("latin-1")
+            .split(";", 1)[0]
+            .strip()
+            .lower()
+        )
+        if media_type not in JSON_MEDIA_TYPES and not media_type.endswith("+json"):
+            await self.app(scope, receive, send)
+            return
+
+        declared_size = headers.get(b"content-length")
+        if declared_size is not None:
+            try:
+                if int(declared_size) > self.max_json_bytes:
+                    await self._reject(scope, receive, send)
+                    return
+            except ValueError:
+                await self._reject(scope, receive, send, detail="Invalid Content-Length")
+                return
+
+        buffered: list[Message] = []
+        total = 0
+        while True:
+            message = await receive()
+            buffered.append(message)
+            if message["type"] == "http.disconnect":
+                break
+            if message["type"] != "http.request":
+                continue
+            total += len(message.get("body", b""))
+            if total > self.max_json_bytes:
+                await self._reject(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        index = 0
+
+        async def replay() -> Message:
+            nonlocal index
+            if index < len(buffered):
+                message = buffered[index]
+                index += 1
+                return message
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        await self.app(scope, replay, send)
+
+    async def _reject(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        *,
+        detail: str = "JSON request body is too large",
+    ) -> None:
+        response = JSONResponse(
+            status_code=413,
+            content={"detail": detail, "code": "request_body_too_large"},
+        )
+        await response(scope, receive, send)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -78,8 +167,8 @@ class SensitiveOperationRateLimitMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         bucket = next(
             (
-                f"sensitive-{index}"
-                for index, pattern in enumerate(SENSITIVE_POST_PATHS)
+                bucket_name
+                for bucket_name, pattern in SENSITIVE_POST_PATHS
                 if pattern.fullmatch(request.url.path)
             ),
             None,

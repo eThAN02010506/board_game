@@ -99,14 +99,10 @@ class RealCase:
         kp_token = session_bundle["access_token"]
         join_code = session_bundle["join_code"]
 
-        pc = self.request(
+        profile_bundle = self.request(
             "POST",
-            f"/campaigns/{campaign['id']}/pcs",
-            token=kp_token,
-            json={
-                "name": "林若川",
-                "sheet": {"profession": "私家侦探", "language": "zh-CN"},
-            },
+            "/player-profiles",
+            json={"display_name": "玩家·阿宁"},
         )
         player_bundle = self.request(
             "POST",
@@ -114,10 +110,71 @@ class RealCase:
             json={
                 "join_code": join_code,
                 "display_name": "玩家·阿宁",
-                "pc_id": pc["id"],
             },
         )
         player_token = player_bundle["access_token"]
+        player_profile_headers = {
+            "X-AI-KP-Player-Token": profile_bundle["player_token"],
+        }
+        investigator = self.request(
+            "POST",
+            "/investigators",
+            token=player_token,
+            headers=player_profile_headers,
+            json={
+                "canonical_sheet": self._investigator_sheet(),
+                "source_type": "manual",
+            },
+        )
+        self.request(
+            "POST",
+            (
+                f"/campaigns/{campaign['id']}/investigators/"
+                f"{investigator['id']}/submit"
+            ),
+            token=player_token,
+            headers=player_profile_headers,
+            json={"revision_id": investigator["current_revision_id"]},
+        )
+        approved = self.request(
+            "POST",
+            (
+                f"/campaigns/{campaign['id']}/investigators/"
+                f"{investigator['id']}/review"
+            ),
+            token=kp_token,
+            json={
+                "action": "approved",
+                "comment": "real-case：已核对角色卡。",
+            },
+        )
+        self.request(
+            "POST",
+            (
+                f"/sessions/{session_bundle['session']['id']}/members/"
+                f"{player_bundle['member']['id']}/assign-investigator"
+            ),
+            token=kp_token,
+            json={"investigator_id": investigator["id"]},
+        )
+        pcs = self.request(
+            "GET",
+            f"/campaigns/{campaign['id']}/pcs",
+            token=kp_token,
+        )
+        pc = next(
+            item for item in pcs if item["id"] == approved["legacy_pc_id"]
+        )
+
+        # Re-read the token projection after KP approval and binding; every
+        # later player action must resolve this exact approved investigator.
+        player_identity = self.request(
+            "GET",
+            "/auth/me",
+            token=player_token,
+        )
+        if player_identity["pc_id"] != pc["id"]:
+            raise RuntimeError("Approved investigator was not bound to the player token")
 
         npc = self.request(
             "POST",
@@ -157,7 +214,7 @@ class RealCase:
                 "happened_at": "1928-10-01 20:10",
             },
         )
-        self.request(
+        module = self.request(
             "POST",
             f"/campaigns/{campaign['id']}/modules",
             token=kp_token,
@@ -171,6 +228,20 @@ class RealCase:
                     "@visibility=kp @spoiler=warehouse-secret @scene=warehouse\n"
                     "陈记者知道账本藏在仓库二层旧钟后。"
                 ),
+            },
+        )
+        module_run = self.request(
+            "POST",
+            f"/campaigns/{campaign['id']}/module-runs",
+            token=kp_token,
+            json={
+                "module_id": module["id"],
+                "current_scene_key": "warehouse",
+                "active_spoiler_tags": ["warehouse-secret"],
+                "state": {
+                    "investigation_clock": 1,
+                    "warehouse_door": "unlocked",
+                },
             },
         )
 
@@ -207,7 +278,17 @@ class RealCase:
                 "color": "#b93f2d",
             },
         )
-        self.request("POST", f"/maps/{saved_map['id']}/publish", token=kp_token)
+        self.request(
+            "POST",
+            f"/maps/{saved_map['id']}/publish",
+            token=kp_token,
+            json={
+                "expected_revision_id": saved_map["revision_id"],
+                "expected_selected_asset_id": saved_map.get(
+                    "selected_public_asset_id"
+                ),
+            },
+        )
         player_map = self.request(
             "GET",
             f"/maps/{saved_map['id']}",
@@ -263,6 +344,12 @@ class RealCase:
             f"/kp/proposals/{proposal['id']}/context",
             token=kp_token,
         )
+        if not any(
+            source.get("kind") == "module_run"
+            and source.get("id") == module_run["id"]
+            for source in context["included_sources"]
+        ):
+            raise RuntimeError("The active module run was not included in AI context")
         self.request(
             "GET",
             f"/kp/proposals/{proposal['id']}",
@@ -306,9 +393,12 @@ class RealCase:
             "model_id": model_id,
             "campaign_id": campaign["id"],
             "session_id": session_bundle["session"]["id"],
+            "investigator_id": investigator["id"],
             "pc_id": pc["id"],
             "npc_id": npc["id"],
             "memory_id": memory["id"],
+            "module_run_id": module_run["id"],
+            "module_run_version": module_run["version"],
             "map_id": saved_map["id"],
             "map_status": restored_map["status"],
             "map_restored": restored_map["id"] == saved_map["id"],
@@ -326,6 +416,51 @@ class RealCase:
         }
 
     @staticmethod
+    def _investigator_sheet() -> dict[str, Any]:
+        return {
+            "schema_version": "coc7-investigator-v1",
+            "ruleset_id": "coc7-keeper-cn-2002c",
+            "identity": {
+                "name": "林若川",
+                "occupation": "私家侦探",
+                "age": 31,
+                "era": "1920s",
+            },
+            "characteristics": {
+                "str": 50,
+                "con": 55,
+                "siz": 50,
+                "dex": 60,
+                "app": 45,
+                "int": 65,
+                "pow": 55,
+                "edu": 65,
+                "luck": 50,
+            },
+            "skills": [
+                {
+                    "skill_key": "coc7.spot_hidden",
+                    "display_name": "侦查",
+                    "base_value": 25,
+                    "occupation_points": 35,
+                    "interest_points": 0,
+                    "development_points": 0,
+                },
+                {
+                    "skill_key": "coc7.library_use",
+                    "display_name": "图书馆使用",
+                    "base_value": 20,
+                    "occupation_points": 30,
+                    "interest_points": 0,
+                    "development_points": 0,
+                },
+            ],
+            "assets": {"cash": 20, "items": ["笔记本", "手电筒"]},
+            "background": {"description": "在报社与码头行业内有少量旧关系。"},
+            "provenance": {"source_type": "realcase"},
+        }
+
+    @staticmethod
     def _effects_are_safe(
         proposal: dict[str, Any],
         pc: dict[str, Any],
@@ -337,6 +472,12 @@ class RealCase:
         npc_ids = {npc["id"]}
         token_ids = {token["id"]}
         location_names = {location["name"] for location in saved_map["locations"]}
+        # A proposed check is allowed only for the one approved investigator.
+        if any(
+            check.get("pc_id") not in {None, pc["id"]}
+            for check in proposal["proposed_checks"]
+        ):
+            return False
         for event in proposal["proposed_events"]:
             actor_id = event.get("actor_id")
             if actor_id and event.get("actor_type") == "pc" and actor_id not in pc_ids:

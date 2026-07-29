@@ -22,15 +22,20 @@ from ai_kp.platform.modules.structure import (
 )
 
 DocumentType = Literal["pdf", "docx"]
-PARSER_VERSION = "module-document.v2"
+PARSER_VERSION = "module-document.v4"
 MAX_MODULE_BYTES = 64 * 1024 * 1024
+OLE_CFB_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 MAX_PDF_PAGES = 1200
+MAX_PDF_PAGE_CONTENT_BYTES = 16 * 1024 * 1024
+MAX_PDF_TOTAL_CONTENT_BYTES = 128 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10_000
 MAX_DOCX_EXPANDED_BYTES = 256 * 1024 * 1024
 MAX_DOCX_XML_BYTES = 32 * 1024 * 1024
 MAX_EXTRACTED_CHARACTERS = 12_000_000
+MAX_DOCUMENT_CHUNKS = 100_000
 MAX_CHUNK_CHARACTERS = 2600
 MAX_ASSETS = 500
+MAX_PDF_IMAGE_OBJECTS = 2_000
 MAX_SINGLE_ASSET_BYTES = 32 * 1024 * 1024
 MAX_TOTAL_ASSET_BYTES = 256 * 1024 * 1024
 MAX_SINGLE_IMAGE_PIXELS = 50_000_000
@@ -94,25 +99,22 @@ class ExtractedModuleDocument:
 
 def detect_document_type(data: bytes, filename: str) -> DocumentType:
     suffix = PurePosixPath(filename.lower()).suffix
-    if suffix == ".doc":
-        raise ValueError("不支持旧式 .doc；请另存为 .docx 后再导入")
-    if suffix not in {".pdf", ".docx"}:
-        raise ValueError("KP 本只接受 PDF 或 DOCX")
+    if suffix not in {".pdf", ".doc", ".docx"}:
+        raise ValueError("KP 本只接受 PDF、DOC 或 DOCX")
     if not data or len(data) > MAX_MODULE_BYTES:
         raise ValueError("KP 本为空或超过 64 MiB 限制")
     if suffix == ".pdf":
         if not data.startswith(b"%PDF-"):
             raise ValueError("文件扩展名为 PDF，但文件签名不正确")
         return "pdf"
+    if suffix == ".doc":
+        if not data.startswith(OLE_CFB_SIGNATURE):
+            raise ValueError("文件扩展名为 DOC，但 OLE CFB 文件签名不正确")
+        # The durable schema intentionally normalizes converted legacy Word
+        # sources to docx; the original .doc bytes and hash remain authoritative.
+        return "docx"
     if not data.startswith(b"PK"):
         raise ValueError("文件扩展名为 DOCX，但文件签名不正确")
-    try:
-        with ZipFile(BytesIO(data)) as archive:
-            names = set(archive.namelist())
-    except BadZipFile as exc:
-        raise ValueError("无法解析 DOCX 容器") from exc
-    if "[Content_Types].xml" not in names or "word/document.xml" not in names:
-        raise ValueError("上传文件不是有效的 Word DOCX 文档")
     return "docx"
 
 
@@ -122,6 +124,8 @@ def extract_module_document(
     *,
     title: str,
 ) -> ExtractedModuleDocument:
+    if PurePosixPath(filename.lower()).suffix == ".doc":
+        raise ValueError("旧式 .doc 必须通过隔离的模组导入转换流程处理")
     source_type = detect_document_type(data, filename)
     normalized_title = title.strip() or PurePosixPath(filename).stem
     if not normalized_title:
@@ -138,7 +142,11 @@ def _extract_pdf(
     source_hash: str,
 ) -> ExtractedModuleDocument:
     try:
-        reader = PdfReader(BytesIO(data), strict=True)
+        # Real-world scenario PDFs are often structurally recoverable without
+        # being fully spec-conformant. pypdf documents ``strict=False`` as its
+        # best-effort mode; the parser sandbox and explicit resource limits
+        # below remain the security boundary.
+        reader = PdfReader(BytesIO(data), strict=False)
     except Exception as exc:
         raise ValueError("无法解析 KP 本 PDF") from exc
     if reader.is_encrypted:
@@ -151,8 +159,18 @@ def _extract_pdf(
     extracted_characters = 0
     asset_bytes = 0
     image_pixels = 0
+    pdf_content_bytes = 0
+    pdf_images_seen = 0
     current_heading = title
     for page_number, page in enumerate(reader.pages, start=1):
+        page_content_bytes = _pdf_page_content_bytes(page, page_number)
+        if page_content_bytes > MAX_PDF_PAGE_CONTENT_BYTES:
+            raise ValueError(
+                f"第 {page_number} 页解压后的 PDF 内容流超过 16 MiB 限制"
+            )
+        pdf_content_bytes += page_content_bytes
+        if pdf_content_bytes > MAX_PDF_TOTAL_CONTENT_BYTES:
+            raise ValueError("KP 本解压后的 PDF 内容流总计超过 128 MiB 限制")
         try:
             page_text = page.extract_text() or ""
         except Exception as exc:
@@ -165,6 +183,10 @@ def _extract_pdf(
             if possible_heading:
                 current_heading = possible_heading
             hint = infer_semantic_kind(block)
+            if len(chunks) >= MAX_DOCUMENT_CHUNKS:
+                raise ValueError(
+                    f"KP 本提取文本块超过 {MAX_DOCUMENT_CHUNKS} 个限制"
+                )
             chunks.append(
                 DocumentChunk(
                     title=current_heading,
@@ -179,13 +201,31 @@ def _extract_pdf(
                 )
             )
         try:
-            page_images = list(page.images)
+            page_images = iter(page.images)
         except Exception as exc:
             raise ValueError(f"第 {page_number} 页图片提取失败") from exc
-        for image_index, image in enumerate(page_images, start=1):
-            raw = bytes(image.data)
-            width = getattr(image.image, "width", None)
-            height = getattr(image.image, "height", None)
+        image_index = 0
+        while True:
+            try:
+                image = next(page_images)
+            except StopIteration:
+                break
+            except Exception as exc:
+                raise ValueError(f"第 {page_number} 页图片提取失败") from exc
+            image_index += 1
+            pdf_images_seen += 1
+            if pdf_images_seen > MAX_PDF_IMAGE_OBJECTS:
+                raise ValueError(
+                    f"KP 本 PDF 图片对象超过 {MAX_PDF_IMAGE_OBJECTS} 个限制"
+                )
+            try:
+                raw = bytes(image.data)
+                width = getattr(image.image, "width", None)
+                height = getattr(image.image, "height", None)
+            except Exception as exc:
+                raise ValueError(
+                    f"第 {page_number} 页第 {image_index} 张图片提取失败"
+                ) from exc
             if width and height and width <= 32 and height <= 32:
                 continue
             asset_bytes, image_pixels = _track_asset_limits(
@@ -248,6 +288,9 @@ def _extract_docx(
             path = PurePosixPath(item.filename)
             if path.is_absolute() or ".." in path.parts or "\\" in item.filename:
                 raise ValueError("DOCX 包含不安全的内部路径")
+        names = {item.filename for item in infos}
+        if "[Content_Types].xml" not in names or "word/document.xml" not in names:
+            raise ValueError("上传文件不是有效的 Word DOCX 文档")
 
         document_xml = _read_safe_xml(archive, "word/document.xml")
         relationships = _docx_relationships(archive)
@@ -271,6 +314,14 @@ def _extract_docx(
             heading: str,
         ) -> None:
             nonlocal asset_bytes, image_pixels
+            if len(assets) >= MAX_ASSETS:
+                raise ValueError(f"KP 本内嵌图片超过 {MAX_ASSETS} 张限制")
+            try:
+                info = archive.getinfo(target)
+            except KeyError as exc:
+                raise ValueError(f"DOCX 缺少内嵌图片 {target}") from exc
+            if info.file_size > MAX_SINGLE_ASSET_BYTES:
+                raise ValueError("KP 本存在超过 32 MiB 的单张图片")
             raw = archive.read(target)
             width, height = _image_dimensions(raw)
             asset_bytes, image_pixels = _track_asset_limits(
@@ -321,6 +372,10 @@ def _extract_docx(
                         text,
                         styled_heading=styled_heading,
                     )
+                    if len(chunks) >= MAX_DOCUMENT_CHUNKS:
+                        raise ValueError(
+                            f"KP 本提取文本块超过 {MAX_DOCUMENT_CHUNKS} 个限制"
+                        )
                     chunks.append(
                         DocumentChunk(
                             title=current_heading,
@@ -361,6 +416,10 @@ def _extract_docx(
                     if extracted_characters > MAX_EXTRACTED_CHARACTERS:
                         raise ValueError("KP 本提取文本超过 1200 万字符限制")
                     hint = infer_semantic_kind(text, content_kind="table")
+                    if len(chunks) >= MAX_DOCUMENT_CHUNKS:
+                        raise ValueError(
+                            f"KP 本提取文本块超过 {MAX_DOCUMENT_CHUNKS} 个限制"
+                        )
                     chunks.append(
                         DocumentChunk(
                             title=current_heading,
@@ -409,6 +468,16 @@ def _read_safe_xml(archive: ZipFile, name: str) -> bytes:
     if info.file_size > MAX_DOCX_XML_BYTES:
         raise ValueError(f"DOCX 的 {name} 超过 32 MiB 限制")
     return archive.read(info)
+
+
+def _pdf_page_content_bytes(page: object, page_number: int) -> int:
+    try:
+        contents = page.get_contents()
+        if contents is None:
+            return 0
+        return len(contents.get_data())
+    except Exception as exc:
+        raise ValueError(f"第 {page_number} 页 PDF 内容流解压失败") from exc
 
 
 def _parse_safe_xml(data: bytes, label: str) -> ElementTree.Element:

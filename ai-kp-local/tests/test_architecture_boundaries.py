@@ -18,6 +18,7 @@ from ai_kp.infrastructure.database.model_configuration import ModelConfiguration
 from ai_kp.infrastructure.database.module_graph import ModuleGraphRepository
 from ai_kp.infrastructure.database.module_imports import ModuleImportRepository
 from ai_kp.infrastructure.database.module_knowledge import ModuleKnowledgeRepository
+from ai_kp.infrastructure.database.module_runs import ModuleRunRepository
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.rulebooks import RulebookRepository
 from ai_kp.infrastructure.database.schema import connect
@@ -315,7 +316,6 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
             ("SessionService", "create"),
             ("SessionService", "join"),
             ("SessionService", "revoke_member_and_rotate_code"),
-            ("SessionService", "assign_member_pc"),
             ("SessionService", "rotate_join_code"),
             ("SessionService", "close"),
             ("SessionService", "create_seat"),
@@ -323,7 +323,6 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
             ("SessionService", "recover_seat"),
             ("SessionService", "reissue_seat_invitation"),
             ("SessionService", "revoke_seat"),
-            ("SessionService", "assign_seat_pc"),
         },
         "checks.py": {
             ("CheckService", "create"),
@@ -333,7 +332,6 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
             ("CheckService", "push"),
         },
         "world.py": {
-            ("WorldService", "create_pc"),
             ("WorldService", "append_event"),
             ("WorldService", "add_memory"),
             ("WorldService", "import_module"),
@@ -400,6 +398,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         ModuleImportRepository,
         ModuleKnowledgeRepository,
         ModuleGraphRepository,
+        ModuleRunRepository,
         ModelConfigurationRepository,
     )
     assert Repository.__mro__.count(SQLiteRepository) == 1
@@ -425,7 +424,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 19
+    assert LATEST_SCHEMA_VERSION == 24
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -443,10 +442,15 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (14, "add_image_model_configuration"),
         (15, "add_memory_fts5_index"),
         (16, "add_module_document_imports"),
-            (17, "add_module_knowledge_review"),
-            (18, "add_module_entity_graph"),
-            (19, "add_module_document_structure"),
-        ]
+        (17, "add_module_knowledge_review"),
+        (18, "add_module_entity_graph"),
+        (19, "add_module_document_structure"),
+        (20, "add_campaign_module_runs"),
+        (21, "add_module_run_version"),
+        (22, "add_knowledge_extraction_attempts"),
+        (23, "enforce_session_assignment_uniqueness"),
+        (24, "scope_rule_source_hash_by_ruleset"),
+    ]
 
 
 def test_failed_http_use_case_rolls_back_its_partial_write(tmp_path: Path) -> None:

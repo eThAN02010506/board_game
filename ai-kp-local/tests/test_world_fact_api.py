@@ -6,6 +6,7 @@ import httpx
 
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
+from tests.support_investigators import coc7_sheet, create_approved_player
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -31,42 +32,28 @@ class WorldFactApiTests(unittest.IsolatedAsyncioTestCase):
             )
         ).json()
         self.kp_headers = bearer(self.session["access_token"])
-        self.pc_one = (
-            await self.client.post(
-                f"/campaigns/{self.campaign['id']}/pcs",
-                headers=self.kp_headers,
-                json={"name": "Ada"},
-            )
-        ).json()
-        self.pc_two = (
-            await self.client.post(
-                f"/campaigns/{self.campaign['id']}/pcs",
-                headers=self.kp_headers,
-                json={"name": "Basil"},
-            )
-        ).json()
-        self.player_one = (
-            await self.client.post(
-                "/sessions/join",
-                json={
-                    "join_code": self.session["join_code"],
-                    "display_name": "Player one",
-                    "pc_id": self.pc_one["id"],
-                },
-            )
-        ).json()
-        self.player_two = (
-            await self.client.post(
-                "/sessions/join",
-                json={
-                    "join_code": self.session["join_code"],
-                    "display_name": "Player two",
-                    "pc_id": self.pc_two["id"],
-                },
-            )
-        ).json()
-        self.player_one_headers = bearer(self.player_one["access_token"])
-        self.player_two_headers = bearer(self.player_two["access_token"])
+        approved_one = await create_approved_player(
+            self.client,
+            campaign=self.campaign,
+            session=self.session,
+            kp_headers=self.kp_headers,
+            display_name="Player one",
+            sheet=coc7_sheet("Ada"),
+        )
+        approved_two = await create_approved_player(
+            self.client,
+            campaign=self.campaign,
+            session=self.session,
+            kp_headers=self.kp_headers,
+            display_name="Player two",
+            sheet=coc7_sheet("Basil"),
+        )
+        self.pc_one = approved_one["pc"]
+        self.pc_two = approved_two["pc"]
+        self.player_one = approved_one["bundle"]
+        self.player_two = approved_two["bundle"]
+        self.player_one_headers = approved_one["headers"]
+        self.player_two_headers = approved_two["headers"]
 
     async def asyncTearDown(self) -> None:
         await self.client.aclose()

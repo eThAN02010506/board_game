@@ -13,6 +13,7 @@ from ai_kp.core.config import Settings
 from ai_kp.core.db import connect
 from ai_kp.core.repository import Repository
 from ai_kp.security.tokens import hash_realtime_ticket
+from tests.support_investigators import coc7_sheet, create_approved_player_sync
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -49,11 +50,17 @@ class RealtimeWebSocketTests(unittest.TestCase):
             json={"kp_display_name": "Realtime KP"},
         ).json()
         self.kp_headers = bearer(self.session["access_token"])
-        self.pc = self.client.post(
-            f"/campaigns/{self.campaign['id']}/pcs",
-            headers=self.kp_headers,
-            json={"name": "Realtime Investigator", "sheet": {}},
-        ).json()
+        approved_player = create_approved_player_sync(
+            self.client,
+            campaign=self.campaign,
+            session=self.session,
+            kp_headers=self.kp_headers,
+            display_name="Realtime Player",
+            sheet=coc7_sheet("Realtime Investigator"),
+        )
+        self.pc = approved_player["pc"]
+        self.player = approved_player["bundle"]
+        self.player_headers = approved_player["headers"]
         self.saved_map = self.client.post(
             f"/campaigns/{self.campaign['id']}/maps/generate",
             headers=self.kp_headers,
@@ -82,16 +89,6 @@ class RealtimeWebSocketTests(unittest.TestCase):
                 "expected_selected_asset_id": None,
             },
         ).raise_for_status()
-        self.player = self.client.post(
-            "/sessions/join",
-            json={
-                "join_code": self.session["join_code"],
-                "display_name": "Realtime Player",
-                "pc_id": self.pc["id"],
-            },
-        ).json()
-        self.player_headers = bearer(self.player["access_token"])
-
     def tearDown(self) -> None:
         self.client.close()
         self.tmpdir.cleanup()

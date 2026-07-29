@@ -14,6 +14,7 @@ from ai_kp.platform.knowledge.sources import ExtractedRulebook
 MAX_PDF_BYTES = 64 * 1024 * 1024
 MAX_PDF_PAGES = 1200
 MAX_PAGE_CONTENT_BYTES = 16 * 1024 * 1024
+MAX_TOTAL_CONTENT_BYTES = 128 * 1024 * 1024
 MAX_EXTRACTED_CHARACTERS = 12_000_000
 MAX_CHUNK_CHARACTERS = 2600
 HEADING_PATTERN = re.compile(r"^(第[一二三四五六七八九十百]+章|\d+(?:\.\d+)+)\s*(.+)?$")
@@ -58,8 +59,12 @@ def _page_content_size(page: Any, page_number: int) -> int | None:
         raise ValueError(f"第 {page_number} 页内容流读取失败") from error
 
 
-def _page_blocks(page: Any, page_number: int) -> list[str]:
-    content_size = _page_content_size(page, page_number)
+def _page_blocks(
+    page: Any,
+    page_number: int,
+    *,
+    content_size: int | None,
+) -> list[str]:
     if content_size is not None and content_size > MAX_PAGE_CONTENT_BYTES:
         raise ValueError(f"第 {page_number} 页解压内容超过 16 MiB 限制")
     try:
@@ -90,8 +95,18 @@ def _extract_chunks(reader: PdfReader, source_hash: str) -> list[dict[str, Any]]
     chapter: str | None = None
     section: str | None = None
     extracted_characters = 0
+    total_content_bytes = 0
     for page_number, page in enumerate(reader.pages, start=1):
-        for block in _page_blocks(page, page_number):
+        content_size = _page_content_size(page, page_number)
+        if content_size is not None:
+            total_content_bytes += content_size
+            if total_content_bytes > MAX_TOTAL_CONTENT_BYTES:
+                raise ValueError("规则书解压内容流总计超过 128 MiB 限制")
+        for block in _page_blocks(
+            page,
+            page_number,
+            content_size=content_size,
+        ):
             extracted_characters += len(block)
             if extracted_characters > MAX_EXTRACTED_CHARACTERS:
                 raise ValueError("规则书提取文本超过 1200 万字符限制")
@@ -109,7 +124,11 @@ def _extract_chunks(reader: PdfReader, source_hash: str) -> list[dict[str, Any]]
                     "chapter": chapter,
                     "section": section,
                     "content_kind": "text",
-                    "audience": "all",
+                    # Imported rulebooks are untrusted with respect to table
+                    # visibility. In particular, Keeper books routinely mix
+                    # player-facing rules with Keeper-only guidance, so source
+                    # text starts closed and cannot be published by extraction.
+                    "audience": "kp",
                     "text": block,
                     "text_hash": hashlib.sha256(block.encode("utf-8")).hexdigest(),
                 }
@@ -122,7 +141,10 @@ def extract_rulebook_pdf(data: bytes, filename: str) -> ExtractedRulebook:
         raise ValueError("规则书 PDF 为空或超过 64 MiB 限制")
     source_hash = hashlib.sha256(data).hexdigest()
     try:
-        reader = PdfReader(BytesIO(data), strict=True)
+        # Real rulebooks frequently contain correctable xref/layout defects.
+        # pypdf's documented best-effort mode accepts those while the explicit
+        # byte/page/content limits below still bound extraction work.
+        reader = PdfReader(BytesIO(data), strict=False)
     except Exception as exc:
         raise ValueError("无法解析规则书 PDF") from exc
     if reader.is_encrypted:

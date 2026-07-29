@@ -19,7 +19,10 @@ def get_app_settings(request: Request) -> Settings:
 
 
 def get_repo(settings: Settings = Depends(get_app_settings)) -> Iterator[Repository]:
-    connection = connect(settings.db_path)
+    connection = connect(
+        settings.db_path,
+        synchronous=settings.sqlite_synchronous,
+    )
     try:
         yield Repository(connection)
         connection.commit()

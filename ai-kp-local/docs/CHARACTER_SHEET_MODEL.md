@@ -99,6 +99,12 @@ Excel 的技能行同时表达：技能基础值、成长值、职业点、兴�
 
 `character_reviews` 作为只追加的审核审计记录，保存操作、目标 revision、角色、理由和时间，不能只保留当前状态。
 
+提交、审批和绑定在写入前取得 SQLite immediate 写事务，审批更新还必须匹配读取时的
+`submitted_revision_id + submitted` 状态。因而重提与审批并发时只能形成一种串行顺序，
+不会出现“提交指向 v2、审批记录却批准 v1”的撕裂状态。绑定只接受已关联稳定玩家档案、
+且档案 ID 与调查员所有者严格相同的活动成员；绑定成功时同一事务同步其 claimed seat
+的 `assigned_pc_id`。
+
 ### 团内动态状态与永久成长
 
 `investigator_campaign_state` 保存参与团后的可变状态：
@@ -182,6 +188,11 @@ KP 审核页显示角色卡完整内容、与上次提交/批准版本的字段�
 - 修改 Excel 中一个公式显示值，确认系统报告差异且仍采用后端重算值。
 - 导入未知模板、缺字段和越界值，确认只生成可修正预览，不污染数据库。
 
+当前用户提供的 `COC空白卡.xlsx` 已通过生产预览接口验收：识别模板
+`coc-character-sheet-cn-people-card-v1`，忽略并重算 381 个公式单元格，返回完整 67
+项技能与 9 条可修正警告；源文件 SHA-256 为
+`eeb4ceea026bf172cd3337f42f1815da897c5c7fa46fb61641b83ef146759545`。
+
 ### C2：玩家建卡页面
 
 - 完成 `/investigators` 列表、分步编辑、剩余点数和规则提示。
@@ -199,4 +210,9 @@ KP 审核页显示角色卡完整内容、与上次提交/批准版本的字段�
 
 ## 当前代码迁移说明
 
-现有 `player_characters(campaign_id, name, sheet_json, ...)` 只能表示“绑定在一个团内的角色”，可继续作为兼容占位，但不是目标模型。迁移时先双写或建立兼容读取层，再把会话成员、地图棋子、行动和记忆引用切换到 `campaign_investigators`；完成数据迁移和回归测试前不能直接删除旧字段。
+`player_characters` 现在只作为旧事件、地图棋子和部分投影所需的兼容 PC 身份；它不再是
+玩家可直接创建或分配的角色卡权威。公开直接创建 PC、成员 `assign-pc` 与席位
+`PATCH .../pc` 均返回 `410 Gone`。权威链路是玩家拥有的 `investigators`、不可变
+revision、当前团 `campaign_investigators.approved_revision_id` 与团内可变状态；KP
+批准时才建立兼容 PC 投影。删除旧表和外键仍需单独的数据迁移版本，不能在兼容引用
+存在时直接清表。

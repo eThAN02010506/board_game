@@ -11,6 +11,9 @@ from ai_kp.rule_authoring.models import RuleObject, RuleStatus
 
 
 class RuleValidationStore(Protocol):
+    def get_rule_source(self, source_id: str) -> dict:
+        ...
+
     def get_rule_chunk(self, chunk_id: str) -> dict:
         ...
 
@@ -29,7 +32,7 @@ def _normalized(text: str) -> str:
 
 
 class RuleValidator:
-    """Three gates: schema, source citation, then conflict/consistency."""
+    """Four gates: schema, source binding, citation, then conflict/consistency."""
 
     def __init__(self, repo: RuleValidationStore):
         self.repo = repo
@@ -37,11 +40,19 @@ class RuleValidator:
     def validate(self, source_id: str, candidate: dict[str, Any]) -> tuple[RuleObject, dict]:
         report: dict[str, Any] = {
             "schema": {"passed": False, "errors": []},
+            "source_binding": {"passed": False, "errors": []},
             "citations": {"passed": False, "errors": []},
             "conflicts": {"passed": False, "errors": []},
         }
         rule = RuleObject.model_validate(candidate)
         report["schema"]["passed"] = True
+
+        source = self.repo.get_rule_source(source_id)
+        if rule.ruleset_id != source["ruleset_id"]:
+            report["source_binding"]["errors"].append(
+                "rule ruleset_id does not match its source ruleset_id"
+            )
+        report["source_binding"]["passed"] = not report["source_binding"]["errors"]
 
         for citation in rule.citations:
             try:
@@ -82,13 +93,18 @@ class RuleValidator:
                 f"validated rule with key {rule.rule_key} already has different content"
             )
         report["conflicts"]["passed"] = not report["conflicts"]["errors"]
-        report["passed"] = all(report[layer]["passed"] for layer in ("schema", "citations", "conflicts"))
+        report["passed"] = all(
+            report[layer]["passed"]
+            for layer in ("schema", "source_binding", "citations", "conflicts")
+        )
         return rule, report
 
     @staticmethod
-    def status_for(rule: RuleObject, report: dict) -> RuleStatus:
+    def status_for(_rule: RuleObject, report: dict) -> RuleStatus:
+        """AI output is never promoted without a later human review."""
+
+        if report["schema"]["errors"] or report["source_binding"]["errors"]:
+            return RuleStatus.QUARANTINED
         if report["conflicts"]["errors"]:
             return RuleStatus.QUARANTINED
-        if not report["passed"] or rule.confidence < 0.75:
-            return RuleStatus.REVIEW_REQUIRED
-        return RuleStatus.VALIDATED
+        return RuleStatus.REVIEW_REQUIRED

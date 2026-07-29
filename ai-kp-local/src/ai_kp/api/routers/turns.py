@@ -2,7 +2,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ai_kp.api.authz import campaign_for_proposal, require_campaign_role
+from ai_kp.api.authz import (
+    campaign_for_proposal,
+    require_approved_pc_binding,
+    require_campaign_role,
+)
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.schemas import (
     KpTurnRequest,
@@ -51,6 +55,12 @@ def submit_player_action(
     repo: Repository = Depends(get_repo),
 ) -> dict:
     require_campaign_role(identity, campaign_id, ("player",))
+    require_approved_pc_binding(
+        repo,
+        campaign_id,
+        identity.pc_id,
+        owner_profile_id=identity.player_profile_id,
+    )
     return TurnService(repo).submit_player_action(
         identity,
         action_text=payload.action_text,
@@ -103,6 +113,8 @@ def create_manual_proposal(
     repo: Repository = Depends(get_repo),
 ) -> dict:
     require_campaign_role(identity, campaign_id, ("kp",))
+    if payload.pc_id:
+        require_approved_pc_binding(repo, campaign_id, payload.pc_id)
     return TurnService(repo).create_manual_proposal(
         campaign_id,
         identity,
@@ -186,6 +198,8 @@ async def kp_turn(
     settings: Settings = Depends(get_app_settings),
 ) -> dict:
     require_campaign_role(identity, payload.campaign_id, ("kp",))
+    if payload.pc_id:
+        require_approved_pc_binding(repo, payload.campaign_id, payload.pc_id)
     try:
         return await TurnService(repo).create_ai_proposal(
             KpTurnCommand(

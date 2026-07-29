@@ -78,8 +78,8 @@ class SessionSeatRepository(SQLiteRepository):
         *,
         label: str,
         created_by_member_id: str,
-        pc_id: str | None = None,
     ) -> dict[str, Any]:
+        self.begin_immediate()
         session = self.get_campaign_session(session_id)
         if session["status"] != "active":
             raise ValueError("Seats can only be created for an active session")
@@ -98,22 +98,18 @@ class SessionSeatRepository(SQLiteRepository):
         ).fetchone()
         if duplicate is not None:
             raise ValueError("An active seat already uses this label")
-        if pc_id:
-            self._validate_seat_pc(session_id, str(session["campaign_id"]), pc_id)
-
         seat_id = new_id("seat")
         self.connection.execute(
             """
             INSERT INTO session_seats
-              (id, session_id, campaign_id, label, assigned_pc_id, created_by_member_id)
-            VALUES (?, ?, ?, ?, ?, ?)
+              (id, session_id, campaign_id, label, created_by_member_id)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 seat_id,
                 session_id,
                 session["campaign_id"],
                 normalized_label,
-                pc_id,
                 created_by_member_id,
             ),
         )
@@ -125,7 +121,7 @@ class SessionSeatRepository(SQLiteRepository):
             event_type="session.seat_created",
             resource_type="session_seat",
             resource_id=seat_id,
-            payload={"label": normalized_label, "pc_id": pc_id},
+            payload={"label": normalized_label},
         )
         return {"seat": self.get_session_seat(seat_id), "invitation_code": invitation_code}
 
@@ -145,6 +141,7 @@ class SessionSeatRepository(SQLiteRepository):
         player_profile_id: str,
         display_name: str,
     ) -> dict[str, Any]:
+        self.begin_immediate()
         invitation = self.connection.execute(
             """
             SELECT si.id AS invitation_id, ss.*
@@ -169,9 +166,25 @@ class SessionSeatRepository(SQLiteRepository):
         ).fetchone()
         if duplicate_profile is not None:
             raise ValueError("This player profile already owns a seat in the session")
+        duplicate_member = self.connection.execute(
+            """
+            SELECT id FROM session_members
+            WHERE session_id = ? AND role = 'player' AND revoked_at IS NULL
+              AND player_profile_id = ?
+            """,
+            (session_id, player_profile_id),
+        ).fetchone()
+        if duplicate_member is not None:
+            raise ValueError("This player profile already owns an active session member")
         pc_id = str(invitation["assigned_pc_id"]) if invitation["assigned_pc_id"] else None
         if pc_id:
-            self._validate_seat_pc(session_id, campaign_id, pc_id, seat_id=str(invitation["id"]))
+            self._validate_legacy_reserved_pc(
+                session_id,
+                campaign_id,
+                pc_id,
+                player_profile_id=player_profile_id,
+                seat_id=str(invitation["id"]),
+            )
 
         consumed = self.connection.execute(
             """
@@ -209,6 +222,7 @@ class SessionSeatRepository(SQLiteRepository):
             SET status = 'claimed', player_profile_id = ?, claimed_member_id = ?,
                 claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND status = 'open'
+              AND player_profile_id IS NULL AND claimed_member_id IS NULL
             """,
             (player_profile_id, member_id, invitation["id"]),
         )
@@ -283,49 +297,12 @@ class SessionSeatRepository(SQLiteRepository):
         )
         return self.get_session_seat(seat_id)
 
-    def assign_session_seat_pc(
-        self,
-        session_id: str,
-        seat_id: str,
-        pc_id: str | None,
-    ) -> dict[str, Any]:
-        seat = self.get_session_seat(seat_id)
-        if seat["session_id"] != session_id or seat["status"] == "revoked":
-            raise ValueError("Target must be an active seat in this session")
-        if pc_id:
-            self._validate_seat_pc(session_id, str(seat["campaign_id"]), pc_id, seat_id=seat_id)
-        if seat["claimed_member_id"]:
-            if pc_id:
-                self.assign_member_pc(session_id, str(seat["claimed_member_id"]), pc_id)
-            else:
-                self.connection.execute(
-                    "UPDATE session_members SET pc_id = NULL WHERE id = ?",
-                    (seat["claimed_member_id"],),
-                )
-        self.connection.execute(
-            """
-            UPDATE session_seats SET assigned_pc_id = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (pc_id, seat_id),
-        )
-        return self.get_session_seat(seat_id)
-
     def seat_for_member(self, member_id: str) -> dict[str, Any] | None:
         row = self.connection.execute(
             "SELECT id FROM session_seats WHERE claimed_member_id = ?",
             (member_id,),
         ).fetchone()
         return self.get_session_seat(str(row["id"])) if row is not None else None
-
-    def sync_member_seat_pc(self, member_id: str, pc_id: str | None) -> None:
-        self.connection.execute(
-            """
-            UPDATE session_seats SET assigned_pc_id = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE claimed_member_id = ? AND status = 'claimed'
-            """,
-            (pc_id, member_id),
-        )
 
     def _issue_seat_invitation(self, seat_id: str) -> str:
         self.connection.execute(
@@ -350,20 +327,38 @@ class SessionSeatRepository(SQLiteRepository):
         )
         return invitation_code
 
-    def _validate_seat_pc(
+    def _validate_legacy_reserved_pc(
         self,
         session_id: str,
         campaign_id: str,
         pc_id: str,
         *,
+        player_profile_id: str,
         seat_id: str | None = None,
     ) -> None:
-        pc = self.connection.execute(
-            "SELECT id FROM player_characters WHERE id = ? AND campaign_id = ?",
-            (pc_id, campaign_id),
+        approved = self.connection.execute(
+            """
+            SELECT ci.owner_profile_id
+            FROM campaign_investigators ci
+            JOIN investigator_revisions ir
+              ON ir.id = ci.approved_revision_id
+             AND ir.investigator_id = ci.investigator_id
+            JOIN investigator_campaign_state state
+              ON state.campaign_id = ci.campaign_id
+             AND state.investigator_id = ci.investigator_id
+             AND state.approved_revision_id = ci.approved_revision_id
+            WHERE ci.campaign_id = ? AND ci.legacy_pc_id = ?
+              AND ci.status = 'approved'
+            """,
+            (campaign_id, pc_id),
         ).fetchone()
-        if pc is None:
-            raise ValueError("PC does not belong to this campaign")
+        if approved is None:
+            raise ValueError(
+                "Legacy seat reservation is not backed by a consistent "
+                "KP-approved investigator; revoke and recreate the seat"
+            )
+        if approved["owner_profile_id"] != player_profile_id:
+            raise ValueError("Reserved investigator belongs to another player profile")
         member = self.connection.execute(
             """
             SELECT id FROM session_members

@@ -1,6 +1,7 @@
 import { Brain, Check, RefreshCw } from "lucide-react";
 import type { ContextAssembly, TurnProposal } from "../../api/types";
 import { ProposalEffectList } from "../../shared/ProposalEffectList";
+import { statusLabel } from "../../ui/statusLabels";
 
 type Props = {
   proposals: TurnProposal[];
@@ -36,7 +37,7 @@ export function ProposalPanel(props: Props) {
             type="button"
           >
             <span>
-              {proposal.status}
+              {statusLabel(proposal.status)}
               {proposal.proposal_kind === "check_consequence" ? " · 检定后果" : ""}
             </span>
             <small>{proposal.player_action}</small>
@@ -47,7 +48,7 @@ export function ProposalPanel(props: Props) {
         {props.activeProposal ? (
           <>
             <span className={`proposal-status ${props.activeProposal.status}`}>
-              {props.activeProposal.status}
+              {statusLabel(props.activeProposal.status)}
               {props.activeProposal.proposal_kind === "check_consequence"
                 ? " · 检定后果"
                 : ""}

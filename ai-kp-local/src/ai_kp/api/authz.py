@@ -16,7 +16,11 @@ def is_local_admin(request: Request, supplied_admin_token: str | None) -> bool:
         and secrets.compare_digest(settings.admin_token, supplied_admin_token)
     ):
         return True
-    if not settings.local_admin_enabled or request.client is None:
+    if (
+        settings.deployment_mode != "local"
+        or not settings.local_admin_enabled
+        or request.client is None
+    ):
         return False
     try:
         address = ipaddress.ip_address(request.client.host)
@@ -44,6 +48,47 @@ def require_campaign_role(
         raise HTTPException(status_code=404, detail="Campaign resource not found")
     if identity.role not in roles:
         raise HTTPException(status_code=403, detail=f"Required role: {', '.join(roles)}")
+
+
+def require_approved_pc_binding(
+    repo: Repository,
+    campaign_id: str,
+    pc_id: str | None,
+    *,
+    owner_profile_id: str | None = None,
+) -> dict:
+    """Fail closed unless a legacy PC id projects one KP-approved investigator."""
+
+    if not pc_id:
+        raise HTTPException(
+            status_code=409,
+            detail="An approved investigator must be bound before this action",
+        )
+    row = repo.connection.execute(
+        """
+        SELECT ci.investigator_id, ci.owner_profile_id, ci.approved_revision_id,
+               ci.legacy_pc_id
+        FROM campaign_investigators ci
+        JOIN investigator_revisions ir
+          ON ir.id = ci.approved_revision_id
+         AND ir.investigator_id = ci.investigator_id
+        JOIN investigator_campaign_state state
+          ON state.campaign_id = ci.campaign_id
+         AND state.investigator_id = ci.investigator_id
+         AND state.approved_revision_id = ci.approved_revision_id
+        WHERE ci.campaign_id = ? AND ci.legacy_pc_id = ?
+          AND ci.approved_revision_id IS NOT NULL
+        """,
+        (campaign_id, pc_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This character is not a consistent KP-approved investigator binding",
+        )
+    if owner_profile_id is not None and row["owner_profile_id"] != owner_profile_id:
+        raise HTTPException(status_code=403, detail="Investigator belongs to another player")
+    return dict(row)
 
 
 def campaign_for_map(repo: Repository, map_id: str) -> str:

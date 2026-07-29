@@ -6,6 +6,7 @@ from ai_kp.platform.modules.graph import (
     ModuleRelationCreate,
     normalize_entity_name,
 )
+from ai_kp.platform.modules.knowledge import validate_derived_scope
 
 
 class ModuleGraphService:
@@ -27,6 +28,12 @@ class ModuleGraphService:
             raise ValueError("Anchor entities require an approved module_anchor source")
         if normalize_entity_name(payload.name) not in self._candidate_text(candidate):
             raise ValueError("Entity name is not present in its approved source candidate")
+        self._require_scope_preserved(
+            candidate,
+            visibility=payload.visibility,
+            spoiler_tag=payload.spoiler_tag,
+            label="Entity",
+        )
         return self.repo.create_module_entity(module_id, payload, member_id=member_id)
 
     def create_relation(
@@ -52,6 +59,26 @@ class ModuleGraphService:
                 raise ValueError(
                     "Relation endpoint is not present in its approved source candidate"
                 )
+        self._require_scope_preserved(
+            candidate,
+            visibility=payload.visibility,
+            spoiler_tag=payload.spoiler_tag,
+            label="Relation source candidate",
+        )
+        for label, endpoint in (
+            ("Relation source entity", source),
+            ("Relation target entity", target),
+        ):
+            # Endpoint spoiler tags remain on the endpoint rows and retrieval
+            # requires all of them. A cross-act edge therefore preserves its
+            # direct evidence tag without having to equal both endpoint tags.
+            validate_derived_scope(
+                source_visibility=str(endpoint.get("visibility") or "kp"),
+                source_spoiler_tag=None,
+                derived_visibility=payload.visibility,
+                derived_spoiler_tag=payload.spoiler_tag,
+                label=label,
+            )
         return self.repo.create_module_relation(module_id, payload, member_id=member_id)
 
     def check_reachability(
@@ -71,6 +98,13 @@ class ModuleGraphService:
             raise ValueError("Source candidate belongs to another module")
         if candidate["status"] != "approved":
             raise ValueError("Entities and relations require an approved source candidate")
+        if not self.repo.module_candidate_sources_are_current(
+            candidate_id,
+            module_id=module_id,
+        ):
+            raise ValueError(
+                "Entities and relations require a currently valid source candidate"
+            )
         return candidate
 
     @staticmethod
@@ -78,3 +112,19 @@ class ModuleGraphService:
         parts = [candidate["title"], candidate["statement"]]
         parts.extend(item["evidence_text"] for item in candidate.get("citations", ()))
         return normalize_entity_name(" ".join(str(part) for part in parts))
+
+    @staticmethod
+    def _require_scope_preserved(
+        source: dict,
+        *,
+        visibility: str,
+        spoiler_tag: str | None,
+        label: str,
+    ) -> None:
+        validate_derived_scope(
+            source_visibility=str(source.get("visibility") or "kp"),
+            source_spoiler_tag=source.get("spoiler_tag"),
+            derived_visibility=visibility,
+            derived_spoiler_tag=spoiler_tag,
+            label=label,
+        )

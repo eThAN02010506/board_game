@@ -11,6 +11,7 @@ from ai_kp.infrastructure.database.model_configuration import ModelConfiguration
 from ai_kp.infrastructure.database.module_graph import ModuleGraphRepository
 from ai_kp.infrastructure.database.module_imports import ModuleImportRepository
 from ai_kp.infrastructure.database.module_knowledge import ModuleKnowledgeRepository
+from ai_kp.infrastructure.database.module_runs import ModuleRunRepository
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.rulebooks import RulebookRepository
 from ai_kp.infrastructure.database.security import SecurityRepository
@@ -37,6 +38,7 @@ class Repository(
     ModuleImportRepository,
     ModuleKnowledgeRepository,
     ModuleGraphRepository,
+    ModuleRunRepository,
     ModelConfigurationRepository,
 ):
     """Backward-compatible facade over the feature-specific SQLite repositories."""

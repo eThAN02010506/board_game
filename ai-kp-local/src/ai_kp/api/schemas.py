@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ai_kp.director.turn_output import (
     CheckCandidate,
@@ -9,6 +9,69 @@ from ai_kp.director.turn_output import (
     MemoryCandidate,
     NpcUpdateCandidate,
 )
+
+MAX_CHARACTER_SHEET_BYTES = 512 * 1024
+MAX_CHARACTER_JSON_DEPTH = 12
+MAX_CHARACTER_JSON_NODES = 10_000
+MAX_CHARACTER_CONTAINER_ITEMS = 256
+MAX_CHARACTER_STRING_LENGTH = 16_384
+CHARACTER_SHEET_FIELDS = {
+    "schema_version",
+    "ruleset_id",
+    "identity",
+    "characteristics",
+    "derived",
+    "skills",
+    "combat",
+    "assets",
+    "background",
+    "provenance",
+    "extensions",
+}
+
+
+def validate_bounded_character_json(value: dict[str, Any]) -> dict[str, Any]:
+    """Reject resource-amplifying or unversioned character-card payloads."""
+
+    import json
+
+    unknown_fields = sorted(set(value) - CHARACTER_SHEET_FIELDS)
+    if unknown_fields:
+        raise ValueError(
+            "Unknown character-sheet fields: " + ", ".join(unknown_fields[:10])
+        )
+
+    stack: list[tuple[object, int]] = [(value, 0)]
+    nodes = 0
+    while stack:
+        item, depth = stack.pop()
+        nodes += 1
+        if nodes > MAX_CHARACTER_JSON_NODES:
+            raise ValueError("Character sheet contains too many values")
+        if depth > MAX_CHARACTER_JSON_DEPTH:
+            raise ValueError("Character sheet is nested too deeply")
+        if isinstance(item, dict):
+            if len(item) > MAX_CHARACTER_CONTAINER_ITEMS:
+                raise ValueError("Character sheet object contains too many fields")
+            for key, child in item.items():
+                if len(str(key)) > 200:
+                    raise ValueError("Character sheet field name is too long")
+                stack.append((child, depth + 1))
+        elif isinstance(item, list):
+            if len(item) > MAX_CHARACTER_CONTAINER_ITEMS:
+                raise ValueError("Character sheet list contains too many entries")
+            stack.extend((child, depth + 1) for child in item)
+        elif isinstance(item, str) and len(item) > MAX_CHARACTER_STRING_LENGTH:
+            raise ValueError("Character sheet text field is too long")
+
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(serialized) > MAX_CHARACTER_SHEET_BYTES:
+        raise ValueError("Character sheet exceeds the 512 KiB canonical limit")
+    return value
 
 
 class HealthResponse(BaseModel):
@@ -67,9 +130,10 @@ class SessionCreate(BaseModel):
 
 
 class SessionJoin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     join_code: str = Field(min_length=12, max_length=20)
     display_name: str = Field(min_length=1, max_length=80)
-    pc_id: str | None = None
 
 
 class SessionKpCredentialRecovery(BaseModel):
@@ -81,8 +145,9 @@ class SessionMemberPcAssign(BaseModel):
 
 
 class SessionSeatCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     label: str = Field(min_length=1, max_length=80)
-    pc_id: str | None = None
 
 
 class SessionSeatClaim(BaseModel):
@@ -142,13 +207,29 @@ class PlayerProfileCreate(BaseModel):
 
 
 class InvestigatorCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     canonical_sheet: dict[str, Any]
     source_type: Literal["manual", "xlsx"] = "manual"
-    source_hash: str | None = None
+    source_hash: str | None = Field(default=None, min_length=64, max_length=64)
     source_filename: str | None = Field(default=None, max_length=255)
     template_id: str | None = Field(default=None, max_length=120)
     parser_version: str | None = Field(default=None, max_length=40)
     warnings: list[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("canonical_sheet")
+    @classmethod
+    def validate_canonical_sheet(
+        cls, value: dict[str, Any]
+    ) -> dict[str, Any]:
+        return validate_bounded_character_json(value)
+
+    @field_validator("warnings")
+    @classmethod
+    def validate_warnings(cls, value: list[str]) -> list[str]:
+        if any(len(warning) > 2000 for warning in value):
+            raise ValueError("Investigator warnings cannot exceed 2000 characters")
+        return value
 
 
 class InvestigatorSkillRecommendationRequest(BaseModel):
@@ -200,6 +281,42 @@ class ModuleKnowledgeReview(BaseModel):
     def require_rejection_note(self) -> "ModuleKnowledgeReview":
         if self.decision == "rejected" and not (self.note or "").strip():
             raise ValueError("Rejected candidates require a review note")
+        return self
+
+
+class ModuleRunStart(BaseModel):
+    module_id: str = Field(min_length=1, max_length=160)
+    current_scene_key: str | None = Field(default=None, max_length=160)
+    active_spoiler_tags: list[str] = Field(default_factory=list, max_length=100)
+    state: dict[str, Any] = Field(default_factory=dict, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "ModuleRunStart":
+        if any(not tag.strip() or len(tag.strip()) > 160 for tag in self.active_spoiler_tags):
+            raise ValueError("Spoiler tags must contain 1-160 non-whitespace characters")
+        return self
+
+
+class ModuleRunUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    status: Literal["active", "paused", "completed"] | None = None
+    current_scene_key: str | None = Field(default=None, max_length=160)
+    active_spoiler_tags: list[str] | None = Field(default=None, max_length=100)
+    state: dict[str, Any] | None = Field(default=None, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_patch(self) -> "ModuleRunUpdate":
+        supplied = self.model_fields_set
+        if not supplied - {"expected_version"}:
+            raise ValueError("At least one module-run field must be supplied")
+        for field_name in ("status", "active_spoiler_tags", "state"):
+            if field_name in supplied and getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null")
+        if self.active_spoiler_tags is not None and any(
+            not tag.strip() or len(tag.strip()) > 160
+            for tag in self.active_spoiler_tags
+        ):
+            raise ValueError("Spoiler tags must contain 1-160 non-whitespace characters")
         return self
 
 

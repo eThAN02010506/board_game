@@ -2,7 +2,11 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ai_kp.api.authz import require_campaign_role, require_local_admin
+from ai_kp.api.authz import (
+    require_approved_pc_binding,
+    require_campaign_role,
+    require_local_admin,
+)
 from ai_kp.api.dependencies import get_identity, get_repo
 from ai_kp.api.schemas import (
     CampaignNpcLink,
@@ -16,7 +20,6 @@ from ai_kp.application.world_service import (
     AddMemoryCommand,
     AppendEventCommand,
     CreateNpcCommand,
-    CreatePcCommand,
     ImportModuleCommand,
     LinkNpcCommand,
     WorldService,
@@ -37,7 +40,7 @@ def _public_pc_summary(pc: dict) -> dict:
     }
 
 
-@router.post("/campaigns/{campaign_id}/pcs")
+@router.post("/campaigns/{campaign_id}/pcs", deprecated=True)
 def create_pc(
     campaign_id: str,
     payload: PcCreate,
@@ -45,10 +48,12 @@ def create_pc(
     repo: Repository = Depends(get_repo),
 ) -> dict:
     require_campaign_role(identity, campaign_id, ("kp",))
-    return WorldService(repo).create_pc(
-        campaign_id,
-        identity.session_id,
-        CreatePcCommand(**payload.model_dump()),
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Direct PC creation was removed. A player must create or import an "
+            "investigator and the KP must approve its submitted revision."
+        ),
     )
 
 
@@ -174,6 +179,12 @@ def search_memory(
                 status_code=403, detail="Players can only search their own PC memory"
             )
         pc_id = identity.pc_id
+        require_approved_pc_binding(
+            repo,
+            campaign_id,
+            pc_id,
+            owner_profile_id=identity.player_profile_id,
+        )
     return WorldService(repo).search_memory(
         campaign_id,
         q,

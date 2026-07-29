@@ -1,17 +1,20 @@
 """Canonical scoped context assembly for the AI KP director."""
 
-import json
 import math
 import re
 import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
+from ai_kp.director.context_sources import (
+    InvestigatorContextProvider,
+    ModuleContextProvider,
+)
 from ai_kp.director.prompts import KP_SYSTEM_PROMPT
 from ai_kp.director.turn_output import STRUCTURED_OUTPUT_INSTRUCTIONS
 from ai_kp.platform.facts import FactLedgerEntry, visible_fact_heads
 from ai_kp.platform.memory.npc_candidates import NpcCandidateService
-from ai_kp.platform.memory.retrieval import MemoryRetriever, tokenize
+from ai_kp.platform.memory.retrieval import MemoryRetriever
 
 CJK_RE = re.compile(r"[\u3400-\u9fff]")
 
@@ -33,7 +36,7 @@ class ContextAssembly:
 
 
 class ContextBuilder:
-    def __init__(self, connection: sqlite3.Connection, max_context_tokens: int = 6000):
+    def __init__(self, connection: sqlite3.Connection, max_context_tokens: int = 12000):
         self.connection = connection
         self.max_context_tokens = max_context_tokens
 
@@ -51,12 +54,21 @@ class ContextBuilder:
         output_instructions: str = STRUCTURED_OUTPUT_INSTRUCTIONS,
         additional_sources: tuple[dict[str, Any], ...] = (),
     ) -> ContextAssembly:
-        allowed_visibility = ("player", "table", "kp") if visibility_scope == "kp" else ("player", "table")
+        if visibility_scope not in {"kp", "player"}:
+            raise ValueError("Visibility scope must be kp or player")
+        if visibility_scope == "player" and not pc_id:
+            raise ValueError("Player context requires an identity-bound PC")
+        allowed_visibility = (
+            ("player", "table", "kp", "secret")
+            if visibility_scope == "kp"
+            else ("player", "table")
+        )
         included: list[dict] = []
         excluded: list[dict] = []
 
         campaign = self.connection.execute(
-            "SELECT * FROM campaigns WHERE id = ?", (campaign_id,)
+            "SELECT * FROM campaigns WHERE id = ?",
+            (campaign_id,),
         ).fetchone()
         if campaign is None:
             raise KeyError(f"Campaign not found: {campaign_id}")
@@ -65,16 +77,36 @@ class ContextBuilder:
                 "kind": "campaign",
                 "id": campaign["id"],
                 "label": campaign["title"],
-                "content": f"团名：{campaign['title']}；规则：{campaign['system']}；当前时间：{campaign['current_time'] or '未设定'}",
+                "content": (
+                    f"团名：{campaign['title']}；规则：{campaign['system']}；"
+                    f"当前时间：{campaign['current_time'] or '未设定'}"
+                ),
                 "visibility": "table",
+                "required": True,
             }
         )
-        self._add_pc_context(campaign_id, pc_id, visibility_scope, included)
-        self._add_world_facts(
-            campaign_id,
-            pc_id,
-            visibility_scope,
-            included,
+        investigator_sources = InvestigatorContextProvider(self.connection).build(
+            campaign_id=campaign_id,
+            pc_id=pc_id,
+            visibility_scope=visibility_scope,
+        )
+        included.extend(investigator_sources)
+        self._add_world_facts(campaign_id, pc_id, visibility_scope, included)
+
+        module_provider = ModuleContextProvider(self.connection)
+        module_scope = module_provider.resolve(
+            campaign_id=campaign_id,
+            requested_spoiler_tags=active_spoiler_tags,
+            visibility_scope=visibility_scope,
+            included=included,
+            excluded=excluded,
+        )
+        module_provider.add_approved_knowledge(
+            scope=module_scope,
+            player_action=player_action,
+            visibility=allowed_visibility,
+            included=included,
+            excluded=excluded,
         )
 
         memories = MemoryRetriever(self.connection).retrieve(
@@ -117,18 +149,31 @@ class ContextBuilder:
                 )
 
         self._add_recent_events(campaign_id, allowed_visibility, included)
-        self._add_map_context(campaign_id, map_id, allowed_visibility, included)
-        self._add_module_chunks(
+        self._add_map_context(
             campaign_id,
-            player_action,
+            map_id,
             allowed_visibility,
-            active_spoiler_tags,
+            visibility_scope,
             included,
-            excluded,
+        )
+        module_provider.add_chunks(
+            scope=module_scope,
+            player_action=player_action,
+            visibility=allowed_visibility,
+            included=included,
+            excluded=excluded,
         )
         # Trusted use-case sources (for example deterministic check results)
         # must be considered before optional memories and module excerpts.
-        included[1:1] = [dict(source) for source in additional_sources]
+        accepted_additional: list[dict[str, Any]] = []
+        for source in additional_sources:
+            copied = dict(source)
+            if copied.get("visibility") not in allowed_visibility:
+                copied["excluded_reason"] = "visibility_not_allowed"
+                excluded.append(self._without_content(copied))
+                continue
+            accepted_additional.append(copied)
+        included[1:1] = accepted_additional
 
         selected, budget_excluded = self._fit_budget(
             player_action,
@@ -137,7 +182,8 @@ class ContextBuilder:
         )
         excluded.extend(budget_excluded)
         sections = "\n\n".join(
-            f"[{source['kind']}] id={source['id']} label={source['label']}\n{source['content']}"
+            f"[{source['kind']}] id={source['id']} label={source['label']}\n"
+            f"{source['content']}"
             for source in selected
         ) or "无可用背景资料"
         user_prompt = f"""玩家行动：
@@ -157,38 +203,10 @@ class ContextBuilder:
             messages=messages,
             included_sources=selected,
             excluded_sources=excluded,
-            token_estimate=sum(estimate_tokens(message["content"]) for message in messages),
+            token_estimate=sum(
+                estimate_tokens(message["content"]) for message in messages
+            ),
             visibility_scope=visibility_scope,
-        )
-
-    def _add_pc_context(
-        self,
-        campaign_id: str,
-        pc_id: str | None,
-        visibility_scope: str,
-        included: list[dict],
-    ) -> None:
-        if not pc_id:
-            return
-        row = self.connection.execute(
-            "SELECT * FROM player_characters WHERE id = ? AND campaign_id = ?",
-            (pc_id, campaign_id),
-        ).fetchone()
-        if row is None:
-            raise ValueError(f"PC {pc_id} does not belong to campaign {campaign_id}")
-        content = "当前玩家角色"
-        source_visibility = "table"
-        if visibility_scope == "kp":
-            content = f"角色卡：{json.dumps(json.loads(row['sheet_json']), ensure_ascii=False)}"
-            source_visibility = "kp"
-        included.append(
-            {
-                "kind": "player_character",
-                "id": row["id"],
-                "label": row["name"],
-                "content": content,
-                "visibility": source_visibility,
-            }
         )
 
     def _add_map_context(
@@ -196,18 +214,35 @@ class ContextBuilder:
         campaign_id: str,
         map_id: str | None,
         visibility: tuple[str, ...],
+        visibility_scope: str,
         included: list[dict],
     ) -> None:
         if map_id:
-            map_row = self.connection.execute(
-                "SELECT * FROM maps WHERE id = ? AND campaign_id = ?",
-                (map_id, campaign_id),
-            ).fetchone()
+            if visibility_scope == "player":
+                map_row = self.connection.execute(
+                    """
+                    SELECT * FROM maps
+                    WHERE id = ? AND campaign_id = ? AND status = 'published'
+                    """,
+                    (map_id, campaign_id),
+                ).fetchone()
+            else:
+                map_row = self.connection.execute(
+                    "SELECT * FROM maps WHERE id = ? AND campaign_id = ?",
+                    (map_id, campaign_id),
+                ).fetchone()
             if map_row is None:
                 raise ValueError(f"Map {map_id} does not belong to campaign {campaign_id}")
         else:
+            status_clause = (
+                "AND status = 'published'" if visibility_scope == "player" else ""
+            )
             map_row = self.connection.execute(
-                "SELECT * FROM maps WHERE campaign_id = ? ORDER BY created_at DESC LIMIT 1",
+                f"""
+                SELECT * FROM maps
+                WHERE campaign_id = ? {status_clause}
+                ORDER BY created_at DESC LIMIT 1
+                """,
                 (campaign_id,),
             ).fetchone()
         if map_row is None:
@@ -223,8 +258,11 @@ class ContextBuilder:
         )
         placeholders = ",".join("?" for _ in visibility)
         locations = self.connection.execute(
-            f"""SELECT * FROM map_locations
-            WHERE map_id = ? AND visibility IN ({placeholders}) ORDER BY order_index""",
+            f"""
+            SELECT * FROM map_locations
+            WHERE map_id = ? AND visibility IN ({placeholders})
+            ORDER BY order_index
+            """,
             (map_row["id"], *visibility),
         ).fetchall()
         for row in locations:
@@ -238,11 +276,13 @@ class ContextBuilder:
                 }
             )
         tokens = self.connection.execute(
-            f"""SELECT t.*, l.name AS location_name
+            f"""
+            SELECT t.*, l.name AS location_name
             FROM map_tokens t JOIN map_locations l ON l.id = t.location_id
             WHERE t.map_id = ? AND t.visibility IN ({placeholders})
               AND l.visibility IN ({placeholders})
-            ORDER BY t.created_at""",
+            ORDER BY t.created_at
+            """,
             (map_row["id"], *visibility, *visibility),
         ).fetchall()
         for row in tokens:
@@ -251,7 +291,11 @@ class ContextBuilder:
                     "kind": "map_token",
                     "id": row["id"],
                     "label": row["label"],
-                    "content": f"类型：{row['actor_type']}；actor_id：{row['actor_id'] or '无'}；位置：{row['location_name']}",
+                    "content": (
+                        f"类型：{row['actor_type']}；"
+                        f"actor_id：{row['actor_id'] or '无'}；"
+                        f"位置：{row['location_name']}"
+                    ),
                     "visibility": row["visibility"],
                 }
             )
@@ -300,13 +344,20 @@ class ContextBuilder:
                 }
             )
 
-    def _add_recent_events(self, campaign_id: str, visibility: tuple[str, ...], included: list[dict]) -> None:
+    def _add_recent_events(
+        self,
+        campaign_id: str,
+        visibility: tuple[str, ...],
+        included: list[dict],
+    ) -> None:
         placeholders = ",".join("?" for _ in visibility)
         rows = self.connection.execute(
-            f"""SELECT * FROM events
+            f"""
+            SELECT * FROM events
             WHERE campaign_id = ? AND visibility IN ({placeholders})
               AND event_type NOT LIKE 'world_fact.%'
-            ORDER BY created_at DESC LIMIT 5""",
+            ORDER BY created_at DESC LIMIT 5
+            """,
             (campaign_id, *visibility),
         ).fetchall()
         for row in reversed(rows):
@@ -320,50 +371,6 @@ class ContextBuilder:
                 }
             )
 
-    def _add_module_chunks(
-        self,
-        campaign_id: str,
-        player_action: str,
-        visibility: tuple[str, ...],
-        active_spoiler_tags: tuple[str, ...],
-        included: list[dict],
-        excluded: list[dict],
-    ) -> None:
-        placeholders = ",".join("?" for _ in visibility)
-        rows = self.connection.execute(
-            f"""SELECT mc.* FROM module_chunks mc JOIN modules m ON m.id = mc.module_id
-            WHERE (m.campaign_id = ? OR m.campaign_id IS NULL) AND mc.visibility IN ({placeholders})
-            ORDER BY mc.order_index""",
-            (campaign_id, *visibility),
-        ).fetchall()
-        query_tokens = tokenize(player_action)
-        ranked = []
-        for row in rows:
-            source = {
-                "kind": "module_chunk",
-                "id": row["id"],
-                "label": row["title"],
-                "content": row["text"],
-                "visibility": row["visibility"],
-                "spoiler_tag": row["spoiler_tag"],
-            }
-            if row["spoiler_tag"] and row["spoiler_tag"] not in active_spoiler_tags:
-                source["excluded_reason"] = "spoiler_not_active"
-                excluded.append(self._without_content(source))
-                continue
-            score = len(query_tokens & tokenize(f"{row['title']} {row['text']} {row['scene_key'] or ''}"))
-            if score == 0:
-                source["excluded_reason"] = "not_relevant"
-                excluded.append(self._without_content(source))
-                continue
-            source["score"] = score
-            ranked.append(source)
-        ranked.sort(key=lambda item: item["score"], reverse=True)
-        included.extend(ranked[:4])
-        for source in ranked[4:]:
-            source["excluded_reason"] = "module_chunk_limit"
-            excluded.append(self._without_content(source))
-
     def _fit_budget(
         self,
         player_action: str,
@@ -376,6 +383,10 @@ class ContextBuilder:
             + estimate_tokens(output_instructions)
             + 200
         )
+        if reserved > self.max_context_tokens:
+            raise ValueError(
+                "Player action and fixed prompt exceed the configured context budget"
+            )
         used = reserved
         selected: list[dict] = []
         excluded: list[dict] = []
@@ -387,7 +398,8 @@ class ContextBuilder:
         ]
         for source in required_sources:
             cost = estimate_tokens(
-                f"{source['kind']} {source['id']} {source['label']} {source['content']}"
+                f"{source['kind']} {source['id']} {source['label']} "
+                f"{source['content']}"
             ) + 8
             if used + cost > self.max_context_tokens:
                 raise ValueError(
@@ -397,7 +409,8 @@ class ContextBuilder:
             used += cost
         for source in optional_sources:
             cost = estimate_tokens(
-                f"{source['kind']} {source['id']} {source['label']} {source['content']}"
+                f"{source['kind']} {source['id']} {source['label']} "
+                f"{source['content']}"
             ) + 8
             if used + cost > self.max_context_tokens:
                 rejected = dict(source)

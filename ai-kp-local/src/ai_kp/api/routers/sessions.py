@@ -57,7 +57,6 @@ def join_campaign_session(
     return SessionService(repo).join(
         payload.join_code,
         display_name=payload.display_name,
-        pc_id=payload.pc_id,
     )
 
 
@@ -126,7 +125,13 @@ def assign_session_member_pc(
 ) -> dict:
     if identity.session_id != session_id or identity.role != "kp":
         raise HTTPException(status_code=403, detail="KP access required for this session")
-    return SessionService(repo).assign_member_pc(session_id, member_id, payload.pc_id)
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Direct PC assignment was removed. The player must submit an investigator, "
+            "the KP must approve it, then use assign-investigator."
+        ),
+    )
 
 
 @router.post("/sessions/{session_id}/rotate-join-code")
@@ -169,7 +174,6 @@ def create_session_seat(
         session_id,
         label=payload.label,
         kp_member_id=identity.member_id,
-        pc_id=payload.pc_id,
     )
 
 
@@ -214,7 +218,13 @@ def assign_session_seat_pc(
     repo: Repository = Depends(get_repo),
 ) -> dict:
     _require_session_kp(identity, session_id)
-    return SessionService(repo).assign_seat_pc(session_id, seat_id, payload.pc_id)
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Direct seat PC assignment was removed. Bind an approved investigator "
+            "to the claimed player member instead."
+        ),
+    )
 
 
 @router.post("/session-seats/claim")

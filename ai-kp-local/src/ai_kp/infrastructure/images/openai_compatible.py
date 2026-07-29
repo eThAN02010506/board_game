@@ -8,6 +8,7 @@ import json
 
 import httpx
 
+from ai_kp.infrastructure.http_limits import request_bounded_bytes
 from ai_kp.infrastructure.images.storage import MAX_IMAGE_BYTES, inspect_raster_image
 from ai_kp.platform.ports.images import MapImageRequest, MapImageResult
 
@@ -98,24 +99,13 @@ class OpenAICompatibleImageProvider:
         payload: dict,
         headers: dict[str, str],
     ) -> tuple[bytes, int]:
-        body = bytearray()
-        async with client.stream(
+        return await request_bounded_bytes(
+            client,
             "POST",
             f"{self.base_url}/images/generations",
+            max_bytes=self.max_response_bytes,
+            limit_error="图片模型响应超过 48 MiB 上限",
             json=payload,
             headers=headers,
             timeout=self.timeout_seconds,
-        ) as response:
-            content_length = response.headers.get("content-length")
-            if content_length:
-                try:
-                    declared_size = int(content_length)
-                except ValueError:
-                    declared_size = 0
-                if declared_size > self.max_response_bytes:
-                    raise RuntimeError("图片模型响应超过 48 MiB 上限")
-            async for chunk in response.aiter_bytes():
-                body.extend(chunk)
-                if len(body) > self.max_response_bytes:
-                    raise RuntimeError("图片模型响应超过 48 MiB 上限")
-            return bytes(body), response.status_code
+        )

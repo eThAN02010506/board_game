@@ -84,7 +84,7 @@ AI KP 应能补全符合时代与地点的公共设施、普通 NPC、反应性�
 
 ### A. 模组知识候选
 
-从 PDF/DOCX 的文本、表格和图片中抽取带来源的 Canon、Anchor、实体与关系候选，KP
+从 PDF/DOC/DOCX 的文本、表格和图片中抽取带来源的 Canon、Anchor、实体与关系候选，KP
 审核后保存。先实现人工修正和版本化，不自动运行剧情。
 
 当前已完成这一阶段的确定性基础：
@@ -126,7 +126,8 @@ AI KP 应能补全符合时代与地点的公共设施、普通 NPC、反应性�
 ## 设计依据
 
 - [Unstructured Partitioning](https://docs.unstructured.io/open-source/core-functionality/partitioning)
-  区分 PDF/DOCX 文档元素，并支持 PDF OCR、布局和图片块提取。
+  区分 PDF/DOCX 文档元素，并支持 PDF OCR、布局和图片块提取；旧 DOC 会先在隔离
+  进程内转换为 DOCX，再进入同一抽取边界。
 - [Unstructured Chunking](https://docs.unstructured.io/open-source/core-functionality/chunking)
   说明按标题保持章节边界，并保留 chunk 对原始元素、页码、坐标和图片的引用。
 - [Microsoft GraphRAG indexing](https://microsoft.github.io/graphrag/index/overview/)

@@ -26,12 +26,10 @@ class SessionService:
         join_code: str,
         *,
         display_name: str,
-        pc_id: str | None = None,
     ) -> dict:
         return self.repo.join_campaign_session(
             join_code,
             display_name=display_name,
-            pc_id=pc_id,
         )
 
     def recover_kp(self, campaign_id: str, *, display_name: str) -> dict:
@@ -55,11 +53,6 @@ class SessionService:
         rotated = self.repo.rotate_session_join_code(session_id)
         return {"member": member, "join_code": rotated["join_code"]}
 
-    def assign_member_pc(self, session_id: str, member_id: str, pc_id: str) -> dict:
-        member = self.repo.assign_member_pc(session_id, member_id, pc_id)
-        self.repo.sync_member_seat_pc(member_id, pc_id)
-        return member
-
     def rotate_join_code(self, session_id: str) -> dict:
         return self.repo.rotate_session_join_code(session_id)
 
@@ -72,13 +65,11 @@ class SessionService:
         *,
         label: str,
         kp_member_id: str,
-        pc_id: str | None = None,
     ) -> dict:
         return self.repo.create_session_seat(
             session_id,
             label=label,
             created_by_member_id=kp_member_id,
-            pc_id=pc_id,
         )
 
     def claim_seat(
@@ -116,11 +107,3 @@ class SessionService:
 
     def revoke_seat(self, session_id: str, seat_id: str) -> dict:
         return self.repo.revoke_session_seat(session_id, seat_id)
-
-    def assign_seat_pc(
-        self,
-        session_id: str,
-        seat_id: str,
-        pc_id: str | None,
-    ) -> dict:
-        return self.repo.assign_session_seat_pc(session_id, seat_id, pc_id)

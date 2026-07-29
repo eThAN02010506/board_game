@@ -282,6 +282,7 @@ class InvestigatorRepository(SQLiteRepository):
         member_id: str,
         session_id: str,
     ) -> dict:
+        self.begin_immediate()
         investigator = self.get_investigator(investigator_id, owner_profile_id)
         revision = self.get_investigator_revision(revision_id)
         if revision["investigator_id"] != investigator_id:
@@ -297,10 +298,34 @@ class InvestigatorRepository(SQLiteRepository):
         linked_profile = member.get("player_profile_id")
         if linked_profile is not None and linked_profile != owner_profile_id:
             raise ValueError("This session seat is linked to another player profile")
-        self.connection.execute(
-            "UPDATE session_members SET player_profile_id = ? WHERE id = ?",
-            (owner_profile_id, member_id),
+        duplicate_profile = self.connection.execute(
+            """
+            SELECT id FROM session_members
+            WHERE session_id = ? AND role = 'player' AND revoked_at IS NULL
+              AND player_profile_id = ? AND id != ?
+            """,
+            (session_id, owner_profile_id, member_id),
+        ).fetchone()
+        if duplicate_profile is not None:
+            raise ValueError("This player profile already owns an active session member")
+        linked = self.connection.execute(
+            """
+            UPDATE session_members
+            SET player_profile_id = ?
+            WHERE id = ? AND session_id = ? AND campaign_id = ?
+              AND role = 'player' AND revoked_at IS NULL
+              AND (player_profile_id IS NULL OR player_profile_id = ?)
+            """,
+            (
+                owner_profile_id,
+                member_id,
+                session_id,
+                campaign_id,
+                owner_profile_id,
+            ),
         )
+        if linked.rowcount != 1:
+            raise ValueError("Session member changed while submitting; refresh and retry")
         self.connection.execute(
             """
             INSERT INTO campaign_investigators
@@ -442,14 +467,15 @@ class InvestigatorRepository(SQLiteRepository):
         kp_member_id: str,
         session_id: str,
     ) -> dict:
-        record = self.get_campaign_investigator(campaign_id, investigator_id)
-        if record["status"] != "submitted" or not record["submitted_revision_id"]:
-            raise ValueError("Only a submitted investigator revision can be reviewed")
         if action not in {"approved", "changes_requested"}:
             raise ValueError("Unsupported investigator review action")
         normalized_comment = (comment or "").strip()
         if action == "changes_requested" and not normalized_comment:
             raise ValueError("A change request must include a player-visible comment")
+        self.begin_immediate()
+        record = self.get_campaign_investigator(campaign_id, investigator_id)
+        if record["status"] != "submitted" or not record["submitted_revision_id"]:
+            raise ValueError("Only a submitted investigator revision can be reviewed")
         revision_id = str(record["submitted_revision_id"])
         legacy_pc_id = record.get("legacy_pc_id")
         if action == "approved":
@@ -508,13 +534,14 @@ class InvestigatorRepository(SQLiteRepository):
                     campaign_id,
                 ),
             )
-            self.connection.execute(
+            reviewed = self.connection.execute(
                 """
                 UPDATE campaign_investigators
                 SET approved_revision_id = ?, legacy_pc_id = ?, status = 'approved',
                     review_comment = ?, reviewed_by_member_id = ?,
                     reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                 WHERE campaign_id = ? AND investigator_id = ?
+                  AND status = 'submitted' AND submitted_revision_id = ?
                 """,
                 (
                     revision_id,
@@ -523,19 +550,29 @@ class InvestigatorRepository(SQLiteRepository):
                     kp_member_id,
                     campaign_id,
                     investigator_id,
+                    revision_id,
                 ),
             )
         else:
-            self.connection.execute(
+            reviewed = self.connection.execute(
                 """
                 UPDATE campaign_investigators
                 SET status = 'changes_requested', review_comment = ?,
                     reviewed_by_member_id = ?, reviewed_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE campaign_id = ? AND investigator_id = ?
+                  AND status = 'submitted' AND submitted_revision_id = ?
                 """,
-                (normalized_comment, kp_member_id, campaign_id, investigator_id),
+                (
+                    normalized_comment,
+                    kp_member_id,
+                    campaign_id,
+                    investigator_id,
+                    revision_id,
+                ),
             )
+        if reviewed.rowcount != 1:
+            raise ValueError("Submitted investigator revision changed; refresh and retry")
         self._append_character_review(
             campaign_id=campaign_id,
             investigator_id=investigator_id,
@@ -567,6 +604,7 @@ class InvestigatorRepository(SQLiteRepository):
     def assign_approved_investigator(
         self, *, session_id: str, member_id: str, investigator_id: str
     ) -> dict:
+        self.begin_immediate()
         member = self.get_session_member(member_id)
         if (
             member["session_id"] != session_id
@@ -577,10 +615,11 @@ class InvestigatorRepository(SQLiteRepository):
         record = self.get_campaign_investigator(member["campaign_id"], investigator_id)
         if not record.get("approved_revision_id") or not record.get("legacy_pc_id"):
             raise ValueError("Only an approved investigator can be bound to a player")
-        if (
-            member.get("player_profile_id") is not None
-            and member["player_profile_id"] != record["owner_profile_id"]
-        ):
+        if member.get("player_profile_id") is None:
+            raise ValueError(
+                "Target player must bind a stable player profile before investigator assignment"
+            )
+        if member["player_profile_id"] != record["owner_profile_id"]:
             raise ValueError("Investigator belongs to another player profile")
         assigned = self.connection.execute(
             """
@@ -591,11 +630,39 @@ class InvestigatorRepository(SQLiteRepository):
         ).fetchone()
         if assigned is not None:
             raise ValueError("Investigator is already controlled by another active member")
+        reserved = self.connection.execute(
+            """
+            SELECT id FROM session_seats
+            WHERE session_id = ? AND assigned_pc_id = ? AND status != 'revoked'
+              AND (claimed_member_id IS NULL OR claimed_member_id != ?)
+            """,
+            (session_id, record["legacy_pc_id"], member_id),
+        ).fetchone()
+        if reserved is not None:
+            raise ValueError("Investigator is already reserved for another active seat")
+        updated = self.connection.execute(
+            """
+            UPDATE session_members
+            SET pc_id = ?
+            WHERE id = ? AND session_id = ? AND role = 'player'
+              AND revoked_at IS NULL AND player_profile_id = ?
+            """,
+            (
+                record["legacy_pc_id"],
+                member_id,
+                session_id,
+                record["owner_profile_id"],
+            ),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("Target player changed while assigning; refresh and retry")
         self.connection.execute(
             """
-            UPDATE session_members SET pc_id = ?, player_profile_id = ? WHERE id = ?
+            UPDATE session_seats
+            SET assigned_pc_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE claimed_member_id = ? AND status = 'claimed'
             """,
-            (record["legacy_pc_id"], record["owner_profile_id"], member_id),
+            (record["legacy_pc_id"], member_id),
         )
         self.append_realtime_event(
             session_id=session_id,

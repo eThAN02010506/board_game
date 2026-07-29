@@ -5,6 +5,7 @@ import {
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   credentialBridge,
+  isApiError,
   requestJson,
   requestJsonWithAccessToken
 } from "../api/client";
@@ -127,6 +128,10 @@ export default function App() {
     loading: capabilitiesLoading,
     refresh: refreshCapabilities
   } = useCapabilities();
+
+  useEffect(() => {
+    document.title = `${currentPage.label} · AI KP Local`;
+  }, [currentPage.label]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [activeCampaign, setActiveCampaign] = useState<Campaign | null>(null);
   const [maps, setMaps] = useState<SavedMap[]>([]);
@@ -155,6 +160,7 @@ export default function App() {
   const campaignSelectionVersion = useRef(0);
   const campaignListRequestVersion = useRef(0);
   const mapRequestVersion = useRef(0);
+  const logRequestVersion = useRef(0);
   const pendingRequestCount = useRef(0);
 
   const [campaignTitle, setCampaignTitle] = useState("雾港 1928");
@@ -170,11 +176,7 @@ export default function App() {
   const [joinCodeInput, setJoinCodeInput] = useState("");
   const [seatInvitationInput, setSeatInvitationInput] = useState("");
   const [seatLabel, setSeatLabel] = useState("玩家席位 1");
-  const [seatPcId, setSeatPcId] = useState("");
   const [playerDisplayName, setPlayerDisplayName] = useState("玩家");
-  const [joinPcId, setJoinPcId] = useState("");
-  const [pcName, setPcName] = useState("林若川");
-  const [memberPcDrafts, setMemberPcDrafts] = useState<Record<string, string>>({});
 
   const selectedToken = useMemo(
     () => activeMap?.tokens?.find((token) => token.id === selectedTokenId) ?? null,
@@ -194,16 +196,62 @@ export default function App() {
     [activeProposalId, proposals]
   );
 
-  async function run<T>(label: string, action: () => Promise<T>): Promise<T | undefined> {
+  type RequestScope = {
+    campaignSelection: number;
+    campaignId: string;
+    sessionId: string;
+    credentials: ReturnType<typeof credentialBridge.snapshot>;
+  };
+
+  function captureRequestScope(): RequestScope {
+    return {
+      campaignSelection: campaignSelectionVersion.current,
+      campaignId: activeCampaignIdRef.current,
+      sessionId: activeSessionIdRef.current,
+      credentials: credentialBridge.snapshot()
+    };
+  }
+
+  function isCurrentRequestScope(scope: RequestScope): boolean {
+    const current = credentialBridge.snapshot();
+    return (
+      scope.campaignSelection === campaignSelectionVersion.current &&
+      scope.campaignId === activeCampaignIdRef.current &&
+      scope.sessionId === activeSessionIdRef.current &&
+      scope.credentials.accessToken === current.accessToken &&
+      scope.credentials.adminToken === current.adminToken &&
+      scope.credentials.role === current.role &&
+      scope.credentials.pcId === current.pcId &&
+      scope.credentials.playerToken === current.playerToken
+    );
+  }
+
+  function showLog(message: string) {
+    logRequestVersion.current += 1;
+    setLog(message);
+  }
+
+  async function run<T>(
+    label: string,
+    action: () => Promise<T>,
+    onError?: (error: unknown) => void
+  ): Promise<T | undefined> {
+    const scope = captureRequestScope();
+    const logRequest = ++logRequestVersion.current;
     pendingRequestCount.current += 1;
     setLoading(true);
     setLog(`${label}...`);
     try {
       const result = await action();
-      setLog(stringifyForLog(result));
+      if (!isCurrentRequestScope(scope)) return undefined;
+      if (logRequestVersion.current === logRequest) setLog(stringifyForLog(result));
       return result;
     } catch (error) {
-      setLog(error instanceof Error ? error.message : String(error));
+      if (!isCurrentRequestScope(scope)) return undefined;
+      onError?.(error);
+      if (logRequestVersion.current === logRequest) {
+        setLog(error instanceof Error ? error.message : String(error));
+      }
       return undefined;
     } finally {
       pendingRequestCount.current = Math.max(0, pendingRequestCount.current - 1);
@@ -217,10 +265,12 @@ export default function App() {
     silent = false
   ): Promise<T | undefined> {
     if (!silent) return run(label, action);
+    const scope = captureRequestScope();
     try {
-      return await action();
+      const result = await action();
+      return isCurrentRequestScope(scope) ? result : undefined;
     } catch {
-      reportRealtimeRefreshFailure(label);
+      if (isCurrentRequestScope(scope)) reportRealtimeRefreshFailure(label);
       return undefined;
     }
   }
@@ -232,7 +282,7 @@ export default function App() {
 
   function applyAdminToken() {
     const nextToken = persistAdminToken();
-    setLog(nextToken ? "管理员口令已仅保存在当前浏览器会话。" : "管理员口令已清除。");
+    showLog(nextToken ? "管理员口令已仅保存在当前浏览器会话。" : "管理员口令已清除。");
   }
 
   function navigateWorkspace(id: typeof activeNav) {
@@ -263,10 +313,16 @@ export default function App() {
     setVisibleSeatInvites({});
     setPcs([]);
     setTokenActorId("");
-    setMemberPcDrafts({});
     setPlayerActions([]);
     setSelectedPlayerActionId("");
     setVisibleJoinCode("");
+    setPlayerAction("");
+    setProposalText("");
+    showLog(
+      campaign
+        ? `已切换到《${campaign.title}》，正在读取当前身份可见的数据。`
+        : "尚未选择团。"
+    );
     resetRealtime();
   }
 
@@ -314,20 +370,53 @@ export default function App() {
     const storedToken = readCampaignToken(campaign.id);
     if (!storedToken) return;
     credentialBridge.session(storedToken);
-    const identity = await run("恢复团会话", () => requestJson<AuthIdentity>("/auth/me"));
+    let identityError: unknown;
+    const identity = await run(
+      "恢复团会话",
+      () => requestJson<AuthIdentity>("/auth/me"),
+      (error) => {
+        identityError = error;
+      }
+    );
     if (
+      !identity &&
+      activeCampaignIdRef.current === campaign.id &&
+      campaignSelectionVersion.current === version &&
+      isApiError(identityError, 401)
+    ) {
+      removeCampaignToken(campaign.id);
+      credentialBridge.session("");
+      return;
+    }
+    if (
+      !identity ||
       activeCampaignIdRef.current !== campaign.id ||
       campaignSelectionVersion.current !== version
     ) return;
-    if (!identity || identity.campaign_id !== campaign.id) {
+    if (identity.campaign_id !== campaign.id) {
       removeCampaignToken(campaign.id);
       credentialBridge.session("");
       return;
     }
     credentialBridge.session(storedToken, identity.role, identity.pc_id);
-    const session = await run("读取会话", () =>
-      requestJson<SessionInfo>(`/sessions/${identity.session_id}`)
+    let sessionError: unknown;
+    const session = await run(
+      "读取会话",
+      () => requestJson<SessionInfo>(`/sessions/${identity.session_id}`),
+      (error) => {
+        sessionError = error;
+      }
     );
+    if (
+      !session &&
+      activeCampaignIdRef.current === campaign.id &&
+      campaignSelectionVersion.current === version &&
+      isApiError(sessionError, 401)
+    ) {
+      removeCampaignToken(campaign.id);
+      credentialBridge.session("");
+      return;
+    }
     if (
       !session ||
       activeCampaignIdRef.current !== campaign.id ||
@@ -374,7 +463,7 @@ export default function App() {
 
   async function startCampaignSession(campaign = activeCampaign) {
     if (!campaign) {
-      setLog("请先创建或选择一个团。");
+      showLog("请先创建或选择一个团。");
       return;
     }
     const version = campaignSelectionVersion.current;
@@ -394,7 +483,7 @@ export default function App() {
 
   async function recoverCampaignKp(campaign = activeCampaign) {
     if (!campaign) {
-      setLog("请先选择需要恢复 KP 的团。");
+      showLog("请先选择需要恢复 KP 的团。");
       return;
     }
     const version = campaignSelectionVersion.current;
@@ -420,8 +509,7 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({
           join_code: joinCodeInput,
-          display_name: playerDisplayName,
-          pc_id: joinPcId.trim() || null
+          display_name: playerDisplayName
         })
       })
     );
@@ -479,7 +567,7 @@ export default function App() {
         `/sessions/${sessionId}/seats`,
         {
           method: "POST",
-          body: JSON.stringify({ label: seatLabel, pc_id: seatPcId || null })
+          body: JSON.stringify({ label: seatLabel })
         }
       )
     );
@@ -489,7 +577,6 @@ export default function App() {
         [result.seat.id]: result.invitation_code
       }));
       setSeatLabel(`玩家席位 ${sessionSeats.length + 2}`);
-      setSeatPcId("");
       void loadSessionSeats(sessionId);
     }
   }
@@ -528,25 +615,9 @@ export default function App() {
     }
   }
 
-  async function assignSessionSeatPc(seatId: string, pcId: string) {
-    if (!activeSession || credentialBridge.snapshot().role !== "kp") return;
-    const sessionId = activeSession.id;
-    const result = await run("更新席位角色", () =>
-      requestJson<SessionSeat>(`/sessions/${sessionId}/seats/${seatId}/pc`, {
-        method: "PATCH",
-        body: JSON.stringify({ pc_id: pcId || null })
-      })
-    );
-    if (result && activeSessionIdRef.current === sessionId) {
-      void loadSessionSeats(sessionId);
-      void loadSessionMembers(sessionId);
-      void loadPcs(activeCampaign);
-    }
-  }
-
   async function recoverSessionSeat(seatId: string) {
     if (!credentialBridge.snapshot().playerToken) {
-      setLog("当前浏览器没有可恢复的长期玩家身份。");
+      showLog("当前浏览器没有可恢复的长期玩家身份。");
       return;
     }
     credentialBridge.session("");
@@ -579,39 +650,6 @@ export default function App() {
     }
   }
 
-  async function createPc(event: FormEvent) {
-    event.preventDefault();
-    if (!activeCampaign || credentialBridge.snapshot().role !== "kp") return;
-    const campaignId = activeCampaign.id;
-    const pc = await run("创建玩家角色", () =>
-      requestJson<PlayerCharacter>(`/campaigns/${campaignId}/pcs`, {
-        method: "POST",
-        body: JSON.stringify({ name: pcName, sheet: {} })
-      })
-    );
-    if (pc && activeCampaignIdRef.current === campaignId) {
-      setPcs((items) => [...items, pc]);
-      setTokenActorId(pc.id);
-      setTokenLabel(pc.name);
-    }
-  }
-
-  async function assignMemberPc(memberId: string) {
-    if (!activeSession || credentialBridge.snapshot().role !== "kp") return;
-    const pcId = memberPcDrafts[memberId];
-    if (!pcId) {
-      setLog("请先为该玩家选择一张角色卡。");
-      return;
-    }
-    const member = await run("绑定玩家角色", () =>
-      requestJson<SessionMember>(`/sessions/${activeSession.id}/members/${memberId}/assign-pc`, {
-        method: "POST",
-        body: JSON.stringify({ pc_id: pcId })
-      })
-    );
-    if (member) void loadSessionMembers(activeSession.id);
-  }
-
   async function loadPlayerActions(campaign = activeCampaign, silent = false) {
     if (!campaign || credentialBridge.snapshot().role !== "kp") return;
     const actions = await perform(
@@ -631,7 +669,7 @@ export default function App() {
 
   async function submitPlayerAction() {
     if (!activeCampaign || credentialBridge.snapshot().role !== "player") {
-      setLog("只有已加入团会话的玩家可以提交行动。");
+      showLog("只有已加入团会话的玩家可以提交行动。");
       return;
     }
     await run("提交玩家行动", () =>
@@ -730,7 +768,7 @@ export default function App() {
 
   async function generateCheckConsequence(checkId: string) {
     if (!activeCampaign || credentialBridge.snapshot().role !== "kp") {
-      setLog("只有 KP 可以生成检定后果草稿。");
+      showLog("只有 KP 可以生成检定后果草稿。");
       return;
     }
     const campaignId = activeCampaign.id;
@@ -788,17 +826,25 @@ export default function App() {
     const listRequest = ++campaignListRequestVersion.current;
     const selectionVersion = campaignSelectionVersion.current;
     const storedTokens = listStoredCampaignTokens();
-    let result = await run("以本机管理员读取团列表", () =>
-      requestJsonWithAccessToken<Campaign[]>("/campaigns", "")
+    let result = await run(
+      "以本机管理员读取团列表",
+      () => requestJsonWithAccessToken<Campaign[]>("/campaigns", "")
     );
     if (campaignListRequestVersion.current !== listRequest) return;
     for (const stored of storedTokens) {
       if (result) break;
-      result = await run("以团会话读取团", () =>
-        requestJsonWithAccessToken<Campaign[]>("/campaigns", stored.token)
+      let storedTokenError: unknown;
+      result = await run(
+        "以团会话读取团",
+        () => requestJsonWithAccessToken<Campaign[]>("/campaigns", stored.token),
+        (error) => {
+          storedTokenError = error;
+        }
       );
       if (campaignListRequestVersion.current !== listRequest) return;
-      if (!result) removeCampaignToken(stored.campaignId);
+      if (!result && isApiError(storedTokenError, 401)) {
+        removeCampaignToken(stored.campaignId);
+      }
     }
     if (result) {
       setCampaigns(result);
@@ -867,7 +913,7 @@ export default function App() {
 
   async function generateMap(input: MapGenerationInput) {
     if (!activeCampaign || credentialBridge.snapshot().role !== "kp") {
-      setLog("请先以 KP 身份开启或恢复该团会话。");
+      showLog("请先以 KP 身份开启或恢复该团会话。");
       return;
     }
     const campaignId = activeCampaign.id;
@@ -891,7 +937,7 @@ export default function App() {
 
   async function generateMapBackground(seed: number | null) {
     if (!activeMap || credentialBridge.snapshot().role !== "kp") {
-      setLog("请先以 KP 身份打开一张地图。");
+      showLog("请先以 KP 身份打开一张地图。");
       return;
     }
     const mapId = activeMap.id;
@@ -992,7 +1038,7 @@ export default function App() {
       !activeMap ||
       activeMap.campaign_id !== activeCampaignIdRef.current
     ) {
-      setLog("请先以 KP 身份打开一张地图。");
+      showLog("请先以 KP 身份打开一张地图。");
       return;
     }
     const mapId = activeMap.id;
@@ -1021,7 +1067,7 @@ export default function App() {
   async function moveToken(event: FormEvent) {
     event.preventDefault();
     if (!selectedToken || !activeMap || selectedToken.map_id !== activeMap.id) {
-      setLog("请先选择一个棋子。");
+      showLog("请先选择一个棋子。");
       return;
     }
     const mapId = activeMap.id;
@@ -1048,7 +1094,7 @@ export default function App() {
   async function searchMemory() {
     const role = credentialBridge.snapshot().role;
     if (!activeCampaign || !role) {
-      setLog("请先加入或恢复团会话。");
+      showLog("请先加入或恢复团会话。");
       return;
     }
     const view = role === "player" ? "player" : "kp";
@@ -1077,7 +1123,7 @@ export default function App() {
   async function createProposal(event?: FormEvent) {
     event?.preventDefault();
     if (!activeCampaign || credentialBridge.snapshot().role !== "kp") {
-      setLog("只有 KP 可以创建草稿。");
+      showLog("只有 KP 可以创建草稿。");
       return;
     }
     const campaignId = activeCampaign.id;
@@ -1110,7 +1156,7 @@ export default function App() {
 
   async function generateAiProposal() {
     if (!activeCampaign || credentialBridge.snapshot().role !== "kp") {
-      setLog("只有 KP 可以调用 AI KP。");
+      showLog("只有 KP 可以调用 AI KP。");
       return;
     }
     const campaignId = activeCampaign.id;
@@ -1143,7 +1189,7 @@ export default function App() {
       !activeProposal ||
       activeProposal.status !== "draft"
     ) {
-      setLog("没有可审批草稿。");
+      showLog("没有可审批草稿。");
       return;
     }
     const proposalId = activeProposal.id;
@@ -1170,7 +1216,7 @@ export default function App() {
       !activeProposal ||
       activeProposal.status !== "draft"
     ) {
-      setLog("没有可拒绝草稿。");
+      showLog("没有可拒绝草稿。");
       return;
     }
     const proposalId = activeProposal.id;
@@ -1191,7 +1237,7 @@ export default function App() {
 
   async function inspectProposalContext() {
     if (credentialBridge.snapshot().role !== "kp" || !activeProposal) {
-      setLog("没有可检查的草稿。");
+      showLog("没有可检查的草稿。");
       return;
     }
     const proposalId = activeProposal.id;
@@ -1205,7 +1251,7 @@ export default function App() {
       (result !== null && result.proposal_id !== proposalId)
     ) return;
     setProposalContext(result);
-    if (result === null) setLog("这是手工草稿，没有 AI 上下文快照。");
+    if (result === null) showLog("这是手工草稿，没有 AI 上下文快照。");
   }
 
   async function refreshRealtimeMaps() {
@@ -1270,13 +1316,20 @@ export default function App() {
 
         {activeNav === "rules" && (
           <Suspense fallback={<section className="page-card">正在载入规则知识……</section>}>
-            <RulebookPage identity={authIdentity} />
+            <RulebookPage
+              identity={authIdentity}
+              key={`${authIdentity?.campaign_id ?? "none"}:${authIdentity?.member_id ?? "anonymous"}:${authIdentity?.role ?? "guest"}`}
+            />
           </Suspense>
         )}
 
         {activeNav === "modules" && (
           <Suspense fallback={<section className="page-card">正在载入 KP 本库……</section>}>
-            <ModuleLibraryPage campaign={activeCampaign} identity={authIdentity} />
+            <ModuleLibraryPage
+              campaign={activeCampaign}
+              identity={authIdentity}
+              key={`${activeCampaign?.id ?? "none"}:${authIdentity?.member_id ?? "anonymous"}`}
+            />
           </Suspense>
         )}
 
@@ -1306,34 +1359,23 @@ export default function App() {
             activeCampaignPresent={Boolean(activeCampaign)}
             identity={authIdentity}
             joinCodeInput={joinCodeInput}
-            joinPcId={joinPcId}
             kpDisplayName={kpDisplayName}
-            memberPcDrafts={memberPcDrafts}
             members={sessionMembers}
             seats={sessionSeats}
             recoverableSeats={recoverableSeats}
             visibleSeatInvites={visibleSeatInvites}
             seatInvitationInput={seatInvitationInput}
             seatLabel={seatLabel}
-            seatPcId={seatPcId}
-            onAssignMemberPc={(memberId) => void assignMemberPc(memberId)}
-            onAssignSeatPc={(seatId, pcId) => void assignSessionSeatPc(seatId, pcId)}
             onCloseSession={() => void closeSession()}
-            onCreatePc={createPc}
             onCreateSeat={createSessionSeat}
             onClaimSeat={claimSessionSeat}
             onJoinCodeInputChange={setJoinCodeInput}
-            onJoinPcIdChange={setJoinPcId}
             onJoinSession={joinSession}
             onKpDisplayNameChange={setKpDisplayName}
-            onMemberPcDraftChange={(memberId, pcId) =>
-              setMemberPcDrafts((drafts) => ({ ...drafts, [memberId]: pcId }))
-            }
-            onPcNameChange={setPcName}
             onPlayerDisplayNameChange={setPlayerDisplayName}
             onSeatInvitationInputChange={setSeatInvitationInput}
             onSeatLabelChange={setSeatLabel}
-            onSeatPcIdChange={setSeatPcId}
+            onOpenInvestigators={() => navigateWorkspace("investigators")}
             onRefreshIdentity={() => void refreshIdentity()}
             onRefreshMembers={() => void loadSessionMembers()}
             onRefreshSeats={() => void loadSessionSeats()}
@@ -1345,8 +1387,6 @@ export default function App() {
             onRotateJoinCode={() => void rotateJoinCode()}
             onRecoverKp={() => void recoverCampaignKp()}
             onStartSession={() => void startCampaignSession()}
-            pcName={pcName}
-            pcs={pcs}
             playerDisplayName={playerDisplayName}
             realtimeNote={realtimeNote}
             realtimeStatus={realtimeStatus}
@@ -1417,7 +1457,7 @@ export default function App() {
             <div className="panel-heading">
               <div><p className="eyebrow">当前调查员</p><h2>{activePc?.name ?? "尚未绑定角色"}</h2></div>
               <button className="ghost-button" onClick={() => setCharacterExpanded((value) => !value)} type="button">
-                {characterExpanded ? "收起" : "放大"}
+                {characterExpanded ? "收起" : "展开完整卡"}
               </button>
             </div>
             {activePc ? (

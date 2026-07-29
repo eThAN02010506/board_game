@@ -12,6 +12,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ai_kp.application.rulebook_service import RulebookService
 from ai_kp.core.db import connect, init_db
 from ai_kp.core.repository import Repository
+from ai_kp.infrastructure.document_process_sandbox import DocumentProcessPolicy
+from ai_kp.infrastructure.knowledge.minirag import MiniRagOriginalIndex
+from ai_kp.infrastructure.knowledge.rulebook_sandbox import (
+    extract_rulebook_pdf_isolated,
+)
 from ai_kp.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.rulebook.agent import RuleExtractionAgent
 from ai_kp.rulebook.validation import RuleValidator
@@ -22,7 +27,21 @@ async def run(args: argparse.Namespace) -> None:
     connection = connect(Path(args.db).expanduser())
     init_db(connection)
     repo = Repository(connection)
-    service = RulebookService(repo, index_root=Path(args.index_root).expanduser())
+    index_root = Path(args.index_root).expanduser()
+    service = RulebookService(
+        repo,
+        extractor=lambda data, filename: extract_rulebook_pdf_isolated(
+            data,
+            filename,
+            policy=DocumentProcessPolicy(),
+        ),
+        index_factory=lambda ruleset_id, source_id: MiniRagOriginalIndex(
+            index_root,
+            ruleset_id,
+            source_id,
+            384,
+        ),
+    )
     try:
         source = service.ingest_pdf(
             pdf_path.read_bytes(),

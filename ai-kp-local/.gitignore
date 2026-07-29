@@ -5,12 +5,11 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.vite/
 .env
-data/*.sqlite3
-data/*.sqlite3-*
-data/*.log
-data/rag/
-data/map-assets/
+# Runtime databases, logs, private module/map assets, RAG indexes, and backups.
+# Versioned test fixtures live under tests/fixtures instead.
+data/
 src/model/
 node_modules/
 .pnpm-store/

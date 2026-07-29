@@ -10,7 +10,7 @@ import {
   Sparkles,
   X
 } from "lucide-react";
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { requestBinary, requestBlob, requestJson } from "../../api/client";
 import type {
@@ -24,7 +24,9 @@ import type {
   ModuleRecord,
   ModuleSearchResult
 } from "../../api/types";
+import { statusLabel } from "../../ui/statusLabels";
 import { ModuleGraphWorkbench } from "./ModuleGraphWorkbench";
+import { ModuleRunPanel } from "./ModuleRunPanel";
 
 type Props = {
   campaign: Campaign | null;
@@ -84,7 +86,11 @@ function AssetPreview({
         {asset.visual_summary && <p><b>视觉摘要</b> {asset.visual_summary}</p>}
         {asset.analysis_error && <p className="module-analysis-error">{asset.analysis_error}</p>}
       </div>
-      <em>{asset.analysis_status === "pending_analysis" ? "等待 OCR / 视觉摘要" : asset.analysis_status}</em>
+      <em>
+        {asset.analysis_status === "pending_analysis"
+          ? "等待 OCR / 视觉摘要"
+          : statusLabel(asset.analysis_status)}
+      </em>
       <div className="module-asset-actions">
         <button disabled={busy} onClick={() => onAnalyze(asset.id, "tesseract")} type="button">
           本地 OCR
@@ -110,15 +116,49 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("选择当前团并以 KP 身份进入，即可导入 KP 本。");
   const [busy, setBusy] = useState(false);
+  const selectedModuleRef = useRef("");
+  const moduleScopeEpochRef = useRef(0);
+  const contentRequestEpochRef = useRef(0);
+  const searchRequestEpochRef = useRef(0);
+  const moduleOperationEpochRef = useRef(0);
 
   const canManage = Boolean(campaign && identity?.role === "kp" && identity.campaign_id === campaign.id);
   const selectedModule = modules.find((item) => item.id === selectedModuleId) ?? null;
   const hasActiveJob = jobs.some((job) => job.status === "queued" || job.status === "processing");
 
+  function clearModuleView(clearQuery = true) {
+    setChunks([]);
+    setAssets([]);
+    setCandidates([]);
+    setSearchResults([]);
+    if (clearQuery) setSearchText("");
+  }
+
+  function selectModule(moduleId: string) {
+    if (moduleId === selectedModuleRef.current) return;
+    selectedModuleRef.current = moduleId;
+    moduleScopeEpochRef.current += 1;
+    contentRequestEpochRef.current += 1;
+    searchRequestEpochRef.current += 1;
+    moduleOperationEpochRef.current += 1;
+    clearModuleView();
+    setBusy(false);
+    setSelectedModuleId(moduleId);
+  }
+
+  function isCurrentModule(moduleId: string, scopeEpoch: number) {
+    return (
+      selectedModuleRef.current === moduleId &&
+      moduleScopeEpochRef.current === scopeEpoch
+    );
+  }
+
   async function loadLibrary(silent = false) {
     if (!campaign || !canManage) {
       setJobs([]);
       setModules([]);
+      setCapabilities(null);
+      selectModule("");
       return;
     }
     if (!silent) setBusy(true);
@@ -133,9 +173,13 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
       setJobs(loadedJobs);
       setModules(loadedModules);
       setCapabilities(loadedCapabilities);
-      setSelectedModuleId((current) =>
-        loadedModules.some((item) => item.id === current) ? current : loadedModules[0]?.id ?? ""
-      );
+      const currentSelection = selectedModuleRef.current;
+      const nextSelection = loadedModules.some((item) => item.id === currentSelection)
+        ? currentSelection
+        : loadedModules[0]?.id ?? "";
+      if (nextSelection !== currentSelection) {
+        selectModule(nextSelection);
+      }
       if (!silent) {
         setMessage(
           loadedModules.length
@@ -162,30 +206,32 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
 
   useEffect(() => {
     if (!selectedModuleId || !canManage) {
-      setChunks([]);
-      setAssets([]);
-      setCandidates([]);
+      selectedModuleRef.current = selectedModuleId;
+      moduleScopeEpochRef.current += 1;
+      contentRequestEpochRef.current += 1;
+      searchRequestEpochRef.current += 1;
+      moduleOperationEpochRef.current += 1;
+      clearModuleView();
+      setBusy(false);
       return;
     }
-    let active = true;
-    void Promise.all([
-      requestJson<ModuleChunk[]>(`/modules/${selectedModuleId}/chunks?view=kp`),
-      requestJson<ModuleAsset[]>(`/modules/${selectedModuleId}/assets`),
-      requestJson<ModuleKnowledgeCandidate[]>(
-        `/modules/${selectedModuleId}/knowledge/candidates`
-      )
-    ])
-      .then(([loadedChunks, loadedAssets, loadedCandidates]) => {
-        if (!active) return;
-        setChunks(loadedChunks);
-        setAssets(loadedAssets);
-        setCandidates(loadedCandidates);
-      })
+    selectedModuleRef.current = selectedModuleId;
+    const scopeEpoch = ++moduleScopeEpochRef.current;
+    searchRequestEpochRef.current += 1;
+    clearModuleView();
+    void refreshModule(selectedModuleId, scopeEpoch)
       .catch((error) => {
-        if (active) setMessage(error instanceof Error ? error.message : String(error));
+        if (isCurrentModule(selectedModuleId, scopeEpoch)) {
+          setMessage(error instanceof Error ? error.message : String(error));
+        }
       });
     return () => {
-      active = false;
+      if (isCurrentModule(selectedModuleId, scopeEpoch)) {
+        moduleScopeEpochRef.current += 1;
+        contentRequestEpochRef.current += 1;
+        searchRequestEpochRef.current += 1;
+        moduleOperationEpochRef.current += 1;
+      }
     };
   }, [selectedModuleId, canManage]);
 
@@ -224,21 +270,33 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
     }
   }
 
-  async function refreshModule() {
-    if (!selectedModuleId) return;
+  async function refreshModule(moduleId: string, scopeEpoch: number) {
+    if (!moduleId || !isCurrentModule(moduleId, scopeEpoch)) return false;
+    const requestEpoch = ++contentRequestEpochRef.current;
     const [loadedChunks, loadedAssets, loadedCandidates] = await Promise.all([
-      requestJson<ModuleChunk[]>(`/modules/${selectedModuleId}/chunks?view=kp`),
-      requestJson<ModuleAsset[]>(`/modules/${selectedModuleId}/assets`),
+      requestJson<ModuleChunk[]>(`/modules/${moduleId}/chunks?view=kp`),
+      requestJson<ModuleAsset[]>(`/modules/${moduleId}/assets`),
       requestJson<ModuleKnowledgeCandidate[]>(
-        `/modules/${selectedModuleId}/knowledge/candidates`
+        `/modules/${moduleId}/knowledge/candidates`
       )
     ]);
+    if (
+      !isCurrentModule(moduleId, scopeEpoch) ||
+      requestEpoch !== contentRequestEpochRef.current
+    ) {
+      return false;
+    }
     setChunks(loadedChunks);
     setAssets(loadedAssets);
     setCandidates(loadedCandidates);
+    return true;
   }
 
   async function analyzeAsset(assetId: string, mode: "tesseract" | "vision") {
+    const moduleId = selectedModuleId;
+    const scopeEpoch = moduleScopeEpochRef.current;
+    if (!moduleId || !isCurrentModule(moduleId, scopeEpoch)) return;
+    const operationEpoch = ++moduleOperationEpochRef.current;
     setBusy(true);
     try {
       const language = capabilities?.tesseract.languages.includes("chi_sim")
@@ -248,29 +306,66 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
         method: "POST",
         body: JSON.stringify({ mode, language })
       });
+      if (
+        !isCurrentModule(moduleId, scopeEpoch) ||
+        operationEpoch !== moduleOperationEpochRef.current
+      ) return;
       setAssets((current) => current.map((item) => item.id === asset.id ? asset : item));
       setMessage(asset.analysis_status === "completed" ? "图片分析已保存。" : asset.analysis_error ?? "分析失败。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      if (
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setBusy(false);
+      if (
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setBusy(false);
+      }
     }
   }
 
   async function extractKnowledge() {
     if (!selectedModuleId) return;
+    const moduleId = selectedModuleId;
+    const scopeEpoch = moduleScopeEpochRef.current;
+    const operationEpoch = ++moduleOperationEpochRef.current;
     setBusy(true);
     try {
       const result = await requestJson<{ processed_count: number; accepted_count: number }>(
-        `/modules/${selectedModuleId}/knowledge/extract?limit=5`,
+        `/modules/${moduleId}/knowledge/extract?limit=5`,
         { method: "POST" }
       );
-      await refreshModule();
-      setMessage(`已处理 ${result.processed_count} 个文本块，生成 ${result.accepted_count} 条待审候选。`);
+      if (
+        !isCurrentModule(moduleId, scopeEpoch) ||
+        operationEpoch !== moduleOperationEpochRef.current
+      ) return;
+      const refreshed = await refreshModule(moduleId, scopeEpoch);
+      if (
+        refreshed &&
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setMessage(`已处理 ${result.processed_count} 个文本块，生成 ${result.accepted_count} 条待审候选。`);
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      if (
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setBusy(false);
+      if (
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setBusy(false);
+      }
     }
   }
 
@@ -278,30 +373,69 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
     candidateId: string,
     decision: "approved" | "rejected"
   ) {
+    const moduleId = selectedModuleId;
+    const scopeEpoch = moduleScopeEpochRef.current;
+    if (!moduleId || !isCurrentModule(moduleId, scopeEpoch)) return;
     const note = decision === "rejected" ? "KP 审核未通过" : null;
+    const operationEpoch = ++moduleOperationEpochRef.current;
     setBusy(true);
     try {
       await requestJson(`/module-knowledge/${candidateId}/review`, {
         method: "POST",
         body: JSON.stringify({ decision, note })
       });
-      await refreshModule();
-      setMessage(decision === "approved" ? "候选已批准并进入检索库。" : "候选已拒绝。");
+      if (
+        !isCurrentModule(moduleId, scopeEpoch) ||
+        operationEpoch !== moduleOperationEpochRef.current
+      ) return;
+      const refreshed = await refreshModule(moduleId, scopeEpoch);
+      if (
+        refreshed &&
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setMessage(decision === "approved" ? "候选已批准并进入检索库。" : "候选已拒绝。");
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      if (
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setBusy(false);
+      if (
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setBusy(false);
+      }
     }
   }
 
   async function searchModule() {
     if (!selectedModuleId || !searchText.trim()) return;
+    const moduleId = selectedModuleId;
+    const scopeEpoch = moduleScopeEpochRef.current;
+    const requestEpoch = ++searchRequestEpochRef.current;
+    setSearchResults([]);
     try {
-      setSearchResults(await requestJson<ModuleSearchResult[]>(
-        `/modules/${selectedModuleId}/search?q=${encodeURIComponent(searchText.trim())}`
-      ));
+      const loadedResults = await requestJson<ModuleSearchResult[]>(
+        `/modules/${moduleId}/search?q=${encodeURIComponent(searchText.trim())}`
+      );
+      if (
+        isCurrentModule(moduleId, scopeEpoch) &&
+        requestEpoch === searchRequestEpochRef.current
+      ) {
+        setSearchResults(loadedResults);
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      if (
+        isCurrentModule(moduleId, scopeEpoch) &&
+        requestEpoch === searchRequestEpochRef.current
+      ) {
+        setMessage(error instanceof Error ? error.message : String(error));
+      }
     }
   }
 
@@ -311,10 +445,13 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
   ) {
     event.preventDefault();
     if (!selectedModuleId) return;
+    const moduleId = selectedModuleId;
+    const scopeEpoch = moduleScopeEpochRef.current;
     const data = new FormData(event.currentTarget);
+    const operationEpoch = ++moduleOperationEpochRef.current;
     setBusy(true);
     try {
-      await requestJson(`/modules/${selectedModuleId}/sections`, {
+      await requestJson(`/modules/${moduleId}/sections`, {
         method: "PATCH",
         body: JSON.stringify({
           title: heading,
@@ -322,12 +459,32 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
           spoiler_tag: data.get("spoiler_tag") || null
         })
       });
-      await refreshModule();
-      setMessage(`已更新章节“${heading}”的可见范围。`);
+      if (
+        !isCurrentModule(moduleId, scopeEpoch) ||
+        operationEpoch !== moduleOperationEpochRef.current
+      ) return;
+      const refreshed = await refreshModule(moduleId, scopeEpoch);
+      if (
+        refreshed &&
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setMessage(`已更新章节“${heading}”的可见范围。`);
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      if (
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setBusy(false);
+      if (
+        isCurrentModule(moduleId, scopeEpoch) &&
+        operationEpoch === moduleOperationEpochRef.current
+      ) {
+        setBusy(false);
+      }
     }
   }
 
@@ -343,6 +500,13 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
 
   return (
     <div className="module-library-page">
+      {canManage && campaign && (
+        <ModuleRunPanel
+          campaignId={campaign.id}
+          modules={modules}
+          selectedModuleId={selectedModuleId}
+        />
+      )}
       <section className="page-card module-import-card">
         <div className="page-intro">
           <div><p className="eyebrow">不可变来源版本</p><h2>导入 KP 本</h2></div>
@@ -358,14 +522,16 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
           />
         </label>
         <label className="file-drop">
-          选择 PDF 或 DOCX
+          选择 PDF、DOC 或 DOCX
           <input
-            accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
+            accept="application/pdf,.pdf,application/msword,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
             disabled={!canManage || busy}
             onChange={upload}
             type="file"
           />
-          <small>最多 64 MiB；旧式 .doc 请先另存为 .docx。图片默认仅 KP 可见。</small>
+          <small>
+            最多 64 MiB；旧式 .doc 会由本机 LibreOffice 在隔离进程中转换。图片默认仅 KP 可见。
+          </small>
         </label>
         {!canManage && (
           <p className="permission-hint">请先在“团与权限”页面选择团，并以该团 KP 身份进入。</p>
@@ -415,7 +581,7 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
             <button
               className={`record-button ${selectedModuleId === item.id ? "selected" : ""}`}
               key={item.id}
-              onClick={() => setSelectedModuleId(item.id)}
+              onClick={() => selectModule(item.id)}
               type="button"
             >
               <strong>{item.title}</strong>
@@ -530,7 +696,10 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
         <div className="module-candidate-list">
           {candidates.map((candidate) => (
             <article className={candidate.status} key={candidate.id}>
-              <div><strong>{candidate.title}</strong><em>{candidate.status}</em></div>
+              <div>
+                <strong>{candidate.title}</strong>
+                <em>{statusLabel(candidate.status)}</em>
+              </div>
               <p>{candidate.statement}</p>
               {candidate.citations.map((citation, index) => (
                 <blockquote key={`${candidate.id}-${index}`}>

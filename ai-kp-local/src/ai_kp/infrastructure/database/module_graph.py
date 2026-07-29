@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from collections import defaultdict, deque
+
 from ai_kp.core.ids import new_id
+from ai_kp.infrastructure.database.module_knowledge import (
+    get_current_module_candidate_scope,
+)
 from ai_kp.infrastructure.database.rows import row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 from ai_kp.platform.modules.graph import (
@@ -12,6 +17,9 @@ from ai_kp.platform.modules.graph import (
     ModuleRelationCreate,
     normalize_entity_name,
 )
+from ai_kp.platform.modules.knowledge import validate_derived_scope
+
+_ALL_VISIBILITY = ("player", "table", "kp", "secret")
 
 
 class ModuleGraphRepository(SQLiteRepository):
@@ -55,15 +63,8 @@ class ModuleGraphRepository(SQLiteRepository):
         return row_to_dict(row)
 
     def list_module_entities(self, module_id: str) -> list[dict]:
-        rows = self.connection.execute(
-            """
-            SELECT * FROM module_entities
-            WHERE module_id = ?
-            ORDER BY entity_type, name, id
-            """,
-            (module_id,),
-        ).fetchall()
-        return [row_to_dict(row) for row in rows]
+        entities, _relations = self._current_module_graph(module_id)
+        return entities
 
     def create_module_relation(
         self,
@@ -113,7 +114,104 @@ class ModuleGraphRepository(SQLiteRepository):
         return row_to_dict(row)
 
     def list_module_relations(self, module_id: str) -> list[dict]:
-        rows = self.connection.execute(
+        _entities, relations = self._current_module_graph(module_id)
+        return relations
+
+    def module_graph_reachability(
+        self,
+        module_id: str,
+        entry_entity_ids: tuple[str, ...],
+    ) -> dict:
+        if not entry_entity_ids:
+            raise ValueError("At least one entry entity is required")
+        entities, relations = self._current_module_graph(module_id)
+        valid_entity_ids = {str(entity["id"]) for entity in entities}
+        reached_ids = {
+            entity_id for entity_id in entry_entity_ids if entity_id in valid_entity_ids
+        }
+        adjacency: dict[str, list[str]] = defaultdict(list)
+        for relation in relations:
+            if relation["predicate"] in TRAVERSABLE_PREDICATES:
+                adjacency[str(relation["source_entity_id"])].append(
+                    str(relation["target_entity_id"])
+                )
+        frontier = deque(reached_ids)
+        while frontier:
+            current = frontier.popleft()
+            for target_id in adjacency[current]:
+                if target_id in reached_ids:
+                    continue
+                reached_ids.add(target_id)
+                frontier.append(target_id)
+        anchors = [
+            {**entity, "reachable": entity["id"] in reached_ids}
+            for entity in entities
+            if entity["entity_type"] == "anchor"
+        ]
+        conflict_rows = [
+            relation
+            for relation in relations
+            if relation["predicate"] in CONFLICT_PREDICATES
+            and (
+                relation["source_entity_id"] in reached_ids
+                or relation["target_entity_id"] in reached_ids
+            )
+        ]
+        all_anchors_reachable = bool(anchors) and all(
+            anchor["reachable"] for anchor in anchors
+        )
+        return {
+            "module_id": module_id,
+            "entry_entity_ids": list(entry_entity_ids),
+            "invalid_entry_entity_ids": sorted(
+                set(entry_entity_ids).difference(valid_entity_ids)
+            ),
+            "reached_entity_ids": sorted(reached_ids),
+            "anchors": anchors,
+            "all_anchors_reachable": all_anchors_reachable,
+            "has_conflicts": bool(conflict_rows),
+            "safe": all_anchors_reachable and not conflict_rows,
+            "conflicts": conflict_rows,
+        }
+
+    def _current_module_graph(self, module_id: str) -> tuple[list[dict], list[dict]]:
+        """Build a read-time graph without deleting invalid provenance rows."""
+
+        candidate_scopes: dict[str, dict | None] = {}
+
+        def candidate_scope(candidate_id: str) -> dict | None:
+            if candidate_id not in candidate_scopes:
+                candidate_scopes[candidate_id] = get_current_module_candidate_scope(
+                    self.connection,
+                    candidate_id,
+                    module_id=module_id,
+                    allowed_visibility=_ALL_VISIBILITY,
+                    spoiler_tags=None,
+                )
+            return candidate_scopes[candidate_id]
+
+        entity_rows = self.connection.execute(
+            """
+            SELECT * FROM module_entities
+            WHERE module_id = ?
+            ORDER BY entity_type, name, id
+            """,
+            (module_id,),
+        ).fetchall()
+        entities: list[dict] = []
+        for row in entity_rows:
+            entity = row_to_dict(row)
+            scope = candidate_scope(str(entity["source_candidate_id"]))
+            if scope is None or not _derived_scope_is_current(
+                scope,
+                entity,
+                label="Entity",
+            ):
+                continue
+            entities.append(entity)
+
+        entities_by_id = {str(entity["id"]): entity for entity in entities}
+        relation_rows = self.connection.execute(
             """
             SELECT r.*, source.name AS source_name, target.name AS target_name
             FROM module_entity_relations r
@@ -124,81 +222,45 @@ class ModuleGraphRepository(SQLiteRepository):
             """,
             (module_id,),
         ).fetchall()
-        return [row_to_dict(row) for row in rows]
+        relations: list[dict] = []
+        for row in relation_rows:
+            relation = row_to_dict(row)
+            source_entity = entities_by_id.get(str(relation["source_entity_id"]))
+            target_entity = entities_by_id.get(str(relation["target_entity_id"]))
+            if source_entity is None or target_entity is None:
+                continue
+            scope = candidate_scope(str(relation["source_candidate_id"]))
+            if scope is None or not _derived_scope_is_current(
+                scope,
+                relation,
+                label="Relation source candidate",
+            ):
+                continue
+            if any(
+                not _derived_scope_is_current(
+                    {**endpoint, "spoiler_tag": None},
+                    relation,
+                    label=label,
+                )
+                for label, endpoint in (
+                    ("Relation source entity", source_entity),
+                    ("Relation target entity", target_entity),
+                )
+            ):
+                continue
+            relations.append(relation)
+        return entities, relations
 
-    def module_graph_reachability(
-        self,
-        module_id: str,
-        entry_entity_ids: tuple[str, ...],
-    ) -> dict:
-        if not entry_entity_ids:
-            raise ValueError("At least one entry entity is required")
-        placeholders = ",".join("?" for _ in entry_entity_ids)
-        predicate_placeholders = ",".join("?" for _ in TRAVERSABLE_PREDICATES)
-        reached_rows = self.connection.execute(
-            f"""
-            WITH RECURSIVE reachable(entity_id) AS (
-              SELECT id FROM module_entities
-              WHERE module_id = ? AND id IN ({placeholders})
-              UNION
-              SELECT r.target_entity_id
-              FROM module_entity_relations r
-              JOIN reachable current ON current.entity_id = r.source_entity_id
-              WHERE r.module_id = ?
-                AND r.predicate IN ({predicate_placeholders})
-            )
-            SELECT entity_id FROM reachable
-            """,
-            (
-                module_id,
-                *entry_entity_ids,
-                module_id,
-                *TRAVERSABLE_PREDICATES,
-            ),
-        ).fetchall()
-        reached_ids = {str(row["entity_id"]) for row in reached_rows}
-        entities = self.list_module_entities(module_id)
-        anchors = [
-            {**entity, "reachable": entity["id"] in reached_ids}
-            for entity in entities
-            if entity["entity_type"] == "anchor"
-        ]
-        conflict_placeholders = ",".join("?" for _ in CONFLICT_PREDICATES)
-        conflicts = []
-        if reached_ids:
-            reached_placeholders = ",".join("?" for _ in reached_ids)
-            conflicts = self.connection.execute(
-                f"""
-                SELECT r.*, source.name AS source_name, target.name AS target_name
-                FROM module_entity_relations r
-                JOIN module_entities source ON source.id = r.source_entity_id
-                JOIN module_entities target ON target.id = r.target_entity_id
-                WHERE r.module_id = ?
-                  AND r.predicate IN ({conflict_placeholders})
-                  AND (
-                    r.source_entity_id IN ({reached_placeholders})
-                    OR r.target_entity_id IN ({reached_placeholders})
-                  )
-                ORDER BY source.name, r.predicate, target.name
-                """,
-                (
-                    module_id,
-                    *CONFLICT_PREDICATES,
-                    *reached_ids,
-                    *reached_ids,
-                ),
-            ).fetchall()
-        conflict_rows = [row_to_dict(row) for row in conflicts]
-        all_anchors_reachable = bool(anchors) and all(
-            anchor["reachable"] for anchor in anchors
+
+def _derived_scope_is_current(source: dict, derived: dict, *, label: str) -> bool:
+    try:
+        validate_derived_scope(
+            source_visibility=str(source.get("visibility") or "kp"),
+            source_spoiler_tag=source.get("spoiler_tag"),
+            derived_visibility=str(derived.get("visibility") or "kp"),
+            derived_spoiler_tag=derived.get("spoiler_tag"),
+            label=label,
         )
-        return {
-            "module_id": module_id,
-            "entry_entity_ids": list(entry_entity_ids),
-            "reached_entity_ids": sorted(reached_ids),
-            "anchors": anchors,
-            "all_anchors_reachable": all_anchors_reachable,
-            "has_conflicts": bool(conflict_rows),
-            "safe": all_anchors_reachable and not conflict_rows,
-            "conflicts": conflict_rows,
-        }
+    except (KeyError, ValueError):
+        return False
+    return True

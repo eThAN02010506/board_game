@@ -4,8 +4,8 @@ The rulebook subsystem deliberately separates three responsibilities:
 
 1. `rule_chunks` stores immutable, page-addressable source text in SQLite. The same chunks are
    indexed in an isolated MiniRAG working directory for original-source retrieval.
-2. `rule_objects` stores versioned JSON candidates. A candidate is executable only when its
-   status is `validated`.
+2. `rule_objects` stores versioned JSON candidates. AI output can only become
+   `review_required` or `quarantined`; it cannot publish itself.
 3. `rulebook.engine` executes a closed declarative DSL. It never evaluates Python, JavaScript,
    formulas, or natural-language conditions.
 
@@ -28,6 +28,15 @@ character n-gram embedding function and writes NanoVectorDB files under
 `AI_KP_RULEBOOK_INDEX_ROOT`. The adapter calls MiniRAG's vector storage directly for retrieval so
 that `tiktoken` never downloads an OpenAI tokenizer at runtime.
 
+Uploaded PDF bytes are never decoded in the API process or its request thread. The request thread
+only waits for a fresh `spawn` child that verifies the source SHA-256, applies the existing
+`AI_KP_MODULE_PARSE_*` wall/CPU/address-space budgets, and writes a bounded JSON result manifest to
+a private temporary directory. Large chunks never cross a multiprocessing pipe. Per-page
+decompressed content is limited to 16 MiB and the complete book to 128 MiB; these checks execute
+inside the resource-limited child because `pypdf.get_data()` necessarily performs decompression
+before its output length is known. Timeout, abnormal exit, malformed manifest, hash mismatch and
+cleanup all fail closed before SQLite source creation.
+
 ## Storage
 
 - `rule_sources`: source identity, SHA-256, ruleset, page count, and lifecycle.
@@ -38,19 +47,57 @@ that `tiktoken` never downloads an OpenAI tokenizer at runtime.
 - `rule_validation_issues`: malformed agent output and failed validation audit records.
 - `rule_relations`: explicit cross-rule relations for later graph enrichment.
 
-## Three validation gates
+If the process exits after claiming a chunk but before recording an LLM result, application startup
+moves only `processing` chunks back to `pending`. Completed and failed audit states are preserved.
+Every claim atomically increments the chunk's durable `attempt_count`. After the external LLM call,
+the service takes a short SQLite writer transaction, verifies `processing + attempt_count`, writes
+rule objects and validation issues, and completes the chunk in that same transaction. A worker
+from before recovery therefore cannot publish results or failure audit records into a newer claim.
+Unexpected SQLite begin, write, or commit failures roll back partial results and best-effort move
+the still-current attempt to `failed`, so `retry_failed=true` works without another process
+restart. Startup also closes leftover `running` ingestion runs as interrupted; an interrupted
+MiniRAG index run moves its source out of `indexing`.
+
+Each source and ingestion stage has at most one service-created `running` run. Chunk claims
+atomically require both a pending chunk and their owning extraction run to remain `running`, while
+run completion is a `running -> completed` CAS. MiniRAG publication uses the same run transition
+inside its result transaction. Consequently, neither a stale successful worker nor its later
+failure handler can revive a recovered run, claim subsequent chunks, publish stale index IDs, or
+overwrite a replacement run's `ready` source with `failed`.
+
+## Validation and human promotion
 
 1. **Schema:** Pydantic validates the closed rule DSL. Unknown executable expressions cannot enter
    the engine.
-2. **Citation:** every citation must reference a chunk from the same source, use a page inside that
+2. **Source binding:** the candidate `ruleset_id` must equal the immutable ruleset identity of its
+   source.
+3. **Citation:** every citation must reference a chunk from the same source, use a page inside that
    chunk, and copy evidence present in the stored source after whitespace normalization.
-3. **Conflict:** a differing object with the same `rule_key` as an existing validated rule is
+4. **Conflict:** a differing object with the same `rule_key` as an existing validated rule is
    quarantined rather than silently replacing it.
 
-Candidates below `0.75` confidence or with a failed source check become `review_required`.
-Conflicts become `quarantined`. Only `validated` objects can be executed. Validation is per
-candidate: one truncated or malformed object does not discard valid siblings from the same model
-response.
+Passing these gates still produces `review_required`, regardless of model confidence. A local
+administrator who is also an authenticated KP must review the exact object hash and provide at
+least one deterministic golden case. The engine runs every case and compares canonical JSON with
+type preservation; only a full pass can promote an executable object to `validated`. Direct
+validated inserts are rejected, and legacy rows without bound human-review evidence fail closed in
+both search and execution.
+`reference_only` material remains available through original-source retrieval rather than being
+misrepresented as executable code.
+
+Review takes a short SQLite writer transaction and repeats source/conflict validation after it
+acquires the lock. The final update compares the original `review_required` status and object hash.
+`validated` and `quarantined` are terminal review states, so a delayed approve or reject cannot
+overwrite completed human evidence. A failed golden-case approval remains `review_required` and
+may be reviewed again with corrected cases.
+
+Raw source text follows a stricter boundary than derived rule objects. Imported Keeper and unknown
+PDFs always create `kp` chunks. Historical chunk rows may contain `all` or `player`, but those
+values came from extraction and are not reliable evidence of a human publication decision; runtime
+therefore treats every raw chunk as KP-only. A player may receive a derived rule object only when
+its exact object hash has a passing KP review and the stored object explicitly contains
+`audience: all` or `audience: player`. Missing audience fields fail closed for players. This avoids
+opening an entire mixed Keeper paragraph merely because one public rule cites a short excerpt.
 
 ## Runtime safety envelope
 
@@ -81,16 +128,24 @@ Upload a PDF as the raw request body and send its URL-encoded name in `X-File-Na
 idempotent by source hash and cannot downgrade a ready source. Failed chunks remain auditable and
 are retried only when `retry_failed=true` is explicit.
 
-Session members use:
+Rule maintenance additionally requires local-administrator access and an authenticated KP:
+
+```http
+GET  /rulebooks/sources/{source_id}/rules
+POST /rulebooks/rules/{rule_object_id}/review
+```
+
+Authenticated session members use:
 
 ```http
 POST /rules/query
 POST /rules/execute
 ```
 
-Queries report `retrieval_backend` as `minirag` or `lexical_fallback`. Player queries exclude
-KP-only chunks and objects; execution applies the same audience boundary even when a player knows
-the rule key.
+Queries report `retrieval_backend` as `minirag` or `lexical_fallback`. KP queries can retrieve raw
+page-addressable chunks. Player queries never return raw rulebook chunks; they return only
+human-reviewed rule objects with an explicit `all` or `player` audience. Execution applies the
+same fail-closed boundary even when a player knows the rule key.
 
 ## Real-case acceptance
 
@@ -109,4 +164,4 @@ chunks and retrieved pages 101-103 for a major-wound query. The configured GPT-O
 produced two structurally valid candidates whose evidence was not exact; both were correctly kept
 in `review_required`. A malformed third candidate was independently rejected. This is a safe
 failure, not a validated ruleset: full-book extraction must continue in resumable batches, and the
-validated count must be reviewed before gameplay relies on it.
+`review_required` candidates must be reviewed before gameplay relies on them.

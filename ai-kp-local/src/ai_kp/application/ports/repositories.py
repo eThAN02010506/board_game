@@ -96,6 +96,10 @@ class MapImageStore(Protocol):
 
 
 class ModuleKnowledgeStore(Protocol):
+    def begin_immediate(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
     def get_module_chunk(self, chunk_id: str) -> dict: ...
 
     def get_module_asset(self, asset_id: str) -> dict: ...
@@ -108,7 +112,22 @@ class ModuleKnowledgeStore(Protocol):
         limit: int = 5,
     ) -> list[dict]: ...
 
-    def mark_module_chunk_knowledge_status(self, chunk_id: str, status: str) -> None: ...
+    def claim_module_chunk_for_knowledge(self, chunk_id: str) -> int | None: ...
+
+    def module_chunk_knowledge_claim_is_current(
+        self,
+        chunk_id: str,
+        *,
+        expected_attempt: int,
+    ) -> bool: ...
+
+    def mark_module_chunk_knowledge_status(
+        self,
+        chunk_id: str,
+        status: str,
+        *,
+        expected_attempt: int,
+    ) -> bool: ...
 
     def reset_failed_module_chunks(self, module_id: str) -> int: ...
 
@@ -123,11 +142,29 @@ class ModuleKnowledgeStore(Protocol):
         prompt_version: str | None,
     ) -> dict: ...
 
+    def get_module_knowledge_candidate(self, candidate_id: str) -> dict: ...
+
+    def review_module_knowledge_candidate(
+        self,
+        candidate_id: str,
+        *,
+        decision: str,
+        member_id: str | None,
+        note: str | None,
+    ) -> dict: ...
+
     def commit(self) -> None: ...
 
 
 class ModuleGraphStore(Protocol):
     def get_module_knowledge_candidate(self, candidate_id: str) -> dict: ...
+
+    def module_candidate_sources_are_current(
+        self,
+        candidate_id: str,
+        *,
+        module_id: str,
+    ) -> bool: ...
 
     def create_module_entity(
         self,
@@ -151,6 +188,25 @@ class ModuleGraphStore(Protocol):
         self,
         module_id: str,
         entry_entity_ids: tuple[str, ...],
+    ) -> dict: ...
+
+
+class ModuleRunStore(Protocol):
+    def start_campaign_module_run(
+        self,
+        *,
+        campaign_id: str,
+        module_id: str,
+        current_scene_key: str | None,
+        active_spoiler_tags: list[str],
+        state: dict[str, Any],
+        started_by_member_id: str | None,
+    ) -> dict: ...
+
+    def update_campaign_module_run(
+        self,
+        run_id: str,
+        changes: dict[str, Any],
     ) -> dict: ...
 
 
@@ -332,7 +388,6 @@ class SessionStore(Protocol):
         join_code: str,
         *,
         display_name: str,
-        pc_id: str | None = None,
     ) -> dict: ...
 
     def reissue_campaign_kp_access_token(
@@ -352,10 +407,6 @@ class SessionStore(Protocol):
 
     def rotate_session_join_code(self, session_id: str) -> dict: ...
 
-    def assign_member_pc(self, session_id: str, member_id: str, pc_id: str) -> dict: ...
-
-    def sync_member_seat_pc(self, member_id: str, pc_id: str | None) -> None: ...
-
     def close_campaign_session(self, session_id: str) -> dict: ...
 
     def create_session_seat(
@@ -364,7 +415,6 @@ class SessionStore(Protocol):
         *,
         label: str,
         created_by_member_id: str,
-        pc_id: str | None = None,
     ) -> dict: ...
 
     def create_player_profile(self, display_name: str) -> dict: ...
@@ -384,14 +434,6 @@ class SessionStore(Protocol):
     def list_player_session_seats(self, player_profile_id: str) -> list[dict]: ...
 
     def reissue_seat_invitation(self, session_id: str, seat_id: str) -> dict: ...
-
-    def assign_session_seat_pc(
-        self,
-        session_id: str,
-        seat_id: str,
-        pc_id: str | None,
-    ) -> dict: ...
-
 
 class WorldStore(RealtimeOutbox, Protocol):
     def create_pc(self, campaign_id: str, name: str, sheet: dict | None = None) -> dict: ...
@@ -487,7 +529,11 @@ class WorldStore(RealtimeOutbox, Protocol):
 
 
 class RulebookStore(Protocol):
+    def begin_immediate(self) -> None: ...
+
     def commit(self) -> None: ...
+
+    def rollback(self) -> None: ...
 
     def create_rule_source(
         self,
@@ -515,7 +561,28 @@ class RulebookStore(Protocol):
         prompt_version: str | None = None,
     ) -> dict: ...
 
-    def update_ingestion_run(self, run_id: str, **changes: Any) -> dict: ...
+    def update_ingestion_run(
+        self,
+        run_id: str,
+        *,
+        expected_status: str | None = None,
+        **changes: Any,
+    ) -> dict: ...
+
+    def transition_ingestion_run(
+        self,
+        run_id: str,
+        *,
+        expected_status: str,
+        **changes: Any,
+    ) -> dict | None: ...
+
+    def ingestion_run_is_current(
+        self,
+        run_id: str,
+        *,
+        expected_status: str,
+    ) -> bool: ...
 
     def replace_rule_chunks(
         self,
@@ -533,13 +600,28 @@ class RulebookStore(Protocol):
 
     def get_rule_chunk(self, chunk_id: str) -> dict: ...
 
+    def claim_rule_chunk_for_extraction(
+        self,
+        chunk_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> int | None: ...
+
+    def rule_chunk_extraction_claim_is_current(
+        self,
+        chunk_id: str,
+        *,
+        expected_attempt: int,
+    ) -> bool: ...
+
     def mark_rule_chunk(
         self,
         chunk_id: str,
         *,
         extraction_status: str | None = None,
         minirag_doc_id: str | None = None,
-    ) -> None: ...
+        expected_attempt: int | None = None,
+    ) -> bool: ...
 
     def reset_failed_rule_chunks(self, source_id: str) -> int: ...
 
@@ -550,6 +632,18 @@ class RulebookStore(Protocol):
         *,
         status: str,
         validation: dict[str, Any],
+    ) -> dict: ...
+
+    def get_rule_object(self, object_id: str) -> dict: ...
+
+    def update_rule_object_review(
+        self,
+        object_id: str,
+        *,
+        status: str,
+        validation: dict[str, Any],
+        expected_status: str,
+        expected_object_hash: str,
     ) -> dict: ...
 
     def record_rule_validation_issue(

@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,6 +19,15 @@ class Settings(BaseSettings):
     rulebook_embedding_dimensions: int = Field(default=384, ge=64, le=2048)
     map_asset_root: Path = Field(default=Path("data/map-assets"))
     module_asset_root: Path = Field(default=Path("data/module-assets"))
+    module_parse_timeout_seconds: float = Field(default=90, ge=5, le=600)
+    module_parse_memory_limit_mib: int = Field(default=1024, ge=256, le=8192)
+    module_parse_cpu_seconds: int = Field(default=60, ge=1, le=600)
+    legacy_doc_converter_command: str = Field(
+        default="soffice",
+        min_length=1,
+        max_length=500,
+    )
+    legacy_doc_converter_timeout_seconds: float = Field(default=60, ge=1, le=600)
     tesseract_command: str = Field(default="tesseract", min_length=1, max_length=500)
     tesseract_timeout_seconds: float = Field(default=60, ge=5, le=600)
     backup_root: Path = Field(default=Path("data/backups"))
@@ -26,6 +36,7 @@ class Settings(BaseSettings):
         default=20 * 1024 * 1024 * 1024,
         ge=1024 * 1024,
     )
+    sqlite_synchronous: Literal["FULL", "NORMAL"] = "FULL"
     image_base_url: str | None = None
     image_api_key: str = Field(default="")
     image_model: str | None = None
@@ -39,11 +50,20 @@ class Settings(BaseSettings):
     trusted_hosts: str = Field(default="localhost,127.0.0.1,testserver")
     sensitive_rate_limit_requests: int = Field(default=20, ge=1, le=1000)
     sensitive_rate_limit_window_seconds: int = Field(default=60, ge=1, le=3600)
+    json_body_max_bytes: int = Field(
+        default=1024 * 1024,
+        ge=64 * 1024,
+        le=16 * 1024 * 1024,
+    )
 
     @model_validator(mode="after")
     def validate_lan_security(self) -> "Settings":
         if self.deployment_mode == "lan" and not self.admin_token:
             raise ValueError("AI_KP_ADMIN_TOKEN is required in LAN deployment mode")
+        if self.deployment_mode == "lan":
+            # A reverse proxy commonly reaches the backend through loopback. LAN
+            # mode therefore never treats a loopback socket as administrator.
+            self.local_admin_enabled = False
         return self
 
     @property

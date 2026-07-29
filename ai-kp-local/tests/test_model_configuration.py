@@ -1,12 +1,18 @@
+import asyncio
+import stat
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
 from ai_kp.llm.local_runtime import LocalModelRuntime
 from ai_kp.llm.model_configuration import (
+    MAX_MODEL_DISCOVERY_RESPONSE_BYTES,
+    discover_openai_models,
     normalize_openai_base_url,
     validate_local_model_path,
 )
@@ -30,6 +36,18 @@ def _settings(db_path: Path) -> Settings:
         llm_api_key="env-secret",
         llm_model="env-model",
     )
+
+
+def test_local_runtime_does_not_claim_an_existing_custom_data_directory(
+    tmp_path: Path,
+) -> None:
+    custom_data = tmp_path / "data"
+    custom_data.mkdir(mode=0o755)
+    custom_data.chmod(0o755)
+
+    LocalModelRuntime(custom_data / "runtime.log")
+
+    assert stat.S_IMODE(custom_data.stat().st_mode) == 0o755
 
 
 def test_model_configuration_persists_and_replaces_runtime_settings(
@@ -185,6 +203,28 @@ def test_local_model_path_validation_and_url_normalization(tmp_path: Path) -> No
     )
 
 
+def test_model_discovery_streams_with_a_decoded_body_limit() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"x" * (MAX_MODEL_DISCOVERY_RESPONSE_BYTES + 1),
+            headers={"content-length": "invalid-on-purpose"},
+        )
+
+    async def exercise() -> None:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            with pytest.raises(RuntimeError, match="2 MiB"):
+                await discover_openai_models(
+                    "http://model.test/v1",
+                    "",
+                    client=client,
+                )
+
+    asyncio.run(exercise())
+
+
 def test_local_runtime_uses_argument_list_without_shell(
     tmp_path: Path,
     monkeypatch,
@@ -215,7 +255,11 @@ def test_local_runtime_uses_argument_list_without_shell(
 
     monkeypatch.setattr("ai_kp.llm.local_runtime.importlib.util.find_spec", lambda _: object())
     monkeypatch.setattr("ai_kp.llm.local_runtime.subprocess.Popen", fake_popen)
-    runtime = LocalModelRuntime(tmp_path / "runtime.log")
+    log_path = tmp_path / "runtime.log"
+    log_path.write_bytes(b"previous log")
+    log_path.chmod(0o644)
+    runtime = LocalModelRuntime(log_path)
+    assert stat.S_IMODE(log_path.stat().st_mode) == 0o600
 
     started = runtime.start(str(model_path), 8112)
     stopped = runtime.stop()
@@ -234,4 +278,6 @@ def test_local_runtime_uses_argument_list_without_shell(
     ]
     assert "shell" not in captured["kwargs"]
     assert captured["kwargs"]["cwd"] == model_path.parent
+    assert stat.S_IMODE(runtime.log_path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(runtime.log_path.stat().st_mode) == 0o600
     assert stopped["state"] == "stopped"

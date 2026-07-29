@@ -396,16 +396,23 @@ class SkillCheckRepository(SQLiteRepository):
     def cancel_skill_check(
         self, check_id: str, *, actor_member_id: str, reason: str
     ) -> dict[str, Any]:
+        # Resolution and cancellation are competing terminal transitions. Take
+        # the writer lock before reading, then keep the status predicate on the
+        # update as a second compare-and-swap guard.
+        self.begin_immediate()
         check = self.get_skill_check(check_id)
+        self._assert_check_consequence_not_finalized(check)
         if check["status"] != "requested":
             raise ValueError("Only a requested check can be cancelled")
-        self.connection.execute(
+        updated = self.connection.execute(
             """
             UPDATE skill_checks SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            WHERE id = ? AND status = 'requested'
             """,
             (check_id,),
         )
+        if updated.rowcount != 1:
+            raise ValueError("Check changed before it could be cancelled")
         self._add_check_action(
             check_id, "cancelled", actor_member_id, reason=reason.strip()
         )

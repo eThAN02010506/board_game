@@ -153,5 +153,29 @@ class RuleObject(ClosedRuleModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class RuleGoldenCase(ClosedRuleModel):
+    """A KP-authored deterministic example bound to one rule review."""
+
+    name: str = Field(min_length=1, max_length=120)
+    inputs: dict[str, Any] = Field(max_length=128)
+    expected_output: dict[str, Any] = Field(max_length=128)
+
+
+class RuleReviewSubmission(ClosedRuleModel):
+    """Human decision required before an extracted rule can become executable."""
+
+    decision: Literal["approved", "rejected"]
+    note: str | None = Field(default=None, max_length=2000)
+    golden_cases: list[RuleGoldenCase] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def require_review_evidence(self) -> RuleReviewSubmission:
+        if self.decision == "approved" and not self.golden_cases:
+            raise ValueError("Approved executable rules require at least one golden case")
+        if self.decision == "rejected" and not (self.note or "").strip():
+            raise ValueError("Rejected rules require a review note")
+        return self
+
+
 class RuleExtractionEnvelope(ClosedRuleModel):
     rules: list[RuleObject] = Field(default_factory=list, max_length=24)

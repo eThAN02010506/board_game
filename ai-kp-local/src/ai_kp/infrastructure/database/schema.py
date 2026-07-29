@@ -1,5 +1,6 @@
 """SQLite connection, base schema, migration, and transaction lifecycle."""
 
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -200,6 +201,7 @@ CREATE TABLE IF NOT EXISTS module_chunks (
   review_flags_json TEXT NOT NULL DEFAULT '[]',
   knowledge_status TEXT NOT NULL DEFAULT 'pending'
     CHECK (knowledge_status IN ('pending', 'processing', 'completed', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -222,6 +224,23 @@ CREATE TABLE IF NOT EXISTS module_import_jobs (
   parser_version TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS campaign_module_runs (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE RESTRICT,
+  module_source_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'paused', 'completed')),
+  current_scene_key TEXT,
+  active_spoiler_tags_json TEXT NOT NULL DEFAULT '[]',
+  state_json TEXT NOT NULL DEFAULT '{}',
+  version INTEGER NOT NULL DEFAULT 0,
+  started_by_member_id TEXT REFERENCES session_members(id) ON DELETE SET NULL,
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS module_assets (
@@ -556,7 +575,7 @@ CREATE TABLE IF NOT EXISTS rule_sources (
   ruleset_id TEXT NOT NULL,
   title TEXT NOT NULL,
   source_filename TEXT NOT NULL,
-  source_hash TEXT NOT NULL UNIQUE,
+  source_hash TEXT NOT NULL,
   page_count INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'extracted'
     CHECK (status IN ('extracting', 'extracted', 'indexing', 'ready', 'failed')),
@@ -590,11 +609,12 @@ CREATE TABLE IF NOT EXISTS rule_chunks (
   chapter TEXT,
   section TEXT,
   content_kind TEXT NOT NULL DEFAULT 'text' CHECK (content_kind IN ('text', 'table')),
-  audience TEXT NOT NULL DEFAULT 'all' CHECK (audience IN ('all', 'player', 'kp')),
+  audience TEXT NOT NULL DEFAULT 'kp' CHECK (audience IN ('all', 'player', 'kp')),
   text TEXT NOT NULL,
   text_hash TEXT NOT NULL,
   extraction_status TEXT NOT NULL DEFAULT 'pending'
     CHECK (extraction_status IN ('pending', 'processing', 'completed', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
   minirag_doc_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(source_id, order_index),
@@ -667,9 +687,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_sessions_one_active
   ON campaign_sessions(campaign_id) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_session_members_session ON session_members(session_id, joined_at);
 CREATE INDEX IF NOT EXISTS idx_session_members_campaign ON session_members(campaign_id, role);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_session_members_active_pc
-  ON session_members(session_id, pc_id)
-  WHERE pc_id IS NOT NULL AND revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_player_actions_session ON player_actions(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_player_actions_campaign_status
   ON player_actions(campaign_id, status, created_at);
@@ -695,6 +712,11 @@ CREATE INDEX IF NOT EXISTS idx_module_import_jobs_campaign_created
   ON module_import_jobs(campaign_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_module_import_jobs_status
   ON module_import_jobs(status, updated_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_module_runs_one_active
+  ON campaign_module_runs(campaign_id)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_campaign_module_runs_campaign_started
+  ON campaign_module_runs(campaign_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_module_assets_module
   ON module_assets(module_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_module_assets_hash
@@ -715,6 +737,8 @@ CREATE INDEX IF NOT EXISTS idx_memories_campaign_scope ON memories(campaign_id, 
 CREATE INDEX IF NOT EXISTS idx_memories_pc ON memories(pc_id);
 CREATE INDEX IF NOT EXISTS idx_memories_npc ON memories(npc_id);
 CREATE INDEX IF NOT EXISTS idx_rule_sources_ruleset ON rule_sources(ruleset_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_sources_ruleset_hash
+  ON rule_sources(ruleset_id, source_hash);
 CREATE INDEX IF NOT EXISTS idx_rule_chunks_source_page
   ON rule_chunks(source_id, page_start, order_index);
 CREATE INDEX IF NOT EXISTS idx_rule_chunks_status
@@ -727,8 +751,18 @@ CREATE INDEX IF NOT EXISTS idx_rule_validation_issues_source
   ON rule_validation_issues(source_id, validation_layer);
 """
 
+OWNED_DEFAULT_DB_PATH = Path("data/ai_kp.sqlite3")
 
-def connect(db_path: Path | str) -> sqlite3.Connection:
+
+def connect(
+    db_path: Path | str,
+    *,
+    synchronous: str = "FULL",
+) -> sqlite3.Connection:
+    normalized_synchronous = synchronous.upper()
+    if normalized_synchronous not in {"FULL", "NORMAL"}:
+        raise ValueError("SQLite synchronous mode must be FULL or NORMAL")
+
     raw_path = str(db_path)
     is_memory = raw_path == ":memory:"
     sqlite_path: Path | str
@@ -736,15 +770,29 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
         sqlite_path = raw_path
     else:
         sqlite_path = Path(db_path)
-        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+        directory_was_missing = not sqlite_path.parent.exists()
+        sqlite_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory_was_missing or sqlite_path == OWNED_DEFAULT_DB_PATH:
+            os.chmod(sqlite_path.parent, 0o700)
+        descriptor = os.open(sqlite_path, os.O_CREAT | os.O_RDWR, 0o600)
+        os.close(descriptor)
+        os.chmod(sqlite_path, 0o600)
 
     connection = sqlite3.connect(sqlite_path, timeout=5.0, check_same_thread=False)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA busy_timeout = 5000")
-    connection.execute("PRAGMA foreign_keys = ON")
-    if not is_memory:
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute("PRAGMA synchronous = NORMAL")
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA foreign_keys = ON")
+        if not is_memory:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute(f"PRAGMA synchronous = {normalized_synchronous}")
+            for suffix in ("", "-wal", "-shm"):
+                private_file = Path(f"{sqlite_path}{suffix}")
+                if private_file.exists():
+                    os.chmod(private_file, 0o600)
+    except Exception:
+        connection.close()
+        raise
     return connection
 
 
@@ -755,8 +803,12 @@ def init_db(connection: sqlite3.Connection) -> None:
 
 
 @contextmanager
-def db_session(db_path: Path | str) -> Iterator[sqlite3.Connection]:
-    connection = connect(db_path)
+def db_session(
+    db_path: Path | str,
+    *,
+    synchronous: str = "FULL",
+) -> Iterator[sqlite3.Connection]:
+    connection = connect(db_path, synchronous=synchronous)
     try:
         init_db(connection)
         yield connection

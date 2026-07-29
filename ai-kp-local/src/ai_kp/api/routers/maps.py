@@ -3,7 +3,12 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from ai_kp.api.authz import campaign_for_map, campaign_for_token, require_campaign_role
+from ai_kp.api.authz import (
+    campaign_for_map,
+    campaign_for_token,
+    require_approved_pc_binding,
+    require_campaign_role,
+)
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.schemas import (
     MapGenerateRequest,
@@ -298,6 +303,8 @@ def place_map_token(
 ) -> dict:
     campaign_id = campaign_for_map(repo, map_id)
     require_campaign_role(identity, campaign_id, ("kp",))
+    if payload.actor_type == "pc":
+        require_approved_pc_binding(repo, campaign_id, payload.actor_id)
     return MapService(repo).place_token(
         map_id,
         campaign_id,
@@ -324,6 +331,12 @@ def move_map_token(
     require_campaign_role(identity, campaign_id)
     token = repo.get_map_token(token_id)
     if identity.role == "player":
+        require_approved_pc_binding(
+            repo,
+            campaign_id,
+            identity.pc_id,
+            owner_profile_id=identity.player_profile_id,
+        )
         if not repo.is_map_published(token["map_id"]):
             raise HTTPException(status_code=404, detail="Map token not found")
         if not identity.pc_id or token["actor_type"] != "pc" or token["actor_id"] != identity.pc_id:
@@ -349,9 +362,16 @@ def list_map_token_moves(
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> list[dict]:
-    require_campaign_role(identity, campaign_for_token(repo, token_id))
+    campaign_id = campaign_for_token(repo, token_id)
+    require_campaign_role(identity, campaign_id)
     token = repo.get_map_token(token_id)
     if identity.role == "player":
+        require_approved_pc_binding(
+            repo,
+            campaign_id,
+            identity.pc_id,
+            owner_profile_id=identity.player_profile_id,
+        )
         if not repo.is_map_published(token["map_id"]):
             raise HTTPException(status_code=404, detail="Map token not found")
         if not identity.pc_id or token["actor_type"] != "pc" or token["actor_id"] != identity.pc_id:

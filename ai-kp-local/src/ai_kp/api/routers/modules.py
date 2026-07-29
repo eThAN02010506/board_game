@@ -1,12 +1,12 @@
-"""KP-only PDF/DOCX module import and private asset routes."""
+"""KP-only PDF/DOC/DOCX module import and private asset routes."""
 
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import quote
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     Header,
     HTTPException,
@@ -38,7 +38,6 @@ from ai_kp.infrastructure.modules.analysis import (
 from ai_kp.infrastructure.modules.import_worker import (
     enqueue_module_import,
     queue_module_import_retry,
-    run_module_import,
 )
 from ai_kp.platform.modules.documents import MAX_MODULE_BYTES
 from ai_kp.platform.modules.knowledge import ModuleKnowledgeCandidate
@@ -64,7 +63,6 @@ def _require_module_kp(
 async def upload_module_document(
     campaign_id: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     title: str = "",
     x_file_name: str | None = Header(default=None),
     identity: AuthenticatedMember = Depends(get_identity),
@@ -77,20 +75,17 @@ async def upload_module_document(
         max_bytes=MAX_MODULE_BYTES,
         label="KP 本",
     )
-    job = enqueue_module_import(
+    job = await asyncio.to_thread(
+        enqueue_module_import,
         settings.db_path,
         settings.module_asset_root,
         campaign_id=campaign_id,
         title=title,
         source_filename=filename,
         data=data,
+        synchronous=settings.sqlite_synchronous,
     )
-    background_tasks.add_task(
-        run_module_import,
-        settings.db_path,
-        settings.module_asset_root,
-        job["id"],
-    )
+    request.app.state.module_import_worker.wake()
     return job
 
 
@@ -121,20 +116,19 @@ def get_module_import(
 )
 def retry_module_import(
     job_id: str,
-    background_tasks: BackgroundTasks,
+    request: Request,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
     settings: Settings = Depends(get_app_settings),
 ) -> dict:
     job = repo.get_module_import_job(job_id)
     require_campaign_role(identity, job["campaign_id"], ("kp",))
-    queued = queue_module_import_retry(settings.db_path, job_id)
-    background_tasks.add_task(
-        run_module_import,
+    queued = queue_module_import_retry(
         settings.db_path,
-        settings.module_asset_root,
         job_id,
+        synchronous=settings.sqlite_synchronous,
     )
+    request.app.state.module_import_worker.wake()
     return queued
 
 
@@ -355,7 +349,7 @@ def review_module_knowledge_candidate(
 ) -> dict:
     candidate = repo.get_module_knowledge_candidate(candidate_id)
     _require_module_kp(repo, identity, candidate["module_id"])
-    return repo.review_module_knowledge_candidate(
+    return ModuleKnowledgeService(repo).review_candidate(
         candidate_id,
         decision=payload.decision,
         member_id=identity.member_id,

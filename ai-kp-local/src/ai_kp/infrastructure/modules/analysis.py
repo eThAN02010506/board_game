@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from ai_kp.infrastructure.http_limits import request_bounded_bytes
 from ai_kp.platform.modules.documents import SAFE_RASTER_MIME_TYPES
 from ai_kp.platform.modules.vision import ModuleAssetAnalysis
 
@@ -202,35 +203,24 @@ class OpenAICompatibleVisionAnalyzer:
         }
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         try:
-            if self.client is None:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"{self.base_url}/chat/completions",
-                        json=payload,
-                        headers=headers,
-                        timeout=self.timeout_seconds,
-                    )
-            else:
-                response = await self.client.post(
-                    f"{self.base_url}/chat/completions",
-                    json=payload,
-                    headers=headers,
-                    timeout=self.timeout_seconds,
-                )
+            response_content, status_code = await self._post_bounded(payload, headers)
         except httpx.RequestError as exc:
             raise RuntimeError(f"无法连接视觉模型 {self.base_url}：{exc}") from exc
-        if len(response.content) > MAX_MODEL_RESPONSE_BYTES:
-            raise RuntimeError("视觉模型响应超过 4 MiB 限制")
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            detail = response.text.replace("\n", " ")[:1000]
+        if status_code < 200 or status_code >= 300:
+            detail = response_content.decode("utf-8", errors="replace")
             raise RuntimeError(
-                f"视觉模型返回 HTTP {response.status_code}：{detail}"
-            ) from exc
+                f"视觉模型返回 HTTP {status_code}："
+                f"{detail.replace(chr(10), ' ')[:1000]}"
+            )
         try:
-            content = response.json()["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            content = json.loads(response_content)["choices"][0]["message"]["content"]
+        except (
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            KeyError,
+            IndexError,
+            TypeError,
+        ) as exc:
             raise RuntimeError("视觉模型返回了无效的 OpenAI-compatible JSON") from exc
         if not isinstance(content, str):
             raise TypeError("视觉模型没有返回文本 JSON")
@@ -250,6 +240,33 @@ class OpenAICompatibleVisionAnalyzer:
             visual_summary=visual_summary or None,
             model=self.model,
             prompt_version=VISION_PROMPT_VERSION,
+        )
+
+    async def _post_bounded(
+        self,
+        payload: dict,
+        headers: dict[str, str],
+    ) -> tuple[bytes, int]:
+        if self.client is not None:
+            return await self._stream_response(self.client, payload, headers)
+        async with httpx.AsyncClient() as client:
+            return await self._stream_response(client, payload, headers)
+
+    async def _stream_response(
+        self,
+        client: httpx.AsyncClient,
+        payload: dict,
+        headers: dict[str, str],
+    ) -> tuple[bytes, int]:
+        return await request_bounded_bytes(
+            client,
+            "POST",
+            f"{self.base_url}/chat/completions",
+            max_bytes=MAX_MODEL_RESPONSE_BYTES,
+            limit_error="视觉模型响应超过 4 MiB 限制",
+            json=payload,
+            headers=headers,
+            timeout=self.timeout_seconds,
         )
 
 

@@ -101,7 +101,8 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="all",
         summary=(
             "玩家长期档案、独立调查员页面、完整手工建卡、安全 Excel 预览和不可变草稿版本已可用；"
-            "按团提交、KP 退回/批准、字段差异、已批准版本绑定和团内运行状态均已可用。"
+            "按团提交、KP 退回/批准、字段差异、已批准版本绑定和团内运行状态均已可用；"
+            "AI 上下文只读取该团批准的不可变版本与当前状态，不读取玩家后来尚未批准的编辑。"
         ),
         dependencies=("session_roles", "seat_invitations"),
         acceptance=(
@@ -138,12 +139,19 @@ CAPABILITIES: tuple[Capability, ...] = (
         phase="F2",
         audience="kp",
         summary=(
-            "内部纯文本剧透边界继续保留；独立 KP 本页面现可导入 PDF/DOCX、"
+            "内部纯文本剧透边界继续保留；独立 KP 本页面现可导入 PDF/DOC/DOCX、"
             "查看持久任务、章节正文和私密原图，并可做权限过滤检索、章节剧透编辑和"
-            "带逐字证据的知识候选审核。仍缺少实体图谱和自动锚点可达性检查。"
+            "带逐字证据的知识候选审核。已支持来源约束实体图谱、确定性锚点可达性、"
+            "每团一个显式活动模组及场景/剧透/运行态上下文；仍缺自动结构校订与"
+            "完整的受约束动态补全工作流。"
         ),
         dependencies=("proposal_approval",),
-        acceptance=("KP 可导入、预览、标记剧透范围，玩家端不可读取未揭示章节。",),
+        acceptance=(
+            "KP 可导入、预览、标记剧透范围，玩家端不可读取未揭示章节。",
+            "同一团只有一个活动模组；重复开始不会清空进度，场景、剧透标签和运行态重启后仍进入 AI 上下文。",
+            "两个 KP 客户端用版本号检测并发修改；旧版本不能覆盖新进度。",
+            "知识候选、实体和关系不能把来源的可见性或剧透范围降级。",
+        ),
     ),
     Capability(
         id="module_document_import",
@@ -152,9 +160,10 @@ CAPABILITIES: tuple[Capability, ...] = (
         phase="F2",
         audience="kp",
         summary=(
-            "已只接收 PDF/DOCX，并安全抽取正文、表格、照片等内嵌原图，保留页码/段落锚点、"
-            "持久任务、失败重试和完整备份；现支持可选本地 Tesseract OCR 与"
-            "OpenAI-compatible 视觉摘要，中文 OCR 仍取决于本机语言数据。"
+            "已只接收 PDF/DOC/DOCX，并安全抽取正文、表格、照片等内嵌原图；旧 DOC "
+            "仅在隔离子进程中经 LibreOffice 转换。链路保留页码/段落锚点、"
+            "SQLite 持久队列、领取代次 CAS、崩溃恢复、失败重试和完整备份；现支持可选本地 "
+            "Tesseract OCR 与 OpenAI-compatible 视觉摘要，中文 OCR 仍取决于本机语言数据。"
         ),
         dependencies=("module_library",),
         acceptance=(
@@ -226,7 +235,8 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="all",
         summary=(
             "已有显式规则注册表和 CoC7 应用端口，并具备可追溯 PDF 原文块、MiniRAG 本地召回、"
-            "JSON 规则候选、三层校验和封闭 DSL 执行器；当前仅注册 CoC7，"
+            "JSON 规则候选、来源/引用/冲突校验、KP golden case 审核和封闭 DSL 执行器；"
+            "AI 置信度不能自行发布规则，历史缺少审核证据的规则会 fail-closed。当前仅注册 CoC7，"
             "尚未完成全部 CoC7 规则对象或任何第二系统插件。"
         ),
         dependencies=("check_resolution",),

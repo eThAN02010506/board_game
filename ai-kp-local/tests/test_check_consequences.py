@@ -9,6 +9,7 @@ import httpx
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
 from ai_kp.platform.resolution import HIDDEN_CHECK_PUBLIC_NARRATION
+from tests.support_investigators import coc7_sheet, create_approved_player
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -128,24 +129,17 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
             )
         ).json()
         self.kp_headers = bearer(self.session["access_token"])
-        self.pc = (
-            await self.client.post(
-                f"/campaigns/{self.campaign['id']}/pcs",
-                headers=self.kp_headers,
-                json={"name": "Ada", "sheet": {"侦查": 60}},
-            )
-        ).json()
-        self.player = (
-            await self.client.post(
-                "/sessions/join",
-                json={
-                    "join_code": self.session["join_code"],
-                    "display_name": "Player",
-                    "pc_id": self.pc["id"],
-                },
-            )
-        ).json()
-        self.player_headers = bearer(self.player["access_token"])
+        approved_player = await create_approved_player(
+            self.client,
+            campaign=self.campaign,
+            session=self.session,
+            kp_headers=self.kp_headers,
+            display_name="Player",
+            sheet=coc7_sheet("Ada", skills={"侦查": 60}),
+        )
+        self.pc = approved_player["pc"]
+        self.player = approved_player["bundle"]
+        self.player_headers = approved_player["headers"]
 
     async def asyncTearDown(self) -> None:
         await self.client.aclose()

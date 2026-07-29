@@ -10,6 +10,12 @@
 - `POST /model-settings/discover` 请求服务的 `/v1/models`，前端展示服务实际返回的 ID。
 - API Key 只写入本地 SQLite；读取配置时只返回 `api_key_configured`，不回传密钥。
 - 地址可以是本机、局域网或其他由本地管理员信任的服务。
+- 当服务返回的模型 ID 明确属于 `gpt-oss` 时，聊天请求会向 llama.cpp 的 Harmony
+  模板传入 `reasoning_effort=low`。这不会把思考内容交给玩家，而是为 AI KP 所需的
+  结构化最终正文保留输出预算；采样按官方建议规范为
+  `temperature=1.0, top_p=1.0`。`chat_template_kwargs` 不是 OpenAI 标准字段，因此
+  严格兼容服务若以 400/422 拒绝它，客户端会自动移除该可选提示并安全重试一次；
+  其他模型不会收到这个字段。
 
 ### 本地 MLX 模型目录
 
@@ -42,3 +48,8 @@
 4. 保存并启动，等待进程状态为运行中；再次检测，直到 `/v1/models` 返回模型。
 5. 发起一次完整 AI KP 草稿，确认 `source_model` 是当前模型且草稿仍需 KP 审批。
 6. 停止本地模型，确认进程退出；再次发起请求时应明确失败而不是静默切回远程服务。
+
+当前 `http://192.168.1.97:8001/v1` 已按 `/models` 实际返回的 GPT-OSS 20B GGUF ID
+完成生产 real-case：正式调查员提交/批准/绑定、NPC 与长期记忆、活动模组、地图保存
+与移动、玩家行动、AI KP 结构化草稿及 KP 批准全部通过，且草稿 `source_model` 与服务
+发现的完整 ID 精确相同。

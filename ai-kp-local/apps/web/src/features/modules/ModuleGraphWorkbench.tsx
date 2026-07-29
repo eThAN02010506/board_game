@@ -1,5 +1,5 @@
 import { GitBranch, Link2, Network } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { requestJson } from "../../api/client";
 import type {
@@ -41,12 +41,26 @@ const predicates = [
 ] as const;
 
 export function ModuleGraphWorkbench({ moduleId, candidates, onMessage }: Props) {
-  const [entities, setEntities] = useState<ModuleEntity[]>([]);
-  const [relations, setRelations] = useState<ModuleEntityRelation[]>([]);
+  const [graph, setGraph] = useState<{
+    moduleId: string;
+    entities: ModuleEntity[];
+    relations: ModuleEntityRelation[];
+  }>({ moduleId: "", entities: [], relations: [] });
   const [entryIds, setEntryIds] = useState<string[]>([]);
-  const [report, setReport] = useState<ModuleReachabilityReport | null>(null);
+  const [scopedReport, setScopedReport] = useState<{
+    moduleId: string;
+    value: ModuleReachabilityReport;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [entityType, setEntityType] = useState("npc");
+  const currentModuleIdRef = useRef(moduleId);
+  const moduleScopeEpochRef = useRef(0);
+  const graphRequestEpochRef = useRef(0);
+  const reachabilityRequestEpochRef = useRef(0);
+  const operationEpochRef = useRef(0);
+  const entities = graph.moduleId === moduleId ? graph.entities : [];
+  const relations = graph.moduleId === moduleId ? graph.relations : [];
+  const report = scopedReport?.moduleId === moduleId ? scopedReport.value : null;
   const approved = useMemo(
     () => candidates.filter((candidate) => candidate.status === "approved"),
     [candidates]
@@ -55,35 +69,75 @@ export function ModuleGraphWorkbench({ moduleId, candidates, onMessage }: Props)
     ? approved.filter((candidate) => candidate.kind === "module_anchor")
     : approved;
 
-  async function loadGraph() {
-    if (!moduleId) {
-      setEntities([]);
-      setRelations([]);
-      return;
-    }
-    const [loadedEntities, loadedRelations] = await Promise.all([
-      requestJson<ModuleEntity[]>(`/modules/${moduleId}/entities`),
-      requestJson<ModuleEntityRelation[]>(`/modules/${moduleId}/relations`)
-    ]);
-    setEntities(loadedEntities);
-    setRelations(loadedRelations);
-    setEntryIds((current) => current.filter((id) => loadedEntities.some((item) => item.id === id)));
+  function isCurrentModule(requestedModuleId: string, scopeEpoch: number) {
+    return (
+      currentModuleIdRef.current === requestedModuleId &&
+      moduleScopeEpochRef.current === scopeEpoch
+    );
   }
 
-  useEffect(() => {
-    setReport(null);
-    void loadGraph().catch((error) => {
-      onMessage(error instanceof Error ? error.message : String(error));
+  async function loadGraph(requestedModuleId: string, scopeEpoch: number) {
+    if (!requestedModuleId || !isCurrentModule(requestedModuleId, scopeEpoch)) {
+      return false;
+    }
+    const requestEpoch = ++graphRequestEpochRef.current;
+    const [loadedEntities, loadedRelations] = await Promise.all([
+      requestJson<ModuleEntity[]>(`/modules/${requestedModuleId}/entities`),
+      requestJson<ModuleEntityRelation[]>(`/modules/${requestedModuleId}/relations`)
+    ]);
+    if (
+      !isCurrentModule(requestedModuleId, scopeEpoch) ||
+      requestEpoch !== graphRequestEpochRef.current
+    ) {
+      return false;
+    }
+    setGraph({
+      moduleId: requestedModuleId,
+      entities: loadedEntities,
+      relations: loadedRelations
     });
+    setEntryIds((current) => current.filter((id) => loadedEntities.some((item) => item.id === id)));
+    return true;
+  }
+
+  useLayoutEffect(() => {
+    currentModuleIdRef.current = moduleId;
+    const scopeEpoch = ++moduleScopeEpochRef.current;
+    graphRequestEpochRef.current += 1;
+    reachabilityRequestEpochRef.current += 1;
+    operationEpochRef.current += 1;
+    setGraph({ moduleId, entities: [], relations: [] });
+    setEntryIds([]);
+    setScopedReport(null);
+    setBusy(false);
+    if (moduleId) {
+      void loadGraph(moduleId, scopeEpoch).catch((error) => {
+        if (isCurrentModule(moduleId, scopeEpoch)) {
+          onMessage(error instanceof Error ? error.message : String(error));
+        }
+      });
+    }
+    return () => {
+      if (isCurrentModule(moduleId, scopeEpoch)) {
+        moduleScopeEpochRef.current += 1;
+        graphRequestEpochRef.current += 1;
+        reachabilityRequestEpochRef.current += 1;
+        operationEpochRef.current += 1;
+      }
+    };
   }, [moduleId]);
 
   async function createEntity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const requestedModuleId = moduleId;
+    const scopeEpoch = moduleScopeEpochRef.current;
+    if (!requestedModuleId || !isCurrentModule(requestedModuleId, scopeEpoch)) return;
     const form = event.currentTarget;
     const data = new FormData(form);
+    const operationEpoch = ++operationEpochRef.current;
     setBusy(true);
     try {
-      await requestJson(`/modules/${moduleId}/entities`, {
+      await requestJson(`/modules/${requestedModuleId}/entities`, {
         method: "POST",
         body: JSON.stringify({
           entity_type: data.get("entity_type"),
@@ -93,24 +147,48 @@ export function ModuleGraphWorkbench({ moduleId, candidates, onMessage }: Props)
           visibility: "kp"
         })
       });
+      if (
+        !isCurrentModule(requestedModuleId, scopeEpoch) ||
+        operationEpoch !== operationEpochRef.current
+      ) return;
       form.reset();
       setEntityType("npc");
-      await loadGraph();
-      onMessage("实体已保存，并保留已批准知识候选作为来源。");
+      setScopedReport(null);
+      await loadGraph(requestedModuleId, scopeEpoch);
+      if (
+        isCurrentModule(requestedModuleId, scopeEpoch) &&
+        operationEpoch === operationEpochRef.current
+      ) {
+        onMessage("实体已保存，并保留已批准知识候选作为来源。");
+      }
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : String(error));
+      if (
+        isCurrentModule(requestedModuleId, scopeEpoch) &&
+        operationEpoch === operationEpochRef.current
+      ) {
+        onMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setBusy(false);
+      if (
+        isCurrentModule(requestedModuleId, scopeEpoch) &&
+        operationEpoch === operationEpochRef.current
+      ) {
+        setBusy(false);
+      }
     }
   }
 
   async function createRelation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const requestedModuleId = moduleId;
+    const scopeEpoch = moduleScopeEpochRef.current;
+    if (!requestedModuleId || !isCurrentModule(requestedModuleId, scopeEpoch)) return;
     const form = event.currentTarget;
     const data = new FormData(form);
+    const operationEpoch = ++operationEpochRef.current;
     setBusy(true);
     try {
-      await requestJson(`/modules/${moduleId}/relations`, {
+      await requestJson(`/modules/${requestedModuleId}/relations`, {
         method: "POST",
         body: JSON.stringify({
           source_entity_id: data.get("source_entity_id"),
@@ -122,13 +200,33 @@ export function ModuleGraphWorkbench({ moduleId, candidates, onMessage }: Props)
           visibility: "kp"
         })
       });
+      if (
+        !isCurrentModule(requestedModuleId, scopeEpoch) ||
+        operationEpoch !== operationEpochRef.current
+      ) return;
       form.reset();
-      await loadGraph();
-      onMessage("关系已保存。");
+      setScopedReport(null);
+      await loadGraph(requestedModuleId, scopeEpoch);
+      if (
+        isCurrentModule(requestedModuleId, scopeEpoch) &&
+        operationEpoch === operationEpochRef.current
+      ) {
+        onMessage("关系已保存。");
+      }
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : String(error));
+      if (
+        isCurrentModule(requestedModuleId, scopeEpoch) &&
+        operationEpoch === operationEpochRef.current
+      ) {
+        onMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setBusy(false);
+      if (
+        isCurrentModule(requestedModuleId, scopeEpoch) &&
+        operationEpoch === operationEpochRef.current
+      ) {
+        setBusy(false);
+      }
     }
   }
 
@@ -137,19 +235,44 @@ export function ModuleGraphWorkbench({ moduleId, candidates, onMessage }: Props)
       onMessage("请至少选择一个当前可进入的地点、人物或线索。");
       return;
     }
+    const requestedModuleId = moduleId;
+    const scopeEpoch = moduleScopeEpochRef.current;
+    if (!requestedModuleId || !isCurrentModule(requestedModuleId, scopeEpoch)) return;
+    const requestEpoch = ++reachabilityRequestEpochRef.current;
+    const operationEpoch = ++operationEpochRef.current;
+    const requestedEntryIds = [...entryIds];
+    setScopedReport(null);
     setBusy(true);
     try {
-      setReport(await requestJson<ModuleReachabilityReport>(
-        `/modules/${moduleId}/graph/reachability`,
+      const loadedReport = await requestJson<ModuleReachabilityReport>(
+        `/modules/${requestedModuleId}/graph/reachability`,
         {
           method: "POST",
-          body: JSON.stringify({ entry_entity_ids: entryIds })
+          body: JSON.stringify({ entry_entity_ids: requestedEntryIds })
         }
-      ));
+      );
+      if (
+        isCurrentModule(requestedModuleId, scopeEpoch) &&
+        requestEpoch === reachabilityRequestEpochRef.current &&
+        operationEpoch === operationEpochRef.current
+      ) {
+        setScopedReport({ moduleId: requestedModuleId, value: loadedReport });
+      }
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : String(error));
+      if (
+        isCurrentModule(requestedModuleId, scopeEpoch) &&
+        requestEpoch === reachabilityRequestEpochRef.current &&
+        operationEpoch === operationEpochRef.current
+      ) {
+        onMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setBusy(false);
+      if (
+        isCurrentModule(requestedModuleId, scopeEpoch) &&
+        operationEpoch === operationEpochRef.current
+      ) {
+        setBusy(false);
+      }
     }
   }
 

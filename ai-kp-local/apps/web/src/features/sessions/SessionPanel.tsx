@@ -1,13 +1,13 @@
-import { Copy, Plus, RefreshCw, ShieldCheck, UserPlus, Users } from "lucide-react";
+import { Copy, RefreshCw, ShieldCheck, UserPlus, Users } from "lucide-react";
 import type { FormEventHandler } from "react";
 import type {
   AuthIdentity,
-  PlayerCharacter,
   SessionInfo,
   SessionMember,
   SessionSeat
 } from "../../api/types";
 import type { RealtimeStatus } from "../../realtime";
+import { statusLabel } from "../../ui/statusLabels";
 
 type Props = {
   identity: AuthIdentity | null;
@@ -21,35 +21,23 @@ type Props = {
   joinCodeInput: string;
   seatInvitationInput: string;
   seatLabel: string;
-  seatPcId: string;
   playerDisplayName: string;
-  joinPcId: string;
-  pcName: string;
   members: SessionMember[];
   seats: SessionSeat[];
   recoverableSeats: SessionSeat[];
-  pcs: PlayerCharacter[];
-  memberPcDrafts: Record<string, string>;
   onKpDisplayNameChange: (value: string) => void;
   onJoinCodeInputChange: (value: string) => void;
   onSeatInvitationInputChange: (value: string) => void;
   onSeatLabelChange: (value: string) => void;
-  onSeatPcIdChange: (value: string) => void;
   onPlayerDisplayNameChange: (value: string) => void;
-  onJoinPcIdChange: (value: string) => void;
-  onPcNameChange: (value: string) => void;
-  onMemberPcDraftChange: (memberId: string, pcId: string) => void;
   onRefreshIdentity: () => void;
   onRotateJoinCode: () => void;
   onRefreshMembers: () => void;
   onRefreshSeats: () => void;
   onRefreshRecoverableSeats: () => void;
   onCloseSession: () => void;
-  onCreatePc: FormEventHandler<HTMLFormElement>;
   onCreateSeat: FormEventHandler<HTMLFormElement>;
   onClaimSeat: FormEventHandler<HTMLFormElement>;
-  onAssignMemberPc: (memberId: string) => void;
-  onAssignSeatPc: (seatId: string, pcId: string) => void;
   onReissueSeat: (seatId: string) => void;
   onRevokeSeat: (seatId: string) => void;
   onRecoverSeat: (seatId: string) => void;
@@ -57,6 +45,7 @@ type Props = {
   onStartSession: () => void;
   onRecoverKp: () => void;
   onJoinSession: FormEventHandler<HTMLFormElement>;
+  onOpenInvestigators: () => void;
 };
 
 function seatStatusLabel(status: SessionSeat["status"]) {
@@ -83,7 +72,8 @@ export function SessionPanel(props: Props) {
             </span>
             <strong>{props.identity.display_name}</strong>
             <small>
-              会话 {props.session.status} · 角色卡 {props.identity.pc_id ?? "待 KP 分配"}
+              会话 {statusLabel(props.session.status)} · 调查员
+              {props.identity.pc_id ? "已通过 KP 审批并绑定" : "待创建、审批与绑定"}
             </small>
             {props.identity.seat_id && <small>稳定席位 {props.identity.seat_id}</small>}
             <small className={`realtime-note ${props.realtimeStatus}`}>{props.realtimeNote}</small>
@@ -92,13 +82,18 @@ export function SessionPanel(props: Props) {
             <RefreshCw size={16} />
             刷新身份与角色绑定
           </button>
+          <button className="ghost-button" onClick={props.onOpenInvestigators} type="button">
+            {props.identity.role === "kp" ? "前往角色卡审核与绑定" : "前往创建或提交调查员"}
+          </button>
 
           {props.identity.role === "kp" && (
             <>
               <div className="session-section-heading">
                 <div>
                   <h3>玩家席位</h3>
-                  <small>每个邀请码只属于一个席位，认领后立即失效。</small>
+                  <small>
+                    每个邀请码只属于一个席位；玩家认领后创建调查员，KP 在角色卡页审批并绑定。
+                  </small>
                 </div>
                 <button className="icon-button" onClick={props.onRefreshSeats} title="刷新席位" type="button">
                   <RefreshCw size={15} />
@@ -113,16 +108,6 @@ export function SessionPanel(props: Props) {
                     value={props.seatLabel}
                     onChange={(event) => props.onSeatLabelChange(event.target.value)}
                   />
-                </label>
-                <label>
-                  预留角色（可选）
-                  <select
-                    value={props.seatPcId}
-                    onChange={(event) => props.onSeatPcIdChange(event.target.value)}
-                  >
-                    <option value="">暂不绑定</option>
-                    {props.pcs.map((pc) => <option key={pc.id} value={pc.id}>{pc.name}</option>)}
-                  </select>
                 </label>
                 <button className="primary-button" type="submit">
                   <UserPlus size={16} />
@@ -159,16 +144,11 @@ export function SessionPanel(props: Props) {
                         <small className="permission-hint">明文邀请码不会入库；需要时请重新签发。</small>
                       )}
                       {seat.status !== "revoked" && (
-                        <label>
-                          该席位角色
-                          <select
-                            value={seat.assigned_pc_id ?? ""}
-                            onChange={(event) => props.onAssignSeatPc(seat.id, event.target.value)}
-                          >
-                            <option value="">未绑定角色卡</option>
-                            {props.pcs.map((pc) => <option key={pc.id} value={pc.id}>{pc.name}</option>)}
-                          </select>
-                        </label>
+                        <small className="permission-hint">
+                          {seat.assigned_pc_id
+                            ? `已绑定审批通过的调查员：${seat.pc_name ?? seat.assigned_pc_id}`
+                            : "尚未绑定调查员；请在角色卡页完成审批与绑定。"}
+                        </small>
                       )}
                       <div className="inline-actions">
                         {seat.status === "open" && (
@@ -199,14 +179,6 @@ export function SessionPanel(props: Props) {
                   <button className="secondary-button" onClick={props.onCloseSession} type="button">关闭会话</button>
                 </div>
 
-                <form onSubmit={props.onCreatePc}>
-                  <label>
-                    新建兼容角色卡名称
-                    <input value={props.pcName} onChange={(event) => props.onPcNameChange(event.target.value)} />
-                  </label>
-                  <button className="secondary-button" type="submit"><Plus size={16} />创建空白角色卡</button>
-                </form>
-
                 <div className="member-list">
                   {props.members.map((member) => (
                     <div className={`member-card ${member.revoked_at ? "revoked" : ""}`} key={member.id}>
@@ -215,20 +187,12 @@ export function SessionPanel(props: Props) {
                         <small>{member.role} · {member.revoked_at ? "已撤销" : "在线凭证有效"}</small>
                       </div>
                       {member.role === "player" && !member.revoked_at && (
-                        <>
-                          <select
-                            aria-label={`为 ${member.display_name} 选择角色卡`}
-                            value={props.memberPcDrafts[member.id] ?? member.pc_id ?? ""}
-                            onChange={(event) => props.onMemberPcDraftChange(member.id, event.target.value)}
-                          >
-                            <option value="">未绑定角色卡</option>
-                            {props.pcs.map((pc) => <option key={pc.id} value={pc.id}>{pc.name}</option>)}
-                          </select>
-                          <div className="inline-actions">
-                            <button className="ghost-button" onClick={() => props.onAssignMemberPc(member.id)} type="button">绑定角色</button>
-                            <button className="secondary-button" onClick={() => props.onRevokeMember(member.id)} type="button">撤销凭证</button>
-                          </div>
-                        </>
+                        <div className="inline-actions">
+                          <small className="permission-hint">
+                            {member.pc_id ? "已绑定审批通过的调查员" : "等待角色卡审批与绑定"}
+                          </small>
+                          <button className="secondary-button" onClick={() => props.onRevokeMember(member.id)} type="button">撤销凭证</button>
+                        </div>
                       )}
                     </div>
                   ))}
@@ -295,12 +259,11 @@ export function SessionPanel(props: Props) {
                 共享加入码
                 <input autoComplete="off" value={props.joinCodeInput} onChange={(event) => props.onJoinCodeInputChange(event.target.value)} />
               </label>
-              <label>
-                角色卡 ID（可留空）
-                <input value={props.joinPcId} onChange={(event) => props.onJoinPcIdChange(event.target.value)} />
-              </label>
               <button className="secondary-button" type="submit">使用共享码加入</button>
             </form>
+            <small className="permission-hint">
+              旧版共享码只建立临时玩家成员，不再接受角色卡 ID；角色必须由玩家提交并经 KP 审批。
+            </small>
           </details>
         </>
       )}

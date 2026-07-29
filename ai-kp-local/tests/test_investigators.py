@@ -1,4 +1,5 @@
 import json
+import threading
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -11,6 +12,8 @@ from ai_kp.characters.xlsx_import import (
     import_coc_character_xlsx,
 )
 from ai_kp.core.config import Settings
+from ai_kp.core.db import connect
+from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.rules.coc7_character import normalize_character_sheet
 from ai_kp.rules.coc7_recommendations import recommend_coc7_skill_points
 from ai_kp.rules.coc7_skills import list_coc7_skill_catalog
@@ -325,10 +328,16 @@ def test_campaign_submission_review_binding_and_runtime_state(tmp_path: Path) ->
         profile = client.post(
             "/player-profiles", json={"display_name": "玩家甲"}
         ).json()
+        seat = client.post(
+            f"/sessions/{session['session']['id']}/seats",
+            headers=kp_headers,
+            json={"label": "玩家甲席位"},
+        ).json()
         player = client.post(
-            "/sessions/join",
+            "/session-seats/claim",
+            headers={"X-AI-KP-Player-Token": profile["player_token"]},
             json={
-                "join_code": session["join_code"],
+                "invitation_code": seat["invitation_code"],
                 "display_name": "玩家甲",
             },
         ).json()
@@ -361,6 +370,13 @@ def test_campaign_submission_review_binding_and_runtime_state(tmp_path: Path) ->
         )
         assert before_approval.status_code == 200
         assert before_approval.json() == []
+        direct_pc = client.post(
+            f"/campaigns/{campaign['id']}/pcs",
+            headers=kp_headers,
+            json={"name": "绕过审核的角色", "sheet": {}},
+        )
+        assert direct_pc.status_code == 410
+        assert "must create or import an investigator" in direct_pc.json()["detail"]
 
         missing_comment = client.post(
             f"/campaigns/{campaign['id']}/investigators/{created['id']}/review",
@@ -413,6 +429,47 @@ def test_campaign_submission_review_binding_and_runtime_state(tmp_path: Path) ->
         assert public_cards.json()[0]["public_summary"]["name"] == "徐闻"
         assert "canonical_sheet" not in json.dumps(public_cards.json())
 
+        unbound_legacy_member = client.post(
+            "/sessions/join",
+            json={
+                "join_code": session["join_code"],
+                "display_name": "未绑定稳定身份的旧成员",
+            },
+        ).json()
+        unbound_assignment = client.post(
+            f"/sessions/{session['session']['id']}/members/"
+            f"{unbound_legacy_member['member']['id']}/assign-investigator",
+            headers=kp_headers,
+            json={"investigator_id": created["id"]},
+        )
+        assert unbound_assignment.status_code == 409
+        assert "stable player profile" in unbound_assignment.json()["detail"]
+
+        other_profile = client.post(
+            "/player-profiles", json={"display_name": "玩家乙"}
+        ).json()
+        other_seat = client.post(
+            f"/sessions/{session['session']['id']}/seats",
+            headers=kp_headers,
+            json={"label": "玩家乙席位"},
+        ).json()
+        other_player = client.post(
+            "/session-seats/claim",
+            headers={"X-AI-KP-Player-Token": other_profile["player_token"]},
+            json={
+                "invitation_code": other_seat["invitation_code"],
+                "display_name": "玩家乙",
+            },
+        ).json()
+        mismatched_assignment = client.post(
+            f"/sessions/{session['session']['id']}/members/"
+            f"{other_player['member']['id']}/assign-investigator",
+            headers=kp_headers,
+            json={"investigator_id": created["id"]},
+        )
+        assert mismatched_assignment.status_code == 409
+        assert "another player profile" in mismatched_assignment.json()["detail"]
+
         assigned = client.post(
             f"/sessions/{session['session']['id']}/members/"
             f"{player['member']['id']}/assign-investigator",
@@ -425,17 +482,18 @@ def test_campaign_submission_review_binding_and_runtime_state(tmp_path: Path) ->
             "/auth/me", headers={"Authorization": f"Bearer {player['access_token']}"}
         )
         assert refreshed_identity.json()["pc_id"] == approved_record["legacy_pc_id"]
-
-        observer = client.post(
-            "/sessions/join",
-            json={
-                "join_code": session["join_code"],
-                "display_name": "旁观玩家",
-            },
+        seats_after_assignment = client.get(
+            f"/sessions/{session['session']['id']}/seats",
+            headers=kp_headers,
         ).json()
+        assigned_seat = next(item for item in seats_after_assignment if item["id"] == seat["seat"]["id"])
+        assert assigned_seat["assigned_pc_id"] == approved_record["legacy_pc_id"]
+
         observer_cards = client.get(
             f"/campaigns/{campaign['id']}/pcs",
-            headers={"Authorization": f"Bearer {observer['access_token']}"},
+            headers={
+                "Authorization": f"Bearer {unbound_legacy_member['access_token']}"
+            },
         )
         assert observer_cards.status_code == 200
         assert observer_cards.json()[0]["public_summary"]["occupation"] == "调查记者"
@@ -491,3 +549,201 @@ def test_campaign_submission_review_binding_and_runtime_state(tmp_path: Path) ->
         assert owner_view.status_code == 200
         assert owner_view.json()[0]["review_comment"] is None
         assert len(owner_view.json()[0]["reviews"]) == 5
+
+
+def test_character_card_payload_limits_reject_unbounded_or_unknown_content(
+    tmp_path: Path,
+) -> None:
+    app = create_app(Settings(db_path=tmp_path / "bounded-investigators.sqlite3"))
+    with TestClient(app) as client:
+        profile = client.post(
+            "/player-profiles",
+            json={"display_name": "限制测试玩家"},
+        ).json()
+        headers = {"X-AI-KP-Player-Token": profile["player_token"]}
+
+        oversized = client.post(
+            "/investigators",
+            headers=headers,
+            json={
+                "canonical_sheet": {
+                    "identity": {"name": "超大角色"},
+                    "background": {"secret": "x" * 600_000},
+                },
+                "source_type": "manual",
+            },
+        )
+        unknown = client.post(
+            "/investigators",
+            headers=headers,
+            json={
+                "canonical_sheet": {
+                    "identity": {"name": "未知字段角色"},
+                    "unbounded_notes": "不受版本控制的字段",
+                },
+                "source_type": "manual",
+            },
+        )
+        listed = client.get("/investigators", headers=headers)
+
+    assert oversized.status_code == 422
+    assert unknown.status_code == 422
+    assert listed.status_code == 200
+    assert listed.json() == []
+
+
+def test_concurrent_review_and_resubmission_are_serialized_by_revision(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "investigator-review-race.sqlite3"
+    app = create_app(
+        Settings(
+            db_path=db_path,
+            local_admin_enabled=False,
+            admin_token="review-race-admin",
+        )
+    )
+    with TestClient(app) as client:
+        admin_headers = {"X-AI-KP-Admin-Token": "review-race-admin"}
+        campaign = client.post(
+            "/campaigns",
+            headers=admin_headers,
+            json={"title": "审批竞态测试"},
+        ).json()
+        session = client.post(
+            f"/campaigns/{campaign['id']}/sessions",
+            headers=admin_headers,
+            json={"kp_display_name": "并发 KP"},
+        ).json()
+        profile = client.post(
+            "/player-profiles", json={"display_name": "并发玩家"}
+        ).json()
+        player = client.post(
+            "/sessions/join",
+            json={
+                "join_code": session["join_code"],
+                "display_name": "并发玩家",
+            },
+        ).json()
+        player_headers = {
+            "Authorization": f"Bearer {player['access_token']}",
+            "X-AI-KP-Player-Token": profile["player_token"],
+        }
+        preview = import_coc_character_xlsx(_xlsx_fixture(), "并发调查员.xlsx")
+        created = client.post(
+            "/investigators",
+            headers=player_headers,
+            json={
+                "canonical_sheet": preview["canonical_sheet"],
+                "source_type": "manual",
+            },
+        ).json()
+        first_revision_id = created["current_revision_id"]
+        submitted = client.post(
+            f"/campaigns/{campaign['id']}/investigators/{created['id']}/submit",
+            headers=player_headers,
+            json={"revision_id": first_revision_id},
+        )
+        assert submitted.status_code == 200
+
+        revised_sheet = json.loads(json.dumps(preview["canonical_sheet"]))
+        revised_sheet["identity"]["occupation"] = "并发后的新职业"
+        revised = client.post(
+            f"/investigators/{created['id']}/revisions",
+            headers=player_headers,
+            json={"canonical_sheet": revised_sheet, "source_type": "manual"},
+        ).json()
+        second_revision_id = revised["current_revision_id"]
+
+    review_read = threading.Event()
+    release_review = threading.Event()
+    submit_entered = threading.Event()
+    submit_done = threading.Event()
+    failures: list[BaseException] = []
+
+    class PausingReviewRepository(Repository):
+        pause_once = True
+
+        def get_campaign_investigator(
+            self,
+            campaign_id: str,
+            investigator_id: str,
+        ) -> dict:
+            record = super().get_campaign_investigator(campaign_id, investigator_id)
+            if self.pause_once:
+                self.pause_once = False
+                review_read.set()
+                if not release_review.wait(timeout=5):
+                    raise TimeoutError("review race test was not released")
+            return record
+
+    def review_worker() -> None:
+        connection = connect(db_path)
+        try:
+            PausingReviewRepository(connection).review_campaign_investigator(
+                campaign_id=campaign["id"],
+                investigator_id=created["id"],
+                action="approved",
+                comment="审批旧提交",
+                kp_member_id=session["member"]["id"],
+                session_id=session["session"]["id"],
+            )
+            connection.commit()
+        except BaseException as exc:  # noqa: BLE001 - surfaced in the test thread
+            connection.rollback()
+            failures.append(exc)
+        finally:
+            connection.close()
+
+    def submit_worker() -> None:
+        connection = connect(db_path)
+        try:
+            submit_entered.set()
+            Repository(connection).submit_investigator_to_campaign(
+                campaign_id=campaign["id"],
+                investigator_id=created["id"],
+                revision_id=second_revision_id,
+                owner_profile_id=profile["profile"]["id"],
+                member_id=player["member"]["id"],
+                session_id=session["session"]["id"],
+            )
+            connection.commit()
+        except BaseException as exc:  # noqa: BLE001 - surfaced in the test thread
+            connection.rollback()
+            failures.append(exc)
+        finally:
+            connection.close()
+            submit_done.set()
+
+    reviewer = threading.Thread(target=review_worker)
+    submitter = threading.Thread(target=submit_worker)
+    reviewer.start()
+    assert review_read.wait(timeout=5)
+    submitter.start()
+    assert submit_entered.wait(timeout=5)
+    try:
+        assert not submit_done.wait(timeout=0.2)
+    finally:
+        release_review.set()
+    reviewer.join(timeout=5)
+    submitter.join(timeout=5)
+
+    assert not reviewer.is_alive()
+    assert not submitter.is_alive()
+    assert failures == []
+    observer = connect(db_path)
+    try:
+        final = Repository(observer).get_campaign_investigator(
+            campaign["id"],
+            created["id"],
+        )
+    finally:
+        observer.close()
+    assert final["status"] == "submitted"
+    assert final["submitted_revision_id"] == second_revision_id
+    assert final["approved_revision_id"] == first_revision_id
+    review_pairs = {
+        (item["action"], item["revision_id"]) for item in final["reviews"]
+    }
+    assert ("approved", first_revision_id) in review_pairs
+    assert ("submitted", second_revision_id) in review_pairs

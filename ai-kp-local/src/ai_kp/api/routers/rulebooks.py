@@ -8,21 +8,40 @@ from ai_kp.api.uploads import read_limited_body, safe_upload_filename
 from ai_kp.application.rulebook_service import RulebookService
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.document_process_sandbox import DocumentProcessPolicy
 from ai_kp.infrastructure.knowledge.minirag import MiniRagOriginalIndex
-from ai_kp.infrastructure.knowledge.pdf_ingestion import MAX_PDF_BYTES, extract_rulebook_pdf
+from ai_kp.infrastructure.knowledge.pdf_ingestion import MAX_PDF_BYTES
+from ai_kp.infrastructure.knowledge.rulebook_sandbox import (
+    extract_rulebook_pdf_isolated,
+)
 from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.platform.sessions.models import AuthenticatedMember
+from ai_kp.rule_authoring.models import RuleReviewSubmission, RuleStatus
 
 router = APIRouter()
+
+
+def _require_kp(identity: AuthenticatedMember) -> None:
+    if identity.role != "kp":
+        raise HTTPException(status_code=403, detail="KP access required")
 
 
 def get_rulebook_service(
     repo: Repository = Depends(get_repo),
     settings: Settings = Depends(get_app_settings),
 ) -> RulebookService:
+    parse_policy = DocumentProcessPolicy(
+        timeout_seconds=settings.module_parse_timeout_seconds,
+        memory_limit_mib=settings.module_parse_memory_limit_mib,
+        cpu_seconds=settings.module_parse_cpu_seconds,
+    )
     return RulebookService(
         repo,
-        extractor=extract_rulebook_pdf,
+        extractor=lambda data, filename: extract_rulebook_pdf_isolated(
+            data,
+            filename,
+            policy=parse_policy,
+        ),
         index_factory=lambda ruleset_id, source_id: MiniRagOriginalIndex(
             settings.rulebook_index_root,
             ruleset_id,
@@ -74,6 +93,42 @@ def get_rulebook(
     }
     source["validation_issues"] = repo.list_rule_validation_issues(source_id)
     return source
+
+
+@router.get("/rulebooks/sources/{source_id}/rules")
+def list_rulebook_rules(
+    source_id: str,
+    rule_status: str | None = Query(default=None, alias="status"),
+    rule_key: str | None = Query(default=None, max_length=160),
+    _admin: None = Depends(require_local_admin),
+    identity: AuthenticatedMember = Depends(get_identity),
+    service: RulebookService = Depends(get_rulebook_service),
+) -> list[dict]:
+    _require_kp(identity)
+    allowed_statuses = {status.value for status in RuleStatus}
+    if rule_status is not None and rule_status not in allowed_statuses:
+        raise HTTPException(status_code=422, detail="Invalid rule status")
+    return service.list_rules(
+        source_id,
+        status=rule_status,
+        rule_key=rule_key,
+    )
+
+
+@router.post("/rulebooks/rules/{rule_object_id}/review")
+def review_rulebook_rule(
+    rule_object_id: str,
+    payload: RuleReviewSubmission,
+    _admin: None = Depends(require_local_admin),
+    identity: AuthenticatedMember = Depends(get_identity),
+    service: RulebookService = Depends(get_rulebook_service),
+) -> dict:
+    _require_kp(identity)
+    return service.review_rule(
+        rule_object_id,
+        payload,
+        reviewer_member_id=identity.member_id,
+    )
 
 
 @router.post("/rulebooks/sources/{source_id}/index")
