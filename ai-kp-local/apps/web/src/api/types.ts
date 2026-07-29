@@ -127,6 +127,41 @@ export type ModuleAnalysisCapabilities = {
   };
 };
 
+export type ModuleEntity = {
+  id: string;
+  module_id: string;
+  entity_type: "npc" | "location" | "clue" | "organization" | "item" | "event" | "anchor";
+  name: string;
+  description: string;
+  visibility: string;
+  spoiler_tag: string | null;
+  source_candidate_id: string;
+};
+
+export type ModuleEntityRelation = {
+  id: string;
+  module_id: string;
+  source_entity_id: string;
+  source_name: string;
+  predicate: string;
+  target_entity_id: string;
+  target_name: string;
+  source_candidate_id: string;
+  confidence: number;
+  note: string;
+};
+
+export type ModuleReachabilityReport = {
+  module_id: string;
+  entry_entity_ids: string[];
+  reached_entity_ids: string[];
+  anchors: Array<ModuleEntity & { reachable: boolean }>;
+  all_anchors_reachable: boolean;
+  has_conflicts: boolean;
+  safe: boolean;
+  conflicts: ModuleEntityRelation[];
+};
+
 export type SessionInfo = {
   id: string;
   campaign_id: string;

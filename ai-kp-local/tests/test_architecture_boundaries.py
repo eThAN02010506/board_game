@@ -15,6 +15,7 @@ from ai_kp.infrastructure.database.investigators import InvestigatorRepository
 from ai_kp.infrastructure.database.maps import MapRepository
 from ai_kp.infrastructure.database.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
 from ai_kp.infrastructure.database.model_configuration import ModelConfigurationRepository
+from ai_kp.infrastructure.database.module_graph import ModuleGraphRepository
 from ai_kp.infrastructure.database.module_imports import ModuleImportRepository
 from ai_kp.infrastructure.database.module_knowledge import ModuleKnowledgeRepository
 from ai_kp.infrastructure.database.repositories import Repository
@@ -368,6 +369,11 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
             ("RulebookService", "query"),
             ("RulebookService", "execute"),
         },
+        "module_graph.py": {
+            ("ModuleGraphService", "create_entity"),
+            ("ModuleGraphService", "create_relation"),
+            ("ModuleGraphService", "check_reachability"),
+        },
     }
 
     for filename, required_calls in expected.items():
@@ -393,6 +399,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         RulebookRepository,
         ModuleImportRepository,
         ModuleKnowledgeRepository,
+        ModuleGraphRepository,
         ModelConfigurationRepository,
     )
     assert Repository.__mro__.count(SQLiteRepository) == 1
@@ -418,7 +425,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 17
+    assert LATEST_SCHEMA_VERSION == 18
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -437,6 +444,7 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (15, "add_memory_fts5_index"),
         (16, "add_module_document_imports"),
         (17, "add_module_knowledge_review"),
+        (18, "add_module_entity_graph"),
     ]
 
 

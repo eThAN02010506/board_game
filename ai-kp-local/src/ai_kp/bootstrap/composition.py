@@ -15,6 +15,7 @@ from ai_kp.api.routers import (
     investigators,
     maps,
     models,
+    module_graph,
     modules,
     realtime,
     rulebooks,
@@ -114,6 +115,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         world.router,
         maps.router,
         modules.router,
+        module_graph.router,
         turns.router,
     )
     app.state.domain_routers = domain_routers

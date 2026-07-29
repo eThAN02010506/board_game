@@ -4,6 +4,7 @@ from typing import Any, Protocol
 
 from ai_kp.platform.memory.npc_candidates import NpcCandidate
 from ai_kp.platform.memory.retrieval import RetrievedMemory
+from ai_kp.platform.modules.graph import ModuleEntityCreate, ModuleRelationCreate
 from ai_kp.platform.modules.ingestion import ModuleChunk
 from ai_kp.platform.modules.knowledge import ModuleKnowledgeCandidate
 from ai_kp.platform.scenes.map_generation import GeneratedMap
@@ -123,6 +124,34 @@ class ModuleKnowledgeStore(Protocol):
     ) -> dict: ...
 
     def commit(self) -> None: ...
+
+
+class ModuleGraphStore(Protocol):
+    def get_module_knowledge_candidate(self, candidate_id: str) -> dict: ...
+
+    def create_module_entity(
+        self,
+        module_id: str,
+        entity: ModuleEntityCreate,
+        *,
+        member_id: str,
+    ) -> dict: ...
+
+    def get_module_entity(self, entity_id: str) -> dict: ...
+
+    def create_module_relation(
+        self,
+        module_id: str,
+        relation: ModuleRelationCreate,
+        *,
+        member_id: str,
+    ) -> dict: ...
+
+    def module_graph_reachability(
+        self,
+        module_id: str,
+        entry_entity_ids: tuple[str, ...],
+    ) -> dict: ...
 
 
 class CheckStore(CampaignStore, Protocol):

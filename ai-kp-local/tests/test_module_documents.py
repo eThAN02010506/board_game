@@ -184,9 +184,9 @@ def test_kp_document_import_realcase_is_durable_retryable_and_private(
             f"/modules/{job['module_id']}/knowledge/candidates",
             headers=kp_headers,
             json={
-                "kind": "module_canon",
+                "kind": "module_anchor",
                 "title": "仓库照片",
-                "statement": "仓库藏有一张旧照片。",
+                "statement": "仓库中的旧照片揭示照片中的真相。",
                 "confidence": 1,
                 "visibility": "kp",
                 "citations": [
@@ -206,6 +206,51 @@ def test_kp_document_import_realcase_is_durable_retryable_and_private(
         )
         assert reviewed.status_code == 200
         assert reviewed.json()["status"] == "approved"
+        entity_payloads = (
+            ("location", "仓库"),
+            ("clue", "旧照片"),
+            ("anchor", "照片中的真相"),
+        )
+        graph_entities = []
+        for entity_type, name in entity_payloads:
+            created_entity = client.post(
+                f"/modules/{job['module_id']}/entities",
+                headers=kp_headers,
+                json={
+                    "entity_type": entity_type,
+                    "name": name,
+                    "source_candidate_id": candidate.json()["id"],
+                },
+            )
+            assert created_entity.status_code == 200
+            graph_entities.append(created_entity.json())
+        for source, predicate, target in (
+            (graph_entities[0], "leads_to", graph_entities[1]),
+            (graph_entities[1], "reveals", graph_entities[2]),
+        ):
+            relation = client.post(
+                f"/modules/{job['module_id']}/relations",
+                headers=kp_headers,
+                json={
+                    "source_entity_id": source["id"],
+                    "predicate": predicate,
+                    "target_entity_id": target["id"],
+                    "source_candidate_id": candidate.json()["id"],
+                },
+            )
+            assert relation.status_code == 200
+        reachability = client.post(
+            f"/modules/{job['module_id']}/graph/reachability",
+            headers=kp_headers,
+            json={"entry_entity_ids": [graph_entities[0]["id"]]},
+        )
+        assert reachability.status_code == 200
+        assert reachability.json()["all_anchors_reachable"] is True
+        assert reachability.json()["anchors"][0]["name"] == "照片中的真相"
+        assert client.get(
+            f"/modules/{job['module_id']}/entities",
+            headers=player_headers,
+        ).status_code == 403
         kp_search = client.get(
             f"/modules/{job['module_id']}/search",
             params={"q": "旧照片"},

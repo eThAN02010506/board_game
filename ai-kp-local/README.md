@@ -421,12 +421,18 @@ PATCH /modules/{module_id}/sections
 GET  /modules/{module_id}/search
 POST /modules/{module_id}/knowledge/extract
 POST /module-knowledge/{candidate_id}/review
+POST /modules/{module_id}/entities
+POST /modules/{module_id}/relations
+POST /modules/{module_id}/graph/reachability
 ```
 
 页面可运行本机 Tesseract OCR 或 OpenAI-compatible 多模态分析，并保存派生结果的
 模型/版本；它们不会替换原图。当前机器若没有 `chi_sim`，中文图片应使用视觉模型或
 安装对应 Tesseract 语言数据。章节可设置可见性与剧透标签；检索先做权限过滤。
 AI 提取的 Canon/Anchor/Reference 仅是候选，逐字引文校验通过后仍须 KP 批准。
+KP 可将批准的候选整理为 NPC、地点、线索、组织、物品、事件和剧情锚点，并建立
+带来源的窄类型关系。锚点检查使用确定性图遍历，不调用模型，也不会自动运行剧情；
+`blocks` 和 `contradicts` 会作为显式冲突单独报告。
 详细边界见 [`docs/MODULE_DOCUMENT_IMPORT.md`](docs/MODULE_DOCUMENT_IMPORT.md)。
 
 内部文本格式中，每个空行分隔的段落会成为一个 `module_chunk`。

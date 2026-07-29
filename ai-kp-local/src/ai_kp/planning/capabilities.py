@@ -172,8 +172,9 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="kp",
         summary=(
             "AI KP 已收到 Canon、剧情锚点、运行事实和生成候选的权威顺序约束，"
-            "且模组 Canon/Anchor 候选必须通过逐字来源校验与 KP 审批；尚缺实体关系、"
-            "合理性评分、冲突解释、锚点可达性检查和三种自动化模式。"
+            "且模组候选必须通过逐字来源校验与 KP 审批；现已支持带来源的窄类型实体关系、"
+            "显式冲突报告和确定性锚点可达性检查，尚缺合理性评分、动态桥接状态和"
+            "三种自动化模式。"
         ),
         dependencies=(
             "module_library",

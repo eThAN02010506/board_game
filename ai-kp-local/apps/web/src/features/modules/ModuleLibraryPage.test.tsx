@@ -67,6 +67,8 @@ describe("ModuleLibraryPage", () => {
       }
       if (url.endsWith("/assets")) return [];
       if (url.endsWith("/knowledge/candidates")) return [];
+      if (url.endsWith("/entities")) return [];
+      if (url.endsWith("/relations")) return [];
       return {};
     });
     vi.mocked(requestBlob).mockResolvedValue(new Blob());

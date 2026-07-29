@@ -24,6 +24,7 @@ import type {
   ModuleRecord,
   ModuleSearchResult
 } from "../../api/types";
+import { ModuleGraphWorkbench } from "./ModuleGraphWorkbench";
 
 type Props = {
   campaign: Campaign | null;
@@ -549,6 +550,11 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
           {!assets.length && <p className="empty-copy">当前版本没有提取到内嵌图片。</p>}
         </div>
       </section>
+      <ModuleGraphWorkbench
+        candidates={candidates}
+        moduleId={selectedModuleId}
+        onMessage={setMessage}
+      />
     </div>
   );
 }

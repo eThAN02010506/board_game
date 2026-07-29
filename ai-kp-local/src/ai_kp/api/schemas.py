@@ -203,6 +203,10 @@ class ModuleKnowledgeReview(BaseModel):
         return self
 
 
+class ModuleReachabilityCheck(BaseModel):
+    entry_entity_ids: list[str] = Field(min_length=1, max_length=100)
+
+
 class InvestigatorSubmit(BaseModel):
     revision_id: str | None = None
 

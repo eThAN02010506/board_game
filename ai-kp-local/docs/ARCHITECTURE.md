@@ -93,6 +93,9 @@ This catalogue is the single source of truth for delivery status, phase, depende
 - `modules` and `module_chunks` store imported KP material with visibility, spoiler metadata and
   PDF page or DOCX paragraph provenance. `module_import_jobs` is the durable queued/processing/
   completed/failed lifecycle; `module_assets` records every private image occurrence while
+  `module_entities` and `module_entity_relations` form a narrow, provenance-bound directed graph.
+  Every graph write references an approved module knowledge candidate; recursive traversal is a
+  deterministic diagnostic and never mutates module source or world facts.
   content-addressed storage deduplicates identical bytes outside SQLite.
 - Module Canon/Anchor remains source-linked knowledge; generated world completion enters the
   existing proposal boundary and only becomes an append-only runtime fact after confirmation.

@@ -87,6 +87,15 @@ AI KP 应能补全符合时代与地点的公共设施、普通 NPC、反应性�
 从 PDF/DOCX 的文本、表格和图片中抽取带来源的 Canon、Anchor、实体与关系候选，KP
 审核后保存。先实现人工修正和版本化，不自动运行剧情。
 
+当前已完成这一阶段的确定性基础：
+
+- 实体限定为 NPC、地点、线索、组织、物品、事件和剧情锚点；
+- 每个实体和关系必须引用同模组的已批准知识候选，剧情锚点必须引用
+  `module_anchor`；
+- `reveals`、`leads_to`、`provides_access_to` 和 `same_as` 参与有向可达性遍历；
+- `blocks` 与 `contradicts` 不参与“绕过去”的遍历，而是作为显式冲突报告；
+- 玩家不能访问实体图作者接口。当前图是 KP 的来源整理工具，不是玩家公开百科。
+
 ### B. 只读缺口分析
 
 输入玩家意图和当前世界，返回“已有答案 / 可以补全 / 存在冲突 / 信息不足”及理由；
@@ -124,3 +133,7 @@ AI KP 应能补全符合时代与地点的公共设施、普通 NPC、反应性�
   将实体、关系和主张抽取与向量索引作为可配置的派生管线。
 - [AWS Event Sourcing pattern](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/event-sourcing-pattern.html)
   使用不可变追加事件作为单一事实来源，并通过投影或重放恢复当前状态。
+- [SQLite recursive CTE](https://www.sqlite.org/lang_with.html)
+  使用递归公共表表达式遍历树或图；当前锚点检查因此不需要额外图数据库。
+- [W3C PROV Model Primer](https://www.w3.org/TR/prov-primer/)
+  派生实体保留来源与生成责任链；本项目将已批准知识候选作为图节点和边的直接来源。
