@@ -233,7 +233,17 @@ class WorldRepository(SQLiteRepository):
             """,
             params,
         ).fetchall()
-        return [row_to_dict(row) for row in rows]
+        result = [row_to_dict(row) for row in rows]
+        for item in result:
+            item["style_annotations"] = decode_json_field(
+                item.pop("style_annotations_json", "[]"),
+                [],
+            )
+            item["review_flags"] = decode_json_field(
+                item.pop("review_flags_json", "[]"),
+                [],
+            )
+        return result
 
     def append_event(
         self,

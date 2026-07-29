@@ -194,6 +194,10 @@ CREATE TABLE IF NOT EXISTS module_chunks (
   paragraph_start INTEGER,
   paragraph_end INTEGER,
   source_locator TEXT,
+  semantic_kind TEXT NOT NULL DEFAULT 'text',
+  classification_confidence REAL NOT NULL DEFAULT 0,
+  style_annotations_json TEXT NOT NULL DEFAULT '[]',
+  review_flags_json TEXT NOT NULL DEFAULT '[]',
   knowledge_status TEXT NOT NULL DEFAULT 'pending'
     CHECK (knowledge_status IN ('pending', 'processing', 'completed', 'failed')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -230,6 +234,9 @@ CREATE TABLE IF NOT EXISTS module_assets (
   height INTEGER,
   source_locator TEXT NOT NULL,
   nearby_heading TEXT,
+  asset_role TEXT NOT NULL DEFAULT 'unknown',
+  classification_confidence REAL NOT NULL DEFAULT 0,
+  review_flags_json TEXT NOT NULL DEFAULT '[]',
   visibility TEXT NOT NULL DEFAULT 'kp'
     CHECK (visibility IN ('player', 'table', 'kp', 'secret')),
   spoiler_tag TEXT,

@@ -8,7 +8,7 @@ from typing import Any
 
 from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
-PROMPT_VERSION = "module-knowledge.v1"
+PROMPT_VERSION = "module-knowledge.v2"
 
 
 def _parse_json(text: str) -> Any:
@@ -59,6 +59,9 @@ class ModuleKnowledgeAgent:
 
 来源位置：{chunk.get('source_locator') or ''}
 来源标题：{chunk['title']}
+确定性结构提示：{chunk.get('semantic_kind') or 'text'}
+提示置信度：{chunk.get('classification_confidence') or 0}
+结构提示只用于导航，不是剧情证据；仍须完全以来源正文为准。
 <SOURCE_TEXT>
 {chunk['text']}
 </SOURCE_TEXT>

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import PurePosixPath
 
 from ai_kp.core.ids import new_id
-from ai_kp.infrastructure.database.rows import row_to_dict
+from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 from ai_kp.platform.modules.documents import DocumentAsset, DocumentChunk
 
@@ -153,8 +154,10 @@ class ModuleImportRepository(SQLiteRepository):
                 """
                 INSERT INTO module_chunks
                   (id, module_id, title, text, visibility, order_index, content_kind,
-                   page_start, page_end, paragraph_start, paragraph_end, source_locator)
-                VALUES (?, ?, ?, ?, 'kp', ?, ?, ?, ?, ?, ?, ?)
+                   page_start, page_end, paragraph_start, paragraph_end, source_locator,
+                   semantic_kind, classification_confidence, style_annotations_json,
+                   review_flags_json)
+                VALUES (?, ?, ?, ?, 'kp', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     new_id("chunk"),
@@ -168,6 +171,10 @@ class ModuleImportRepository(SQLiteRepository):
                     chunk.paragraph_start,
                     chunk.paragraph_end,
                     chunk.source_locator,
+                    chunk.semantic_kind,
+                    chunk.classification_confidence,
+                    json.dumps(chunk.style_annotations, ensure_ascii=False),
+                    json.dumps(chunk.review_flags, ensure_ascii=False),
                 ),
             )
         for asset, content_hash, storage_path in assets:
@@ -175,8 +182,9 @@ class ModuleImportRepository(SQLiteRepository):
                 """
                 INSERT INTO module_assets
                   (id, module_id, content_hash, storage_path, mime_type, width, height,
-                   source_locator, nearby_heading)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   source_locator, nearby_heading, asset_role, classification_confidence,
+                   review_flags_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     new_id("modasset"),
@@ -188,6 +196,9 @@ class ModuleImportRepository(SQLiteRepository):
                     asset.height,
                     asset.source_locator,
                     asset.nearby_heading,
+                    asset.asset_role,
+                    asset.classification_confidence,
+                    json.dumps(asset.review_flags, ensure_ascii=False),
                 ),
             )
         total = len(chunks) + len(assets)
@@ -236,7 +247,13 @@ class ModuleImportRepository(SQLiteRepository):
             """,
             (module_id,),
         ).fetchall()
-        return [row_to_dict(row) for row in rows]
+        result = [row_to_dict(row) for row in rows]
+        for item in result:
+            item["review_flags"] = decode_json_field(
+                item.pop("review_flags_json", "[]"),
+                [],
+            )
+        return result
 
     def get_module_asset(self, asset_id: str) -> dict:
         row = self.connection.execute(
@@ -251,6 +268,10 @@ class ModuleImportRepository(SQLiteRepository):
         if row is None:
             raise KeyError(f"Module asset not found: {asset_id}")
         result = row_to_dict(row)
+        result["review_flags"] = decode_json_field(
+            result.pop("review_flags_json", "[]"),
+            [],
+        )
         result["download_name"] = (
             f"{result['id']}{PurePosixPath(result['storage_path']).suffix or '.bin'}"
         )

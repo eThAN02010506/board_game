@@ -23,6 +23,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0016_module_documents,
     v0017_module_knowledge,
     v0018_module_graph,
+    v0019_module_document_structure,
 )
 
 
@@ -119,6 +120,11 @@ MIGRATIONS = (
         v0018_module_graph.VERSION,
         v0018_module_graph.NAME,
         v0018_module_graph.migrate,
+    ),
+    Migration(
+        v0019_module_document_structure.VERSION,
+        v0019_module_document_structure.NAME,
+        v0019_module_document_structure.migrate,
     ),
 )
 

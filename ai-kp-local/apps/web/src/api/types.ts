@@ -63,6 +63,10 @@ export type ModuleChunk = {
   paragraph_start: number | null;
   paragraph_end: number | null;
   source_locator: string | null;
+  semantic_kind: string;
+  classification_confidence: number;
+  style_annotations: string[];
+  review_flags: string[];
   order_index: number;
   spoiler_tag: string | null;
   knowledge_status: "pending" | "processing" | "completed" | "failed";
@@ -77,6 +81,9 @@ export type ModuleAsset = {
   height: number | null;
   source_locator: string;
   nearby_heading: string | null;
+  asset_role: string;
+  classification_confidence: number;
+  review_flags: string[];
   visibility: string;
   spoiler_tag: string | null;
   analysis_status: "pending_analysis" | "completed" | "failed";

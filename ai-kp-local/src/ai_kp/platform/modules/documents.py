@@ -15,8 +15,14 @@ from zipfile import BadZipFile, ZipFile
 
 from pypdf import PdfReader
 
+from ai_kp.platform.modules.structure import (
+    infer_asset_role,
+    infer_semantic_kind,
+    looks_like_heading,
+)
+
 DocumentType = Literal["pdf", "docx"]
-PARSER_VERSION = "module-document.v1"
+PARSER_VERSION = "module-document.v2"
 MAX_MODULE_BYTES = 64 * 1024 * 1024
 MAX_PDF_PAGES = 1200
 MAX_ARCHIVE_MEMBERS = 10_000
@@ -56,6 +62,10 @@ class DocumentChunk:
     paragraph_start: int | None = None
     paragraph_end: int | None = None
     source_locator: str = ""
+    semantic_kind: str = "text"
+    classification_confidence: float = 0
+    style_annotations: tuple[str, ...] = ()
+    review_flags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -67,6 +77,9 @@ class DocumentAsset:
     nearby_heading: str | None = None
     width: int | None = None
     height: int | None = None
+    asset_role: str = "unknown"
+    classification_confidence: float = 0
+    review_flags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -141,16 +154,17 @@ def _extract_pdf(
     current_heading = title
     for page_number, page in enumerate(reader.pages, start=1):
         try:
-            page_text = _normalize_text(page.extract_text() or "")
+            page_text = page.extract_text() or ""
         except Exception as exc:
             raise ValueError(f"第 {page_number} 页文本提取失败") from exc
-        for block in _split_text(page_text):
+        for block in _split_pdf_text(page_text):
             extracted_characters += len(block)
             if extracted_characters > MAX_EXTRACTED_CHARACTERS:
                 raise ValueError("KP 本提取文本超过 1200 万字符限制")
             possible_heading = _possible_heading(block)
             if possible_heading:
                 current_heading = possible_heading
+            hint = infer_semantic_kind(block)
             chunks.append(
                 DocumentChunk(
                     title=current_heading,
@@ -159,6 +173,9 @@ def _extract_pdf(
                     page_start=page_number,
                     page_end=page_number,
                     source_locator=f"pdf:page:{page_number}",
+                    semantic_kind=hint.semantic_kind,
+                    classification_confidence=hint.confidence,
+                    review_flags=hint.review_flags,
                 )
             )
         try:
@@ -169,6 +186,8 @@ def _extract_pdf(
             raw = bytes(image.data)
             width = getattr(image.image, "width", None)
             height = getattr(image.image, "height", None)
+            if width and height and width <= 32 and height <= 32:
+                continue
             asset_bytes, image_pixels = _track_asset_limits(
                 raw,
                 width,
@@ -178,6 +197,12 @@ def _extract_pdf(
                 image_pixels=image_pixels,
             )
             filename = image.name or f"page-{page_number}-image-{image_index}.bin"
+            role, confidence, flags = infer_asset_role(
+                filename=filename,
+                nearby_heading=current_heading,
+                width=width,
+                height=height,
+            )
             assets.append(
                 DocumentAsset(
                     data=raw,
@@ -187,6 +212,9 @@ def _extract_pdf(
                     height=height,
                     source_locator=f"pdf:page:{page_number}:image:{image_index}",
                     nearby_heading=current_heading,
+                    asset_role=role,
+                    classification_confidence=confidence,
+                    review_flags=flags,
                 )
             )
     if not chunks and not assets:
@@ -254,30 +282,45 @@ def _extract_docx(
                 image_pixels=image_pixels,
             )
             referenced_media.add(target)
+            filename = PurePosixPath(target).name
+            role, confidence, flags = infer_asset_role(
+                filename=filename,
+                nearby_heading=heading,
+                width=width,
+                height=height,
+            )
             assets.append(
                 DocumentAsset(
                     data=raw,
-                    filename=PurePosixPath(target).name,
+                    filename=filename,
                     mime_type=_asset_mime(target),
                     width=width,
                     height=height,
                     source_locator=locator,
                     nearby_heading=heading,
+                    asset_role=role,
+                    classification_confidence=confidence,
+                    review_flags=flags,
                 )
             )
 
         for element in body:
             if element.tag == f"{_W}p":
                 paragraph_index += 1
-                text = _element_text(element)
+                text, style_annotations = _paragraph_text_and_styles(element)
                 style = element.find(f"./{_W}pPr/{_W}pStyle")
                 style_name = style.get(f"{_W}val", "") if style is not None else ""
-                if text and _is_heading_style(style_name):
+                styled_heading = _is_heading_style(style_name)
+                if text and looks_like_heading(text, styled_heading=styled_heading):
                     current_heading = text[:200]
                 if text:
                     extracted_characters += len(text)
                     if extracted_characters > MAX_EXTRACTED_CHARACTERS:
                         raise ValueError("KP 本提取文本超过 1200 万字符限制")
+                    hint = infer_semantic_kind(
+                        text,
+                        styled_heading=styled_heading,
+                    )
                     chunks.append(
                         DocumentChunk(
                             title=current_heading,
@@ -286,6 +329,10 @@ def _extract_docx(
                             paragraph_start=paragraph_index,
                             paragraph_end=paragraph_index,
                             source_locator=f"docx:paragraph:{paragraph_index}",
+                            semantic_kind=hint.semantic_kind,
+                            classification_confidence=hint.confidence,
+                            style_annotations=style_annotations,
+                            review_flags=hint.review_flags,
                         )
                     )
                 for image_index, blip in enumerate(
@@ -313,6 +360,7 @@ def _extract_docx(
                     extracted_characters += len(text)
                     if extracted_characters > MAX_EXTRACTED_CHARACTERS:
                         raise ValueError("KP 本提取文本超过 1200 万字符限制")
+                    hint = infer_semantic_kind(text, content_kind="table")
                     chunks.append(
                         DocumentChunk(
                             title=current_heading,
@@ -322,6 +370,8 @@ def _extract_docx(
                             paragraph_start=paragraph_index,
                             paragraph_end=paragraph_index,
                             source_locator=f"docx:table:{paragraph_index}",
+                            semantic_kind=hint.semantic_kind,
+                            classification_confidence=hint.confidence,
                         )
                     )
                 for image_index, blip in enumerate(element.iter(f"{_A}blip"), start=1):
@@ -394,6 +444,36 @@ def _element_text(element: ElementTree.Element) -> str:
     return _normalize_text("".join(node.text or "" for node in element.iter(f"{_W}t")))
 
 
+def _paragraph_text_and_styles(
+    paragraph: ElementTree.Element,
+) -> tuple[str, tuple[str, ...]]:
+    annotations: set[str] = set()
+    text_parts: list[str] = []
+    for run in paragraph.findall(f"./{_W}r"):
+        run_text = "".join(node.text or "" for node in run.iter(f"{_W}t"))
+        text_parts.append(run_text)
+        properties = run.find(f"{_W}rPr")
+        if properties is None or not run_text.strip():
+            continue
+        for tag, label in (("b", "bold"), ("i", "italic"), ("u", "underline")):
+            node = properties.find(f"{_W}{tag}")
+            if node is not None and node.get(f"{_W}val", "true").casefold() not in {
+                "0",
+                "false",
+                "none",
+            }:
+                annotations.add(label)
+        color = properties.find(f"{_W}color")
+        color_value = color.get(f"{_W}val", "") if color is not None else ""
+        if color_value and color_value.casefold() not in {"auto", "000000"}:
+            annotations.add(f"color:#{color_value.upper()}")
+        highlight = properties.find(f"{_W}highlight")
+        highlight_value = highlight.get(f"{_W}val", "") if highlight is not None else ""
+        if highlight_value and highlight_value.casefold() not in {"none", "auto"}:
+            annotations.add(f"highlight:{highlight_value.casefold()}")
+    return _normalize_text("".join(text_parts)), tuple(sorted(annotations))
+
+
 def _normalize_text(text: str) -> str:
     return "\n".join(
         line
@@ -423,15 +503,56 @@ def _split_text(text: str) -> list[str]:
     return blocks
 
 
+def _split_pdf_text(text: str) -> list[str]:
+    """Keep page-local provenance while exposing headings and paragraph boundaries."""
+
+    if not text.strip():
+        return []
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        line = re.sub(r"[ \t\u00a0]+", " ", raw_line).strip()
+        if not line:
+            if current:
+                paragraphs.append("\n".join(current))
+                current = []
+            continue
+        if looks_like_heading(line):
+            if current:
+                paragraphs.append("\n".join(current))
+                current = []
+            paragraphs.append(line)
+            continue
+        current.append(line)
+    if current:
+        paragraphs.append("\n".join(current))
+
+    blocks: list[str] = []
+    pending: list[str] = []
+    pending_size = 0
+    target_size = min(MAX_CHUNK_CHARACTERS, 1400)
+    for paragraph in paragraphs:
+        if looks_like_heading(paragraph):
+            if pending:
+                blocks.append("\n\n".join(pending))
+                pending = []
+                pending_size = 0
+            blocks.append(paragraph)
+            continue
+        if pending and pending_size + len(paragraph) + 2 > target_size:
+            blocks.append("\n\n".join(pending))
+            pending = []
+            pending_size = 0
+        pending.append(paragraph)
+        pending_size += len(paragraph) + 2
+    if pending:
+        blocks.append("\n\n".join(pending))
+    return [block for block in blocks if block.strip()]
+
+
 def _possible_heading(block: str) -> str | None:
     first = block.splitlines()[0].strip()
-    if len(first) <= 100 and (
-        re.match(
-            r"^(?:第.+章|chapter\s+\d+|\d+(?:\.\d+)*[ .、])",
-            first,
-            re.IGNORECASE,
-        )
-    ):
+    if looks_like_heading(first):
         return first
     return None
 

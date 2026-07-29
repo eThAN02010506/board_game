@@ -696,6 +696,18 @@ h2 {
   white-space: pre-wrap;
 }
 
+.module-reader .module-style-hints,
+.module-reader .module-review-flag,
+.module-asset-card .module-review-flag {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--color-warning, #a6672b);
+}
+
+.module-reader .module-style-hints {
+  color: var(--color-muted, #65706b);
+}
+
 .module-section-scope {
   display: grid;
   grid-template-columns: minmax(100px, 0.45fr) minmax(180px, 1fr) auto;

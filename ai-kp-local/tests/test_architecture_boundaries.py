@@ -425,7 +425,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 18
+    assert LATEST_SCHEMA_VERSION == 19
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -443,9 +443,10 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (14, "add_image_model_configuration"),
         (15, "add_memory_fts5_index"),
         (16, "add_module_document_imports"),
-        (17, "add_module_knowledge_review"),
-        (18, "add_module_entity_graph"),
-    ]
+            (17, "add_module_knowledge_review"),
+            (18, "add_module_entity_graph"),
+            (19, "add_module_document_structure"),
+        ]
 
 
 def test_failed_http_use_case_rolls_back_its_partial_write(tmp_path: Path) -> None:

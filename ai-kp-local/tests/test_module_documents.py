@@ -10,6 +10,7 @@ from PIL import Image
 from ai_kp.api.main import create_app
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.platform.modules.documents import extract_module_document
+from ai_kp.platform.modules.structure import infer_asset_role, infer_semantic_kind
 
 
 def _png() -> bytes:
@@ -26,7 +27,8 @@ def _docx(*, valid_xml: bool = True) -> bytes:
  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
  <w:body>
   <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>第一章 雾港</w:t></w:r></w:p>
-  <w:p><w:r><w:t>码头仓库中藏着一张旧照片。</w:t></w:r>
+  <w:p><w:r><w:rPr><w:color w:val="C00000"/></w:rPr>
+   <w:t>码头仓库中藏着一张旧照片。</w:t></w:r>
    <w:r><a:blip r:embed="rId5"/></w:r>
   </w:p>
   <w:tbl><w:tr><w:tc><w:p><w:r><w:t>人物</w:t></w:r></w:p></w:tc>
@@ -68,11 +70,28 @@ def test_docx_extraction_preserves_heading_table_image_and_anchors() -> None:
     assert [chunk.content_kind for chunk in result.chunks] == ["text", "text", "table"]
     assert result.chunks[1].title == "第一章 雾港"
     assert result.chunks[1].source_locator == "docx:paragraph:2"
+    assert result.chunks[0].semantic_kind == "heading"
+    assert result.chunks[1].style_annotations == ("color:#C00000",)
     assert "人物 | 秘密" in result.chunks[2].text
     assert len(result.assets) == 1
     assert result.assets[0].source_locator == "docx:paragraph:2:image:1"
     assert result.assets[0].width == 40
     assert result.assets[0].height == 24
+
+
+def test_scenario_structure_hints_are_deterministic_and_require_review() -> None:
+    assert infer_semantic_kind("<6号车厢>").semantic_kind == "heading"
+    assert infer_semantic_kind("目击怪物进行 SAN 1/1D6 检定").semantic_kind == "san_check"
+    clue = infer_semantic_kind("调查员可以发现座位下的旧车票线索。")
+    assert clue.semantic_kind == "clue"
+    assert clue.review_flags == ("verify_clue_role",)
+    role, confidence, flags = infer_asset_role(
+        filename="town-map.png",
+        nearby_heading="小镇地图",
+        width=1200,
+        height=900,
+    )
+    assert (role, confidence, flags) == ("map", 0.92, ())
 
 
 def test_image_only_pdf_is_imported_for_future_ocr() -> None:

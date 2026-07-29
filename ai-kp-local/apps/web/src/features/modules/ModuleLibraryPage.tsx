@@ -73,7 +73,13 @@ function AssetPreview({
       <div>
         <strong>{asset.nearby_heading ?? "未命名图片"}</strong>
         <small>{asset.source_locator}</small>
-        <span>{asset.width && asset.height ? `${asset.width} × ${asset.height}` : asset.mime_type}</span>
+        <span>
+          {asset.asset_role ?? "unknown"} ·{" "}
+          {asset.width && asset.height ? `${asset.width} × ${asset.height}` : asset.mime_type}
+        </span>
+        {!!asset.review_flags?.length && (
+          <small className="module-review-flag">{asset.review_flags.join(" · ")}</small>
+        )}
         {asset.ocr_text && <p><b>OCR</b> {asset.ocr_text}</p>}
         {asset.visual_summary && <p><b>视觉摘要</b> {asset.visual_summary}</p>}
         {asset.analysis_error && <p className="module-analysis-error">{asset.analysis_error}</p>}
@@ -461,7 +467,20 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
               </form>
               {headingChunks.map((chunk) => (
                 <article key={chunk.id}>
-                  <small>{chunk.source_locator ?? "内部文本"} · {chunk.content_kind}</small>
+                  <small>
+                    {chunk.source_locator ?? "内部文本"} · {chunk.semantic_kind ?? chunk.content_kind}
+                    {" · "}{Math.round((chunk.classification_confidence ?? 0) * 100)}%
+                  </small>
+                  {!!chunk.style_annotations?.length && (
+                    <small className="module-style-hints">
+                      原文样式：{chunk.style_annotations.join(" · ")}
+                    </small>
+                  )}
+                  {!!chunk.review_flags?.length && (
+                    <small className="module-review-flag">
+                      待确认：{chunk.review_flags.join(" · ")}
+                    </small>
+                  )}
                   <p>{chunk.text}</p>
                 </article>
               ))}
