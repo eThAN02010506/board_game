@@ -27,6 +27,7 @@ PROPOSAL_JSON_FIELDS = (
     "proposed_map_moves",
 )
 CHECK_CONSEQUENCE_ACTION_TYPE = "check_consequence_basis"
+WORLD_EXPANSION_ACTION_TYPE = "world_expansion_basis"
 
 
 class TurnRepository(SQLiteRepository):
@@ -189,11 +190,111 @@ class TurnRepository(SQLiteRepository):
             ),
             None,
         )
+        expansion_matches = [
+            action["payload"]
+            for action in resolved_actions
+            if action["action_type"] == WORLD_EXPANSION_ACTION_TYPE
+        ]
+        if len(expansion_matches) > 1:
+            raise ValueError("A proposal has multiple world expansion bases")
+        world_expansion = expansion_matches[0] if expansion_matches else None
         proposal["proposal_kind"] = (
-            "check_consequence" if consequence is not None else "standard"
+            "check_consequence"
+            if consequence is not None
+            else "world_expansion"
+            if world_expansion is not None
+            else "standard"
         )
         proposal["check_consequence"] = consequence
+        proposal["world_expansion"] = world_expansion
         return proposal
+
+    def attach_world_expansion_basis(
+        self,
+        proposal_id: str,
+        *,
+        module_run_id: str,
+        module_run_version: int,
+        fingerprint: str,
+        analysis: dict,
+        candidate: dict,
+    ) -> dict:
+        proposal = self.get_turn_proposal(proposal_id)
+        if proposal["status"] != "draft":
+            raise ValueError("World expansion metadata requires a draft proposal")
+        if proposal["check_consequence"] is not None:
+            raise ValueError("Check consequence proposals cannot become world expansions")
+        if self.get_world_expansion_basis(proposal_id) is not None:
+            raise ValueError("World expansion metadata is already attached")
+        run = self.get_campaign_module_run(module_run_id)
+        if run["campaign_id"] != proposal["campaign_id"]:
+            raise ValueError("World expansion run and proposal belong to different campaigns")
+        if run["status"] != "active" or run["version"] != module_run_version:
+            raise ValueError("World expansion basis is stale")
+        if len(fingerprint) != 64 or any(
+            character not in "0123456789abcdef" for character in fingerprint
+        ):
+            raise ValueError("World expansion fingerprint must be SHA-256")
+        payload = {
+            "proposal_kind": "world_expansion",
+            "module_run_id": module_run_id,
+            "module_run_version": module_run_version,
+            "module_id": run["module_id"],
+            "module_source_hash": run["module_source_hash"],
+            "fingerprint": fingerprint,
+            "analysis": analysis,
+            "candidate": candidate,
+        }
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        if len(encoded.encode("utf-8")) > 64 * 1024:
+            raise ValueError("World expansion basis exceeds 64 KiB")
+        self.add_proposal_action(
+            proposal_id,
+            WORLD_EXPANSION_ACTION_TYPE,
+            actor="system",
+            note="source-bound scene director world gap",
+            payload=payload,
+        )
+        return payload
+
+    def get_world_expansion_basis(self, proposal_id: str) -> dict | None:
+        matches = [
+            action["payload"]
+            for action in self.list_proposal_actions(proposal_id)
+            if action["action_type"] == WORLD_EXPANSION_ACTION_TYPE
+        ]
+        if len(matches) > 1:
+            raise ValueError("A proposal has multiple world expansion bases")
+        return matches[0] if matches else None
+
+    def find_live_world_expansion(
+        self,
+        campaign_id: str,
+        *,
+        fingerprint: str,
+    ) -> dict | None:
+        rows = self.connection.execute(
+            """
+            SELECT p.id, pa.payload_json
+            FROM proposal_actions pa
+            JOIN turn_proposals p ON p.id = pa.proposal_id
+            WHERE p.campaign_id = ?
+              AND pa.action_type = ?
+              AND p.status IN ('draft', 'approved', 'overridden')
+            ORDER BY p.created_at, p.id
+            """,
+            (campaign_id, WORLD_EXPANSION_ACTION_TYPE),
+        ).fetchall()
+        for row in rows:
+            payload = decode_json_field(row["payload_json"], {})
+            if payload.get("fingerprint") == fingerprint:
+                return self.get_turn_proposal(str(row["id"]))
+        return None
 
     def attach_check_consequence_basis(
         self,

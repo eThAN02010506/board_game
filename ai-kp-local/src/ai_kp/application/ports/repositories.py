@@ -733,7 +733,7 @@ class RulebookStore(Protocol):
     ) -> list[dict]: ...
 
 
-class TurnStore(CheckStore, RealtimeOutbox, Protocol):
+class TurnStore(CheckStore, ModuleRunStore, RealtimeOutbox, Protocol):
     def begin_immediate(self) -> None: ...
 
     def create_player_action(
@@ -763,6 +763,8 @@ class TurnStore(CheckStore, RealtimeOutbox, Protocol):
 
     def get_turn_proposal(self, proposal_id: str) -> dict: ...
 
+    def list_fact_heads(self, campaign_id: str) -> list[Any]: ...
+
     def attach_check_consequence_basis(
         self,
         proposal_id: str,
@@ -779,6 +781,26 @@ class TurnStore(CheckStore, RealtimeOutbox, Protocol):
         *,
         player_action_id: str,
         result_fingerprint: str,
+    ) -> dict | None: ...
+
+    def attach_world_expansion_basis(
+        self,
+        proposal_id: str,
+        *,
+        module_run_id: str,
+        module_run_version: int,
+        fingerprint: str,
+        analysis: dict,
+        candidate: dict,
+    ) -> dict: ...
+
+    def get_world_expansion_basis(self, proposal_id: str) -> dict | None: ...
+
+    def find_live_world_expansion(
+        self,
+        campaign_id: str,
+        *,
+        fingerprint: str,
     ) -> dict | None: ...
 
     def approve_turn_proposal(

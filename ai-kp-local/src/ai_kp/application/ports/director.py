@@ -29,4 +29,18 @@ class CheckConsequenceDirector(Protocol):
     ) -> Any: ...
 
 
-__all__ = ["CheckConsequenceDirector", "KpDirector"]
+class WorldExpansionDirector(Protocol):
+    async def handle_world_expansion(
+        self,
+        *,
+        campaign_id: str,
+        player_intent: str,
+        analysis_snapshot: dict,
+        pc_id: str | None = None,
+        location: str | None = None,
+        map_id: str | None = None,
+        active_spoiler_tags: tuple[str, ...] = (),
+    ) -> Any: ...
+
+
+__all__ = ["CheckConsequenceDirector", "KpDirector", "WorldExpansionDirector"]

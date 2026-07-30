@@ -10,6 +10,7 @@ const draftProposal: TurnProposal = {
   status: "draft",
   proposal_kind: "standard",
   check_consequence: null,
+  world_expansion: null,
   player_action: "检查窗框上的泥土",
   public_narration: "窗框边缘沾着尚未干透的黑泥。",
   kp_notes: "黑泥来自旧码头。",
@@ -41,6 +42,59 @@ const consequenceProposal: TurnProposal = {
   },
   proposed_checks: [],
   player_action: "检查档案柜"
+};
+
+const worldExpansionProposal: TurnProposal = {
+  ...draftProposal,
+  id: "proposal_world",
+  proposal_kind: "world_expansion",
+  check_consequence: null,
+  world_expansion: {
+    proposal_kind: "world_expansion",
+    module_run_id: "run_1",
+    module_run_version: 4,
+    module_id: "module_1",
+    module_source_hash: "a".repeat(64),
+    fingerprint: "b".repeat(64),
+    analysis: {
+      fingerprint: "b".repeat(64),
+      decision: "world_gap",
+      reasons: ["模组没有直接答案"],
+      scene: {
+        key: "town",
+        title: "小镇",
+        play_pace: "freeform",
+        location_entity_id: null,
+        started_world_time: "1928-10-03"
+      },
+      module_id: "module_1",
+      module_title: "小镇疑云",
+      module_source_hash: "a".repeat(64),
+      module_run_id: "run_1",
+      module_run_version: 4,
+      active_spoiler_tags: ["act-1"],
+      unreachable_anchor_count: 0,
+      deferred_source_count: 0,
+      world_fact_head_hash: "c".repeat(64),
+      writes_performed: false
+    },
+    candidate: {
+      expansion_kind: "environment",
+      subject: "小镇警务设施",
+      proposal: "采用治安官办公室。",
+      rationale: "符合年代与聚落规模。",
+      confidence: "medium",
+      assumptions: ["采用治安官制度"],
+      conflicts: ["模组没有说明辖区"],
+      alternatives: [
+        { title: "邻镇辖区", description: "由邻镇负责", tradeoff: "耗时较长" },
+        { title: "临时驻点", description: "巡警临时值守", tradeoff: "资源有限" }
+      ]
+    }
+  },
+  player_action: "寻找镇上的警察局",
+  proposed_checks: [],
+  proposed_events: []
 };
 
 const context: ContextAssembly = {
@@ -205,6 +259,23 @@ describe("ProposalPanel", () => {
       screen.getByRole("button", { name: /草稿 · 检定后果 检查档案柜/ })
     ).toBeVisible();
     expect(screen.getAllByText("草稿 · 检定后果")).toHaveLength(2);
+  });
+
+  it("shows a world-expansion basis, risks and alternatives", () => {
+    renderPanel({
+      proposals: [worldExpansionProposal],
+      activeProposal: worldExpansionProposal
+    });
+
+    expect(
+      screen.getByRole("button", { name: /草稿 · 世界补全 寻找镇上的警察局/ })
+    ).toBeVisible();
+    expect(screen.getByText("小镇警务设施")).toBeVisible();
+    expect(screen.getByText("模组没有说明辖区")).toBeVisible();
+    expect(screen.getByText(/来源：模组运行 v4/)).toBeVisible();
+    fireEvent.click(screen.getByText("替代方案（2）"));
+    expect(screen.getByText("邻镇辖区")).toBeVisible();
+    expect(screen.getByText("临时驻点")).toBeVisible();
   });
 
   it("shows a context snapshot only when it belongs to the active proposal", () => {

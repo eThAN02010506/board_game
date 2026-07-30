@@ -9,7 +9,8 @@ import type {
   ModuleRunUpdate,
   RuleReviewCandidate,
   RuleReviewSubmission,
-  Role
+  Role,
+  TurnProposal
 } from "./types";
 
 export const apiBase = "/api";
@@ -257,6 +258,23 @@ export function analyzeModuleRunIntent(
     {
       method: "POST",
       body: JSON.stringify({ player_intent: playerIntent })
+    }
+  );
+}
+
+export function generateWorldExpansionProposal(
+  runId: string,
+  payload: {
+    player_intent: string;
+    pc_id?: string | null;
+    map_id?: string | null;
+  }
+): Promise<TurnProposal> {
+  return requestJson<TurnProposal>(
+    `/module-runs/${encodeURIComponent(runId)}/director/world-expansion-proposals`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
     }
   );
 }

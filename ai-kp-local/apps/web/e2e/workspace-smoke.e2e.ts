@@ -35,3 +35,16 @@ test("unknown paths fall back to the play workspace without a blank screen", asy
     "page"
   );
 });
+
+test("campaign workspace reflows into one column on a narrow screen", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/campaigns");
+
+  await expect(page.locator(".sidebar")).toBeVisible();
+  await expect(page.getByRole("navigation")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.locator(".app-shell")).toHaveCSS("grid-template-columns", "390px");
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  ).toBeTruthy();
+});

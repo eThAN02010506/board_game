@@ -340,6 +340,12 @@ class DirectorAnalysisRequest(BaseModel):
     player_intent: str = Field(min_length=1, max_length=1000)
 
 
+class WorldExpansionProposalRequest(BaseModel):
+    player_intent: str = Field(min_length=1, max_length=1000)
+    pc_id: str | None = Field(default=None, max_length=160)
+    map_id: str | None = Field(default=None, max_length=160)
+
+
 class ModuleReachabilityCheck(BaseModel):
     entry_entity_ids: list[str] = Field(min_length=1, max_length=100)
 

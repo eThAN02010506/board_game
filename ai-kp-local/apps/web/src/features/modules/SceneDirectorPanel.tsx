@@ -3,6 +3,7 @@ import {
   Compass,
   GitBranch,
   History,
+  Lightbulb,
   MapPin,
   Search,
   ShieldAlert
@@ -12,6 +13,7 @@ import type { FormEvent } from "react";
 
 import {
   analyzeModuleRunIntent,
+  generateWorldExpansionProposal,
   getModuleRunDirectorState,
   isApiError,
   transitionModuleRunScene,
@@ -22,7 +24,8 @@ import type {
   ModulePlayPace,
   ModuleRun,
   ModuleRunDirectorState,
-  ModuleRuntimeEntityStatus
+  ModuleRuntimeEntityStatus,
+  TurnProposal
 } from "../../api/types";
 
 type Props = {
@@ -53,6 +56,7 @@ const decisionLabels: Record<DirectorAnalysis["decision"], string> = {
 export function SceneDirectorPanel({ run, onRunChanged }: Props) {
   const [directorState, setDirectorState] = useState<ModuleRunDirectorState | null>(null);
   const [analysis, setAnalysis] = useState<DirectorAnalysis | null>(null);
+  const [generatedProposal, setGeneratedProposal] = useState<TurnProposal | null>(null);
   const [intent, setIntent] = useState("");
   const [sceneKey, setSceneKey] = useState(run.current_scene_key ?? "");
   const [sceneTitle, setSceneTitle] = useState(
@@ -99,6 +103,7 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
   useEffect(() => {
     setDirectorState(null);
     setAnalysis(null);
+    setGeneratedProposal(null);
     setSceneKey(run.current_scene_key ?? "");
     setSceneTitle(run.current_scene_title ?? run.current_scene_key ?? "");
     setPlayPace(run.play_pace ?? "freeform");
@@ -199,9 +204,35 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
     try {
       const result = await analyzeModuleRunIntent(run.id, intent.trim());
       setAnalysis(result);
+      setGeneratedProposal(null);
       setMessage(`分析完成：${decisionLabels[result.decision]}。本次分析没有写入游戏状态。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateExpansion() {
+    if (analysis?.decision !== "world_gap") return;
+    setBusy(true);
+    try {
+      const proposal = await generateWorldExpansionProposal(run.id, {
+        player_intent: analysis.player_intent
+      });
+      setGeneratedProposal(proposal);
+      setMessage(
+        proposal.status === "draft"
+          ? "世界补全草稿已生成；它还不是世界事实，请前往游玩页审批。"
+          : "相同场景版本已有世界补全提案，已复用原记录。"
+      );
+    } catch (error) {
+      if (isApiError(error, 409) && error.code === "conflict") {
+        await recoverConflict();
+        setAnalysis(null);
+      } else {
+        setMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
       setBusy(false);
     }
@@ -343,6 +374,27 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
                     </blockquote>
                   ))}
                 </details>
+              )}
+              {analysis.decision === "world_gap" && (
+                <div className="world-expansion-action">
+                  <button
+                    disabled={busy}
+                    onClick={() => void generateExpansion()}
+                    type="button"
+                  >
+                    <Lightbulb size={15} />
+                    生成可审批的世界补全草稿
+                  </button>
+                  <small>会调用当前模型；批准前不会写入世界、NPC、地图或记忆。</small>
+                </div>
+              )}
+              {generatedProposal?.world_expansion && (
+                <article className="world-expansion-preview">
+                  <span>待审批 · {generatedProposal.world_expansion.candidate.confidence}</span>
+                  <strong>{generatedProposal.world_expansion.candidate.subject}</strong>
+                  <p>{generatedProposal.world_expansion.candidate.proposal}</p>
+                  <a href="/play">前往游玩页审批</a>
+                </article>
               )}
             </section>
           )}

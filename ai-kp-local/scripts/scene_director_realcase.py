@@ -21,6 +21,7 @@ def request_json(
     payload: dict[str, Any] | None = None,
     token: str | None = None,
     expected_status: int = 200,
+    timeout_seconds: float = 15,
 ) -> Any:
     headers = {"Content-Type": "application/json"}
     if token:
@@ -36,7 +37,7 @@ def request_json(
         method=method,
     )
     try:
-        with urlopen(request, timeout=15) as response:
+        with urlopen(request, timeout=timeout_seconds) as response:
             status = response.status
             body = response.read()
     except HTTPError as exc:
@@ -50,7 +51,7 @@ def request_json(
     return json.loads(body) if body else None
 
 
-def run(base_url: str) -> None:
+def run(base_url: str, *, exercise_world_expansion: bool = False) -> None:
     campaign = request_json(
         base_url,
         "POST",
@@ -152,6 +153,24 @@ def run(base_url: str) -> None:
         f"/module-runs/{module_run['id']}/director-state",
         token=kp_token,
     )
+    world_expansion = None
+    approved_expansion = None
+    if exercise_world_expansion:
+        world_expansion = request_json(
+            base_url,
+            "POST",
+            f"/module-runs/{module_run['id']}/director/world-expansion-proposals",
+            token=kp_token,
+            payload={"player_intent": "我去寻找镇上的警察局"},
+            timeout_seconds=180,
+        )
+        approved_expansion = request_json(
+            base_url,
+            "POST",
+            f"/kp/proposals/{world_expansion['id']}/approve",
+            token=kp_token,
+            payload={"note": "HTTP 真实模型测试批准"},
+        )
 
     assert transitioned_run["version"] == module_run["version"] + 1
     assert canon["decision"] == "answer_from_canon"
@@ -160,18 +179,36 @@ def run(base_url: str) -> None:
     assert spoiler["sources"] == []
     assert state["run"]["version"] == transitioned_run["version"]
     assert len(state["scene_events"]) == 1
+    if exercise_world_expansion:
+        assert world_expansion is not None
+        assert approved_expansion is not None
+        assert world_expansion["proposal_kind"] == "world_expansion"
+        assert world_expansion["proposed_events"] == []
+        assert world_expansion["proposed_memories"] == []
+        assert len(world_expansion["world_expansion"]["candidate"]["alternatives"]) >= 2
+        assert approved_expansion["status"] == "approved"
     print(
         "Scene Director HTTP real-case passed: "
         "scene persisted, canon scoped, spoiler withheld, stale write rejected, "
-        "player denied, analysis read-only."
+        "player denied, analysis read-only"
+        + (
+            ", model-generated world expansion reviewed and approved."
+            if exercise_world_expansion
+            else "."
+        )
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8003")
+    parser.add_argument(
+        "--world-expansion",
+        action="store_true",
+        help="Also call the configured LLM and approve its source-bound draft.",
+    )
     args = parser.parse_args()
-    run(args.base_url)
+    run(args.base_url, exercise_world_expansion=args.world_expansion)
 
 
 if __name__ == "__main__":

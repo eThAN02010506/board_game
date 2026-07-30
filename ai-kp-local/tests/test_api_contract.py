@@ -105,6 +105,7 @@ EXPECTED_HTTP_ROUTES = {
     ("POST", "/module-runs/{run_id}/scene-transitions"),
     ("PATCH", "/module-runs/{run_id}/entities/{entity_id}/state"),
     ("POST", "/module-runs/{run_id}/director/analyze"),
+    ("POST", "/module-runs/{run_id}/director/world-expansion-proposals"),
     ("POST", "/campaigns/{campaign_id}/module-imports"),
     ("GET", "/campaigns/{campaign_id}/module-imports"),
     ("GET", "/module-imports/{job_id}"),

@@ -50,10 +50,15 @@ export function AppLayout({
       </a>
       <aside className="sidebar">
         <div className="brand">
-          <CircleDot size={18} />
-          AI KP Local
+          <span className="brand-mark" aria-hidden="true">
+            <CircleDot size={19} />
+          </span>
+          <span className="brand-copy">
+            <strong>AI KP Local</strong>
+            <small>本地叙事工作台</small>
+          </span>
         </div>
-        <nav>
+        <nav aria-label="工作台页面">
           {workspaceRoutes.map((item) => {
             const Icon = item.icon;
             return (

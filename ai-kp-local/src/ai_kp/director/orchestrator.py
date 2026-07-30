@@ -4,6 +4,7 @@ import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Generic, TypeVar
 
 from ai_kp.director.check_consequence import (
     check_consequence_output_instructions,
@@ -11,14 +12,20 @@ from ai_kp.director.check_consequence import (
 )
 from ai_kp.director.context_builder import ContextAssembly, ContextBuilder, estimate_tokens
 from ai_kp.director.turn_output import KpTurnOutput, StructuredOutputError, parse_kp_turn_output
+from ai_kp.director.world_expansion import (
+    WORLD_EXPANSION_OUTPUT_INSTRUCTIONS,
+    WorldExpansionOutput,
+    parse_world_expansion_output,
+)
 from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
 CHECK_CONSEQUENCE_CONTEXT_BUDGET = 12000
+OutputT = TypeVar("OutputT", KpTurnOutput, WorldExpansionOutput)
 
 
 @dataclass(frozen=True)
-class KpTurnResult:
-    output: KpTurnOutput
+class KpTurnResult(Generic[OutputT]):
+    output: OutputT
     context: ContextAssembly
     repaired: bool = False
 
@@ -37,7 +44,7 @@ class KpOrchestrator:
         map_id: str | None = None,
         profession_hint: str | None = None,
         active_spoiler_tags: tuple[str, ...] = (),
-    ) -> KpTurnResult:
+    ) -> KpTurnResult[KpTurnOutput]:
         context = ContextBuilder(self.connection).build(
             campaign_id=campaign_id,
             player_action=player_action,
@@ -62,7 +69,7 @@ class KpOrchestrator:
         pc_id: str | None = None,
         location: str | None = None,
         map_id: str | None = None,
-    ) -> KpTurnResult:
+    ) -> KpTurnResult[KpTurnOutput]:
         hidden_batch = check_snapshot.get("has_hidden_checks") is True
         snapshot_source = {
             "kind": "verified_check_batch",
@@ -103,11 +110,50 @@ class KpOrchestrator:
             parse_consequence,
         )
 
+    async def handle_world_expansion(
+        self,
+        *,
+        campaign_id: str,
+        player_intent: str,
+        analysis_snapshot: dict,
+        pc_id: str | None = None,
+        location: str | None = None,
+        map_id: str | None = None,
+        active_spoiler_tags: tuple[str, ...] = (),
+    ) -> KpTurnResult[WorldExpansionOutput]:
+        analysis_source = {
+            "kind": "scene_director_analysis",
+            "id": str(analysis_snapshot["fingerprint"]),
+            "label": "确定性世界缺口分析",
+            "content": json.dumps(
+                analysis_snapshot,
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            "visibility": "kp",
+            "required": True,
+        }
+        context = ContextBuilder(self.connection).build(
+            campaign_id=campaign_id,
+            player_action=player_intent,
+            pc_id=pc_id,
+            location=location,
+            map_id=map_id,
+            active_spoiler_tags=active_spoiler_tags,
+            visibility_scope="kp",
+            output_instructions=WORLD_EXPANSION_OUTPUT_INSTRUCTIONS,
+            additional_sources=(analysis_source,),
+        )
+        return await self._complete_structured(
+            context,
+            parse_world_expansion_output,
+        )
+
     async def _complete_structured(
         self,
         context: ContextAssembly,
-        parser: Callable[[str], KpTurnOutput],
-    ) -> KpTurnResult:
+        parser: Callable[[str], OutputT],
+    ) -> KpTurnResult[OutputT]:
         request_messages = [
             ChatMessage(role=item["role"], content=item["content"]) for item in context.messages
         ]

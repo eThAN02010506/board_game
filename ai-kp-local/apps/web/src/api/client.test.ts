@@ -4,6 +4,7 @@ import {
   analyzeModuleRunIntent,
   getCurrentModuleRun,
   getModuleRunDirectorState,
+  generateWorldExpansionProposal,
   listModuleRuns,
   listRuleReviewCandidates,
   requestJson,
@@ -95,6 +96,9 @@ describe("API client", () => {
       status: "discovered"
     });
     await analyzeModuleRunIntent("run/1", "检查照片");
+    await generateWorldExpansionProposal("run/1", {
+      player_intent: "寻找警察局"
+    });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/campaigns/camp%2F1/module-runs?limit=10&offset=2"
@@ -129,6 +133,13 @@ describe("API client", () => {
     expect(fetchMock.mock.calls[7]?.[1]).toMatchObject({
       method: "POST",
       body: JSON.stringify({ player_intent: "检查照片" })
+    });
+    expect(fetchMock.mock.calls[8]?.[0]).toBe(
+      "/api/module-runs/run%2F1/director/world-expansion-proposals"
+    );
+    expect(fetchMock.mock.calls[8]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ player_intent: "寻找警察局" })
     });
   });
 

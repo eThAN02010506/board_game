@@ -131,6 +131,10 @@ This catalogue is the single source of truth for delivery status, phase, depende
   [`SCENE_DIRECTOR.md`](SCENE_DIRECTOR.md).
 - Module Canon/Anchor remains source-linked knowledge; generated world completion enters the
   existing proposal boundary and only becomes an append-only runtime fact after confirmation.
+  A world-expansion proposal stores its immutable module-run/version/source hash, deterministic
+  gap analysis, current World Fact head hash and model candidate in `proposal_actions`; approval
+  fails closed when any bound runtime source changed. The first slice deliberately carries no
+  event, memory, NPC or map effects, so proposal approval is not yet strict fact materialization.
   See [`WORLD_EXPANSION.md`](WORLD_EXPANSION.md).
 - `maps` stores stable identity, publication status, the current revision pointer and the selected public background; `map_revisions` stores canonical MapSpec JSON, validation output and content/layout hashes.
 - `map_locations` and `map_routes` are the current compatible projection used by movement and older API fields. Deterministic SVG is rendered from the role-filtered current MapSpec instead of being trusted as an independent structure source.

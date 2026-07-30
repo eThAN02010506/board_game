@@ -73,6 +73,11 @@ timestamp, so replay preserves the actual sequence.
 the requested place or NPC exists. `blocked_by_spoiler` requires a KP decision and cannot be
 silently converted into narration.
 
+The KP UI can turn a current `world_gap` into a source-bound `world_expansion` proposal. The
+proposal records the module-run version, source hash, world-fact head hash, deterministic analysis,
+model candidate, alternatives and context snapshot. Approval fails closed if any bound runtime
+source changed. See `WORLD_EXPANSION.md`.
+
 ## Concurrency and authorization
 
 All director endpoints are KP-only and resolve the campaign from the run stored on the server.
@@ -110,8 +115,11 @@ Against a disposable running backend:
 .venv/bin/python scripts/scene_director_realcase.py --base-url http://127.0.0.1:8003
 ```
 
+When the disposable backend is configured with a reachable LLM, add
+`--world-expansion` to exercise generation, review and approval as well.
+
 ## Deferred work
 
-Safety pause, private lines/veils, handout reveal, automatic check-consequence return, proposal
-generation from the analysis, and end-of-session memory review are intentionally separate
-vertical slices. Their absence keeps this capability `partial`.
+Safety pause, private lines/veils, handout reveal, automatic check-consequence return, strict
+World Fact materialization after actual contact, and end-of-session memory review are
+intentionally separate vertical slices. Their absence keeps this capability `partial`.

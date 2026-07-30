@@ -101,15 +101,36 @@ AI KP 应能补全符合时代与地点的公共设施、普通 NPC、反应性�
 输入玩家意图和当前世界，返回“已有答案 / 可以补全 / 存在冲突 / 信息不足”及理由；
 不创建地点、NPC、事件或事实。
 
+当前场景导演已经实现只读分类。只有 `world_gap` 可以进入下一阶段；当前剧透范围内存在
+原文答案、未来剧透命中或实体图存在显式冲突时，不得生成补全草稿。
+
 ### C. 草稿补全
 
 把地点、NPC、支线和锚点桥接放入现有 proposal 审批流。批准前不得进入地图、NPC
 档案、记忆或世界事实。
 
+当前已实现第一条安全纵向切片：
+
+- `POST /module-runs/{run_id}/director/world-expansion-proposals` 只允许当前团 KP 调用；
+- 模型必须返回补全类型、建议、时代/场景理由、置信度、假设、潜在冲突和至少两个替代
+  方案；
+- 模型调用前先做确定性 `world_gap` 检查，调用后在 `BEGIN IMMEDIATE` 内重新检查 KP
+  会话、活动模组 ID、来源哈希、运行版本、缺口结论和当前 World Fact head 哈希；
+- 同一运行版本、事实快照和标准化玩家意图使用 SHA-256 指纹复用已有草稿；
+- `proposal_actions.world_expansion_basis` 保存来源和候选快照，`context_assemblies` 保存
+  实际模型上下文；
+- 草稿本身不携带事件、记忆、NPC 更新或地图移动。批准仅采用 KP 可覆写的公开叙述；
+  把接触结果提升为严格 World Fact 属于下一阶段。
+
+审批时会再次核对模组运行版本、模组来源哈希和 World Fact head 哈希。任何一项变化都会
+返回冲突，要求 KP 拒绝旧草稿并重新分析。
+
 ### D. 事实落地与可达性
 
 批准并实际接触后，以追加事件写入 World Fact，并更新锚点可达性投影。重启后从模组
 版本和事件流重建，不依赖模型“记忆”。
+
+此阶段仍未实现；不能把“世界补全草稿已批准”误解为“严格世界事实已经建立”。
 
 ## Real-case 验收
 
@@ -123,8 +144,20 @@ AI KP 应能补全符合时代与地点的公共设施、普通 NPC、反应性�
 6. 玩家实际到达后，地点和接触事件成为追加式世界事实，重启后保持一致。
 7. 同一关键线索可通过原路线或替代路径保持可达，但不会重复发放或提前泄露真相。
 
+使用已配置真实模型的隔离后端时，可运行：
+
+```bash
+.venv/bin/python scripts/scene_director_realcase.py \
+  --base-url http://127.0.0.1:8003 \
+  --world-expansion
+```
+
 ## 设计依据
 
+- [Foundry VTT Scenes](https://foundryvtt.com/article/scenes/) 将当前活动场景与世界中可探索
+  区域分开管理；本项目同样把场景游标与生成候选分离。
+- [Foundry VTT Journal Entries](https://foundryvtt.com/article/journal/) 使用独立页面、权限
+  和场景链接组织 GM 信息；补全候选因此保留独立审计与展示边界，不写回模组正文。
 - [Unstructured Partitioning](https://docs.unstructured.io/open-source/core-functionality/partitioning)
   区分 PDF/DOCX 文档元素，并支持 PDF OCR、布局和图片块提取；旧 DOC 会先在隔离
   进程内转换为 DOCX，再进入同一抽取边界。

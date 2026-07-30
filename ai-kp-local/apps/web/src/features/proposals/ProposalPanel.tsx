@@ -39,6 +39,7 @@ export function ProposalPanel(props: Props) {
             <span>
               {statusLabel(proposal.status)}
               {proposal.proposal_kind === "check_consequence" ? " · 检定后果" : ""}
+              {proposal.proposal_kind === "world_expansion" ? " · 世界补全" : ""}
             </span>
             <small>{proposal.player_action}</small>
           </button>
@@ -51,10 +52,64 @@ export function ProposalPanel(props: Props) {
               {statusLabel(props.activeProposal.status)}
               {props.activeProposal.proposal_kind === "check_consequence"
                 ? " · 检定后果"
+                : props.activeProposal.proposal_kind === "world_expansion"
+                ? " · 世界补全"
                 : ""}
             </span>
             <p>{props.activeProposal.public_narration}</p>
             <small>{props.activeProposal.kp_notes}</small>
+            {props.activeProposal.world_expansion && (
+              <section className="proposal-world-expansion">
+                <header>
+                  <strong>{props.activeProposal.world_expansion.candidate.subject}</strong>
+                  <span>
+                    {props.activeProposal.world_expansion.candidate.expansion_kind}
+                    {" · "}
+                    {props.activeProposal.world_expansion.candidate.confidence}
+                  </span>
+                </header>
+                <p>{props.activeProposal.world_expansion.candidate.proposal}</p>
+                <small>{props.activeProposal.world_expansion.candidate.rationale}</small>
+                {!!props.activeProposal.world_expansion.candidate.assumptions.length && (
+                  <details>
+                    <summary>待确认假设</summary>
+                    <ul>
+                      {props.activeProposal.world_expansion.candidate.assumptions.map(
+                        (item) => <li key={item}>{item}</li>
+                      )}
+                    </ul>
+                  </details>
+                )}
+                {!!props.activeProposal.world_expansion.candidate.conflicts.length && (
+                  <details open>
+                    <summary>潜在冲突</summary>
+                    <ul>
+                      {props.activeProposal.world_expansion.candidate.conflicts.map(
+                        (item) => <li key={item}>{item}</li>
+                      )}
+                    </ul>
+                  </details>
+                )}
+                <details>
+                  <summary>
+                    替代方案（{props.activeProposal.world_expansion.candidate.alternatives.length}）
+                  </summary>
+                  {props.activeProposal.world_expansion.candidate.alternatives.map(
+                    (alternative) => (
+                      <article key={alternative.title}>
+                        <strong>{alternative.title}</strong>
+                        <p>{alternative.description}</p>
+                        <small>{alternative.tradeoff}</small>
+                      </article>
+                    )
+                  )}
+                </details>
+                <small>
+                  来源：模组运行 v{props.activeProposal.world_expansion.module_run_version}。
+                  若场景或线索状态变化，审批会被拒绝并要求重新分析。
+                </small>
+              </section>
+            )}
             <div className="effect-list">
               <ProposalEffectList title="待检定" items={props.activeProposal.proposed_checks} />
               <ProposalEffectList title="事件" items={props.activeProposal.proposed_events} />

@@ -1,5 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const backendPort = process.env.AI_KP_PLAYWRIGHT_BACKEND_PORT ?? "8012";
+const frontendPort = process.env.AI_KP_PLAYWRIGHT_FRONTEND_PORT ?? "5174";
+const backendUrl = `http://127.0.0.1:${backendPort}`;
+const frontendUrl = `http://127.0.0.1:${frontendPort}`;
+const reuseExistingServer = process.env.AI_KP_PLAYWRIGHT_REUSE_SERVERS === "1";
+
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.e2e.ts",
@@ -9,7 +15,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? [["line"], ["html", { open: "never" }]] : "line",
   use: {
-    baseURL: "http://127.0.0.1:5174",
+    baseURL: frontendUrl,
     screenshot: "only-on-failure",
     trace: "on-first-retry",
     video: "retain-on-failure"
@@ -24,7 +30,7 @@ export default defineConfig({
     {
       name: "backend",
       command:
-        ".venv/bin/python -m uvicorn ai_kp.api.main:app --host 127.0.0.1 --port 8012",
+        `.venv/bin/python -m uvicorn ai_kp.api.main:app --host 127.0.0.1 --port ${backendPort}`,
       cwd: "../..",
       env: {
         AI_KP_BACKUP_ROOT: ".playwright/backups",
@@ -34,20 +40,20 @@ export default defineConfig({
         AI_KP_RULEBOOK_INDEX_ROOT: ".playwright/rag",
         PYTHONPATH: "src"
       },
-      url: "http://127.0.0.1:8012/health",
-      reuseExistingServer: !process.env.CI,
+      url: `${backendUrl}/health`,
+      reuseExistingServer,
       timeout: 120_000,
       stdout: "ignore",
       stderr: "pipe"
     },
     {
       name: "frontend",
-      command: "pnpm dev --host 127.0.0.1 --port 5174",
+      command: `pnpm dev --host 127.0.0.1 --port ${frontendPort}`,
       env: {
-        VITE_BACKEND_TARGET: "http://127.0.0.1:8012"
+        VITE_BACKEND_TARGET: backendUrl
       },
-      url: "http://127.0.0.1:5174/play",
-      reuseExistingServer: !process.env.CI,
+      url: `${frontendUrl}/play`,
+      reuseExistingServer,
       timeout: 120_000,
       stdout: "ignore",
       stderr: "pipe"

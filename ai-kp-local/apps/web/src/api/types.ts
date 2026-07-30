@@ -877,13 +877,51 @@ export type TurnProposal = {
   id: string;
   campaign_id: string;
   status: string;
-  proposal_kind: "standard" | "check_consequence";
+  proposal_kind: "standard" | "check_consequence" | "world_expansion";
   check_consequence: {
     proposal_kind: "check_consequence";
     origin_proposal_id: string;
     player_action_id: string;
     check_ids: string[];
     result_fingerprint: string;
+  } | null;
+  world_expansion: {
+    proposal_kind: "world_expansion";
+    module_run_id: string;
+    module_run_version: number;
+    module_id: string;
+    module_source_hash: string | null;
+    fingerprint: string;
+    analysis: {
+      fingerprint: string;
+      decision: "world_gap";
+      reasons: string[];
+      scene: DirectorAnalysis["scene"];
+      module_id: string;
+      module_title: string;
+      module_source_hash: string | null;
+      module_run_id: string;
+      module_run_version: number;
+      active_spoiler_tags: string[];
+      unreachable_anchor_count: number;
+      deferred_source_count: number;
+      world_fact_head_hash: string;
+      writes_performed: false;
+    };
+    candidate: {
+      expansion_kind: "environment" | "reactive_branch" | "anchor_bridge";
+      subject: string;
+      proposal: string;
+      rationale: string;
+      confidence: "low" | "medium" | "high";
+      assumptions: string[];
+      conflicts: string[];
+      alternatives: Array<{
+        title: string;
+        description: string;
+        tradeoff: string;
+      }>;
+    };
   } | null;
   player_action: string;
   public_narration: string;

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   analyzeModuleRunIntent,
+  generateWorldExpansionProposal,
   getModuleRunDirectorState,
   transitionModuleRunScene,
   updateModuleRunEntityState
@@ -11,7 +12,8 @@ import {
 import type {
   DirectorAnalysis,
   ModuleRun,
-  ModuleRunDirectorState
+  ModuleRunDirectorState,
+  TurnProposal
 } from "../../api/types";
 import { SceneDirectorPanel } from "./SceneDirectorPanel";
 
@@ -20,6 +22,7 @@ vi.mock("../../api/client", async (importOriginal) => {
   return {
     ...actual,
     analyzeModuleRunIntent: vi.fn(),
+    generateWorldExpansionProposal: vi.fn(),
     getModuleRunDirectorState: vi.fn(),
     transitionModuleRunScene: vi.fn(),
     updateModuleRunEntityState: vi.fn()
@@ -120,10 +123,73 @@ const analysis: DirectorAnalysis = {
   writes_performed: false
 };
 
+const worldGapAnalysis: DirectorAnalysis = {
+  ...analysis,
+  player_intent: "寻找镇上的警察局",
+  decision: "world_gap",
+  recommended_action: "propose_world_expansion",
+  reasons: ["当前允许的模组来源没有直接回答该意图，可进入受约束世界补全。"],
+  sources: []
+};
+
+const worldExpansionProposal: TurnProposal = {
+  id: "proposal_world_1",
+  campaign_id: run.campaign_id,
+  status: "draft",
+  proposal_kind: "world_expansion",
+  check_consequence: null,
+  world_expansion: {
+    proposal_kind: "world_expansion",
+    module_run_id: run.id,
+    module_run_version: run.version,
+    module_id: run.module_id,
+    module_source_hash: run.module_source_hash,
+    fingerprint: "b".repeat(64),
+    analysis: {
+      fingerprint: "b".repeat(64),
+      decision: "world_gap",
+      reasons: worldGapAnalysis.reasons,
+      scene: worldGapAnalysis.scene,
+      module_id: run.module_id,
+      module_title: run.module_title,
+      module_source_hash: run.module_source_hash,
+      module_run_id: run.id,
+      module_run_version: run.version,
+      active_spoiler_tags: run.active_spoiler_tags,
+      unreachable_anchor_count: 0,
+      deferred_source_count: 0,
+      world_fact_head_hash: "c".repeat(64),
+      writes_performed: false
+    },
+    candidate: {
+      expansion_kind: "environment",
+      subject: "小镇警务设施",
+      proposal: "设置一间小型治安官办公室。",
+      rationale: "符合年代和聚落规模。",
+      confidence: "medium",
+      assumptions: ["采用治安官制度"],
+      conflicts: [],
+      alternatives: [
+        { title: "邻镇辖区", description: "由邻镇负责", tradeoff: "路程更远" },
+        { title: "临时驻点", description: "只有临时巡警", tradeoff: "档案有限" }
+      ]
+    }
+  },
+  player_action: worldGapAnalysis.player_intent,
+  public_narration: "你找到了一间不起眼的治安官办公室。",
+  kp_notes: "批准前不是事实。",
+  proposed_checks: [],
+  proposed_events: [],
+  proposed_memories: [],
+  proposed_npc_updates: [],
+  proposed_map_moves: []
+};
+
 describe("SceneDirectorPanel", () => {
   beforeEach(() => {
     vi.mocked(getModuleRunDirectorState).mockResolvedValue(directorState);
     vi.mocked(analyzeModuleRunIntent).mockResolvedValue(analysis);
+    vi.mocked(generateWorldExpansionProposal).mockResolvedValue(worldExpansionProposal);
     vi.mocked(transitionModuleRunScene).mockResolvedValue({
       run: { ...run, current_scene_title: "灯塔前厅", version: 4 },
       event: {
@@ -224,5 +290,29 @@ describe("SceneDirectorPanel", () => {
         status: "discovered"
       }
     ));
+  });
+
+  it("creates a reviewable proposal only after a world-gap result", async () => {
+    const user = userEvent.setup();
+    vi.mocked(analyzeModuleRunIntent).mockResolvedValueOnce(worldGapAnalysis);
+    render(<SceneDirectorPanel onRunChanged={vi.fn()} run={run} />);
+    await screen.findByText(/导演状态已同步/);
+
+    await user.type(screen.getByLabelText("玩家准备做什么？"), "寻找镇上的警察局");
+    await user.click(screen.getByRole("button", { name: "分析现有答案与世界缺口" }));
+    await user.click(
+      await screen.findByRole("button", { name: "生成可审批的世界补全草稿" })
+    );
+
+    await waitFor(() => expect(generateWorldExpansionProposal).toHaveBeenCalledWith(
+      "run/1",
+      { player_intent: "寻找镇上的警察局" }
+    ));
+    expect(await screen.findByText("小镇警务设施")).toBeVisible();
+    expect(screen.getByText("设置一间小型治安官办公室。")).toBeVisible();
+    expect(screen.getByRole("link", { name: "前往游玩页审批" })).toHaveAttribute(
+      "href",
+      "/play"
+    );
   });
 });

@@ -8,6 +8,7 @@ from ai_kp.api.authz import (
     require_campaign_role,
 )
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
+from ai_kp.api.llm import create_llm_client
 from ai_kp.api.schemas import (
     KpTurnRequest,
     PlayerActionCreate,
@@ -24,27 +25,9 @@ from ai_kp.bootstrap.settings import Settings
 from ai_kp.director.orchestrator import KpOrchestrator
 from ai_kp.director.turn_output import StructuredOutputError
 from ai_kp.infrastructure.database.repositories import Repository
-from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
 router = APIRouter()
-
-
-def _create_llm_client(
-    settings: Settings,
-    request: Request,
-) -> OpenAICompatibleClient:
-    # Keep the original monkeypatch seam available while ``api.main`` remains the
-    # public compatibility module. New callers should patch this router instead.
-    from ai_kp.api import main as compatibility_main
-
-    client_type = getattr(compatibility_main, "OpenAICompatibleClient", OpenAICompatibleClient)
-    return client_type(
-        settings.llm_base_url,
-        settings.llm_api_key,
-        settings.llm_model,
-        client=getattr(request.app.state, "http_client", None),
-    )
 
 
 @router.post("/campaigns/{campaign_id}/actions")
@@ -213,7 +196,7 @@ async def kp_turn(
                 active_spoiler_tags=tuple(payload.active_spoiler_tags),
             ),
             identity,
-            KpOrchestrator(repo.connection, _create_llm_client(settings, request)),
+            KpOrchestrator(repo.connection, create_llm_client(settings, request)),
             source_model=settings.llm_model,
         )
     except StructuredOutputError as exc:
@@ -239,7 +222,7 @@ async def create_check_consequence_proposal(
         return await CheckConsequenceService(repo).generate(
             GenerateCheckConsequenceCommand(check_id=check_id),
             identity,
-            KpOrchestrator(repo.connection, _create_llm_client(settings, request)),
+            KpOrchestrator(repo.connection, create_llm_client(settings, request)),
             source_model=settings.llm_model,
         )
     except StructuredOutputError as exc:

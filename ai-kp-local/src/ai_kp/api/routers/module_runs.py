@@ -1,22 +1,29 @@
 """KP-only selection and progression of the module currently being played."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from ai_kp.api.authz import require_campaign_role
-from ai_kp.api.dependencies import get_identity, get_repo
+from ai_kp.api.authz import require_approved_pc_binding, require_campaign_role
+from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
+from ai_kp.api.llm import create_llm_client
 from ai_kp.api.schemas import (
     DirectorAnalysisRequest,
     ModuleRunEntityStateUpdate,
     ModuleRunStart,
     ModuleRunUpdate,
     ModuleSceneTransition,
+    WorldExpansionProposalRequest,
 )
+from ai_kp.application.errors import KpSessionEndedError
 from ai_kp.application.module_run_service import (
     EntityStateCommand,
     ModuleRunService,
     SceneTransitionCommand,
     StartModuleRunCommand,
 )
+from ai_kp.application.turn_service import TurnService, WorldExpansionCommand
+from ai_kp.bootstrap.settings import Settings
+from ai_kp.director.orchestrator import KpOrchestrator
+from ai_kp.director.turn_output import StructuredOutputError
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
@@ -161,3 +168,38 @@ def analyze_module_run_intent(
 ) -> dict:
     _require_run_kp(run_id, identity, repo)
     return ModuleRunService(repo).analyze(run_id, payload.player_intent)
+
+
+@router.post("/module-runs/{run_id}/director/world-expansion-proposals")
+async def create_world_expansion_proposal(
+    run_id: str,
+    payload: WorldExpansionProposalRequest,
+    request: Request,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_app_settings),
+) -> dict:
+    run = _require_run_kp(run_id, identity, repo)
+    if payload.pc_id:
+        require_approved_pc_binding(repo, str(run["campaign_id"]), payload.pc_id)
+    try:
+        return await TurnService(repo).create_world_expansion_proposal(
+            WorldExpansionCommand(
+                run_id=run_id,
+                player_intent=payload.player_intent,
+                pc_id=payload.pc_id,
+                map_id=payload.map_id,
+            ),
+            identity,
+            KpOrchestrator(repo.connection, create_llm_client(settings, request)),
+            source_model=settings.llm_model,
+        )
+    except StructuredOutputError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Local model returned invalid world expansion output: {exc}",
+        ) from exc
+    except KpSessionEndedError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
