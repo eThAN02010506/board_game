@@ -29,12 +29,12 @@ vertical slice, ownership boundary and focused acceptance tests exist.
 ## Package intentions
 
 - `platform/` contains system-neutral facts, actors, sessions, scenes, modules, memory, knowledge,
-  and multi-stage resolution concepts. It must not import a concrete ruleset.
+  randomness, and multi-stage resolution concepts. It must not import a concrete ruleset.
 - `rulesets/sdk/` contains only contracts already used by installed rulesets. Add small optional
   capability ports when a verified implementation requires them.
 - `rulesets/coc7/` is the canonical home of verified CoC7 behavior.
-- `director/` may gain further scoped planning stages. It may create proposals but cannot commit
-  authoritative state.
+- `director/skills/` owns explicit, versioned proposal-only AI Skill contracts. Skills may consume
+  reviewed rulebook guidance and create proposals, but cannot commit authoritative state.
 - `rule_authoring/` contains the currently executable evidence, validation and closed-runtime
   boundary. Add authoring workflow modules only with their review artifacts and tests.
 - `infrastructure/` is the canonical home of SQLite, MiniRAG, model, realtime, and security

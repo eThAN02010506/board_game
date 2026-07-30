@@ -11,6 +11,12 @@ The backend has explicit composition, transport, application, domain, ruleset, a
   each service. Application code must not import `api`, `bootstrap`, or `infrastructure`;
   concrete adapters are supplied at the composition/delivery boundary.
 - `src/ai_kp/platform/` owns ruleset-neutral memory, module, and scene logic. `director/` owns AI KP context and proposal orchestration. `rule_authoring/` owns extracted rule objects and deterministic validation/execution.
+- `src/ai_kp/platform/randomness/` records system-neutral dice requests, faces and integrity
+  fingerprints without interpreting success. `rulesets/<system>` converts that evidence into
+  system-specific candidates and results.
+- `src/ai_kp/director/skills/` is the explicit registry of proposal-only AI behavior contracts.
+  Skills declare source requirements and logical tool access but cannot import persistence,
+  delivery or concrete ruleset code.
 - `src/ai_kp/infrastructure/database/` owns SQLite mechanics, schema, ordered migrations, and feature repositories. Its `Repository` facade intentionally supplies one shared transaction boundary to current application services.
 - `src/ai_kp/infrastructure/{knowledge,llm,images,modules,realtime,security}/` owns external and persistence adapters. These layers may depend inward on domain contracts; domain packages do not depend on these adapters.
 - `src/ai_kp/application/realtime/` owns the authenticated connection lifecycle and pure wire-message
@@ -98,7 +104,8 @@ Rulebook knowledge is not an executable ruleset. `GET /rulesets` lists the expli
 allow-list of deterministic engines. Campaign and investigator services resolve that registry;
 application, API, and storage layers must not import concrete `rules` modules directly. The
 incremental boundary and requirements for a future second system are documented in
-[`RULESET_BOUNDARY.md`](RULESET_BOUNDARY.md).
+[`RULESET_BOUNDARY.md`](RULESET_BOUNDARY.md), with the normative v1 contract in
+[`RULESET_PLUGIN_SPEC.md`](RULESET_PLUGIN_SPEC.md).
 
 The request transaction is committed only after the router and service finish. Any Python, SQLite, authorization, model-output, or domain validation exception triggers rollback. This includes business changes and their realtime outbox records, so a browser cannot receive an event for state that did not commit.
 

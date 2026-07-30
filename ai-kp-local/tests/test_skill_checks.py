@@ -121,6 +121,15 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(resolved_response.status_code, 200, resolved_response.text)
         resolved = resolved_response.json()
+        self.assertEqual(resolved["random_evidence"]["schema_version"], "dice-roll.v1")
+        self.assertEqual(
+            resolved["random_evidence"]["rolls"],
+            {"ones_digit": [4], "tens_digits": [4, 2]},
+        )
+        self.assertEqual(
+            len(resolved["random_evidence"]["evidence_fingerprint"]),
+            64,
+        )
         self.assertEqual(resolved["raw_dice"]["candidates"], [44, 24])
         self.assertEqual(resolved["selected_roll"], 24)
         self.assertEqual(resolved["success_level"], "hard")
@@ -134,6 +143,10 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             audit["raw_dice"],
             {"ones_digit": 4, "tens_digits": [4, 2], "candidates": [44, 24]},
+        )
+        self.assertEqual(
+            audit["random_evidence"]["evidence_fingerprint"],
+            resolved["random_evidence"]["evidence_fingerprint"],
         )
         self.assertEqual(audit["selected_roll"], 24)
         self.assertEqual(audit["target"], 60)

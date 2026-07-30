@@ -19,7 +19,7 @@ from ai_kp.director.world_expansion import (
 )
 from ai_kp.platform.resolution.proposals import validate_unresolved_check_boundary
 from ai_kp.platform.sessions.models import AuthenticatedMember
-from ai_kp.rulesets import get_ruleset
+from ai_kp.rulesets import get_campaign_ruleset
 
 
 @dataclass(frozen=True)
@@ -422,7 +422,7 @@ class TurnService:
             pending["proposed_facts"],
         )
         campaign = self.repo.get_campaign(campaign_id)
-        ruleset = get_ruleset(str(campaign["system"]))
+        ruleset = get_campaign_ruleset(campaign)
         planned_checks = plan_proposed_checks(pending, ruleset)
         # Own the request transaction before the repository opens its savepoint.
         # This keeps proposal effects, concrete checks, and outbox messages in one

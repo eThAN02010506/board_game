@@ -244,6 +244,8 @@ CAPABILITIES: tuple[Capability, ...] = (
             "已按本地 CoC7 规则来源实现普通/困难/极难检定、数字骰、实体骰、"
             "奖惩骰、暗骰、孤注一掷、KP 覆盖、重放审计及检定结果驱动的"
             "指纹化 AI 二阶段草稿；对抗检定已持久化双方结果并接入 API/UI 与后果快照。"
+            "新投骰同时保存规则无关的 dice-roll.v1 骰面证据和完整性指纹，CoC7 仍单独"
+            "解释百分骰候选与成功等级；旧结果可迁移并保持原投骰投影。"
         ),
         dependencies=("proposal_approval", "character_sheets"),
         acceptance=(
@@ -260,8 +262,11 @@ CAPABILITIES: tuple[Capability, ...] = (
         phase="F3",
         audience="all",
         summary=(
-            "已有显式规则注册表和 CoC7 应用端口，并具备可追溯 PDF 原文块、MiniRAG 本地召回、"
+            "已有 v1 Manifest、支持等级、能力/UI/地图模式声明、团级规则/角色/事件版本"
+            "钉住、显式规则注册表和 CoC7 应用端口，并具备可追溯 PDF 原文块、MiniRAG 本地召回、"
             "JSON 规则候选、来源/引用/冲突校验、KP golden case 审核和封闭 DSL 执行器；"
+            "行动、检定后果、世界补全与团后总结已登记为 proposal-only AI Skill；规则书"
+            "可提取术语、资源、状态、行动经济、成长与 reference-only Skill 指南候选。"
             "AI 置信度不能自行发布规则，历史缺少审核证据的规则会 fail-closed。当前仅注册 CoC7，"
             "尚未完成全部 CoC7 规则对象或任何第二系统插件。"
         ),
@@ -270,6 +275,7 @@ CAPABILITIES: tuple[Capability, ...] = (
             "切换规则系统不会改写既有事件，检定结果可由对应插件重放验证。",
             "核心规则、书中可选规则、团规、临场 KP 裁定和平台策略使用不同来源标签。",
             "AI 不能绕过规则插件直接提交依赖检定的伤害、理智、成长或其它状态变化。",
+            "上传规则书和提取 Skill 指南不会自动出现在已安装规则/Skill 清单。",
         ),
     ),
     Capability(

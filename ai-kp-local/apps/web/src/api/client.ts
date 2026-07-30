@@ -1,4 +1,5 @@
 import type {
+  AiSkillManifest,
   Capability,
   ModuleRun,
   ModuleRunDirectorState,
@@ -6,6 +7,7 @@ import type {
   SceneTransitionInput,
   DirectorAnalysis,
   DynamicBranchRun,
+  InstalledRuleset,
   ModuleRunStart,
   ModuleRunUpdate,
   NpcReappearanceCandidate,
@@ -246,6 +248,14 @@ export async function requestBlob(url: string, signal?: AbortSignal): Promise<Bl
 
 export function fetchCapabilities(): Promise<Capability[]> {
   return requestJson<Capability[]>("/capabilities");
+}
+
+export function fetchInstalledRulesets(): Promise<InstalledRuleset[]> {
+  return requestJson<InstalledRuleset[]>("/rulesets");
+}
+
+export function fetchInstalledAiSkills(): Promise<AiSkillManifest[]> {
+  return requestJson<AiSkillManifest[]>("/ai-skills");
 }
 
 export function listWorldFacts(

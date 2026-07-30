@@ -19,6 +19,7 @@ from ai_kp.director.session_recap import (
     build_session_recap_context,
     parse_session_recap_output,
 )
+from ai_kp.director.skills import get_ai_skill
 from ai_kp.director.turn_output import KpTurnOutput, StructuredOutputError, parse_kp_turn_output
 from ai_kp.director.world_expansion import (
     WORLD_EXPANSION_OUTPUT_INSTRUCTIONS,
@@ -40,6 +41,8 @@ class KpTurnResult(Generic[OutputT]):
     output: OutputT
     context: ContextAssembly
     repaired: bool = False
+    skill_id: str = ""
+    skill_version: str = ""
 
 
 class KpOrchestrator:
@@ -77,6 +80,7 @@ class KpOrchestrator:
             campaign_id,
             context,
             parse_kp_turn_output,
+            skill_id="platform.turn_proposal",
         )
 
     async def handle_check_consequence(
@@ -128,6 +132,7 @@ class KpOrchestrator:
             campaign_id,
             context,
             parse_consequence,
+            skill_id="platform.check_consequence_narration",
         )
 
     async def handle_world_expansion(
@@ -168,6 +173,7 @@ class KpOrchestrator:
             campaign_id,
             context,
             parse_world_expansion_output,
+            skill_id="platform.world_expansion",
         )
 
     async def handle_session_recap(
@@ -178,6 +184,7 @@ class KpOrchestrator:
             str(snapshot["campaign_id"]),
             build_session_recap_context(snapshot),
             parse_session_recap_output,
+            skill_id="platform.session_recap",
         )
 
     async def _complete_structured(
@@ -185,12 +192,25 @@ class KpOrchestrator:
         campaign_id: str,
         context: ContextAssembly,
         parser: Callable[[str], OutputT],
+        *,
+        skill_id: str,
     ) -> KpTurnResult[OutputT]:
+        skill = get_ai_skill(skill_id)
         if self.call_registry is None:
-            return await self._complete_structured_tracked(context, parser)
+            return await self._complete_structured_tracked(
+                context,
+                parser,
+                skill_id=skill.skill_id,
+                skill_version=skill.version,
+            )
         try:
             with self.call_registry.track(campaign_id):
-                return await self._complete_structured_tracked(context, parser)
+                return await self._complete_structured_tracked(
+                    context,
+                    parser,
+                    skill_id=skill.skill_id,
+                    skill_version=skill.version,
+                )
         except asyncio.CancelledError as exc:
             raise CampaignAiCallCancelledError(
                 "Campaign AI call was cancelled by safety pause or human KP takeover"
@@ -200,6 +220,9 @@ class KpOrchestrator:
         self,
         context: ContextAssembly,
         parser: Callable[[str], OutputT],
+        *,
+        skill_id: str,
+        skill_version: str,
     ) -> KpTurnResult[OutputT]:
         request_messages = [
             ChatMessage(role=item["role"], content=item["content"]) for item in context.messages
@@ -207,7 +230,12 @@ class KpOrchestrator:
         raw_output = await self.llm.complete(request_messages, temperature=0.3)
         try:
             output = parser(raw_output)
-            return KpTurnResult(output=output, context=context)
+            return KpTurnResult(
+                output=output,
+                context=context,
+                skill_id=skill_id,
+                skill_version=skill_version,
+            )
         except StructuredOutputError as first_error:
             repair_instruction = (
                 "上一次输出未通过 JSON 结构校验。"
@@ -229,4 +257,10 @@ class KpOrchestrator:
                 messages=audited_messages,
                 token_estimate=sum(estimate_tokens(item["content"]) for item in audited_messages),
             )
-            return KpTurnResult(output=output, context=audited_context, repaired=True)
+            return KpTurnResult(
+                output=output,
+                context=audited_context,
+                repaired=True,
+                skill_id=skill_id,
+                skill_version=skill_version,
+            )

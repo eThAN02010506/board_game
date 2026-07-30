@@ -84,6 +84,10 @@ class CampaignResponse(BaseModel):
     id: str
     title: str
     system: str
+    ruleset_id: str
+    ruleset_version: str
+    character_schema_version: str
+    event_schema_version: str
     current_time: str | None = None
     created_at: str
 

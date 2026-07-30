@@ -8,14 +8,14 @@ from typing import Any
 
 from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
-PROMPT_VERSION = "coc7-rule-extractor-v2-compact"
+PROMPT_VERSION = "ruleset-evidence-extractor-v3-compact"
 
 COMPACT_FORMAT = """{
   "rules": [{
     "rule_key": "lowercase.stable.key",
     "ruleset_id": "coc7-keeper-cn-2002c",
     "title": "规则名称",
-    "rule_type": "check|combat|damage|healing|sanity|chase|character|magic|creature|keeper_guidance|other",
+    "rule_type": "check|terminology|ruleset_metadata|resource|condition|action_economy|combat|damage|healing|sanity|chase|character|magic|creature|keeper_guidance|skill_guidance|advancement|other",
     "summary": "只基于原文的摘要",
     "audience": "all|player|kp",
     "tags": ["关键词"],
@@ -82,6 +82,9 @@ class RuleExtractionAgent:
 每条规则必须引用当前 chunk_id，并逐字复制 2-500 字 evidence_text；页码必须为 {chunk['page_start']}。
 execution 只能使用封闭 DSL，不得生成 Python、JavaScript、公式字符串或自然语言条件。
 解释性内容使用 reference_only；只有条件和数值完全明确时才生成可执行规则。
+术语、版本、角色字段、资源、状态、行动经济、成长、主持建议和可转为 AI Skill 的
+指导信息也可以提取，但必须使用对应 rule_type；不能可靠表达为封闭 DSL 时必须使用
+reference_only。skill_guidance 只是带来源候选，不能直接安装或获得写状态权限。
 rule_key 使用稳定的小写英文命名，例如 coc7.damage.major_wound。
 
 ruleset_id: {ruleset_id}

@@ -19,11 +19,30 @@ class WorldRepository(SQLiteRepository):
         title: str,
         system: str = "coc7",
         current_time: str | None = None,
+        *,
+        ruleset_id: str = "coc7-keeper-cn-2002c",
+        ruleset_version: str = "2002c",
+        character_schema_version: str = "coc7-investigator-v1",
+        event_schema_version: str = "coc7-event-v1",
     ) -> dict:
         campaign_id = new_id("camp")
         self.connection.execute(
-            "INSERT INTO campaigns (id, title, system, current_time) VALUES (?, ?, ?, ?)",
-            (campaign_id, title, system, current_time),
+            """
+            INSERT INTO campaigns
+              (id, title, system, current_time, ruleset_id, ruleset_version,
+               character_schema_version, event_schema_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                campaign_id,
+                title,
+                system,
+                current_time,
+                ruleset_id,
+                ruleset_version,
+                character_schema_version,
+                event_schema_version,
+            ),
         )
         return self.get_campaign(campaign_id)
 

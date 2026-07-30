@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from ai_kp.rulesets.base import Ruleset
 from ai_kp.rulesets.coc7 import COC7_RULESET
@@ -25,15 +26,53 @@ class RulesetRegistry:
                     raise ValueError(f"Duplicate ruleset alias: {name}")
                 self._rulesets[normalized] = ruleset
 
-    def get(self, identifier: str | None = None) -> Ruleset:
+    def get(
+        self,
+        identifier: str | None = None,
+        *,
+        version: str | None = None,
+    ) -> Ruleset:
         normalized = (identifier or DEFAULT_RULESET_ID).strip().lower()
         try:
-            return self._rulesets[normalized]
+            ruleset = self._rulesets[normalized]
         except KeyError as exc:
             raise ValueError(
                 f"Ruleset is not installed: {identifier}. "
                 "Uploading a rulebook does not install an executable ruleset."
             ) from exc
+        if version is not None and ruleset.manifest.version != version:
+            raise ValueError(
+                f"Ruleset version is not installed: {identifier}@{version}. "
+                f"Installed version is {ruleset.manifest.version}."
+            )
+        return ruleset
+
+    def for_campaign(self, campaign: Mapping[str, Any]) -> Ruleset:
+        """Resolve and validate an immutable campaign ruleset pin."""
+
+        identifier = str(
+            campaign.get("ruleset_id")
+            or campaign.get("system")
+            or DEFAULT_RULESET_ID
+        )
+        version = campaign.get("ruleset_version")
+        ruleset = self.get(
+            identifier,
+            version=str(version) if version is not None else None,
+        )
+        manifest = ruleset.manifest
+        expected = {
+            "character_schema_version": manifest.character_schema_version,
+            "event_schema_version": manifest.event_schema_version,
+        }
+        for field, installed in expected.items():
+            pinned = campaign.get(field)
+            if pinned is not None and str(pinned) != installed:
+                raise ValueError(
+                    f"Campaign {field} requires {pinned}, installed ruleset provides "
+                    f"{installed}."
+                )
+        return ruleset
 
     def list(self) -> list[dict]:
         return [
@@ -47,8 +86,16 @@ class RulesetRegistry:
 registry = RulesetRegistry([COC7_RULESET])
 
 
-def get_ruleset(identifier: str | None = None) -> Ruleset:
-    return registry.get(identifier)
+def get_ruleset(
+    identifier: str | None = None,
+    *,
+    version: str | None = None,
+) -> Ruleset:
+    return registry.get(identifier, version=version)
+
+
+def get_campaign_ruleset(campaign: Mapping[str, Any]) -> Ruleset:
+    return registry.for_campaign(campaign)
 
 
 def list_rulesets() -> list[dict]:
@@ -58,6 +105,7 @@ def list_rulesets() -> list[dict]:
 __all__ = [
     "DEFAULT_RULESET_ID",
     "RulesetRegistry",
+    "get_campaign_ruleset",
     "get_ruleset",
     "list_rulesets",
     "registry",

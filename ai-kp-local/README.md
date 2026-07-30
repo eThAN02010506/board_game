@@ -6,6 +6,8 @@
 
 当前产品以 **CoC 第七版**为唯一可执行规则系统。架构已经隔离规则集，但上传其他
 规则书只会建立独立知识库，不会自动获得一个可信的可执行规则插件。
+系统目前按“通用平台内核 + 确定性规则插件 + proposal-only AI Skill + 模组内容包”
+划分；团会固定精确规则、角色 Schema 和事件 Schema 版本。
 
 > 项目仍处于本地开发阶段，适合单机或受信任局域网测试，不应直接暴露到公网。
 
@@ -172,6 +174,10 @@ AI_KP_LLM_MODEL=<GET /v1/models 实际返回的 data[].id>
 - 模组是带来源的权威大纲，而非完整世界清单。AI 可以提出合理世界补全，但不能覆盖
   Canon、剧情锚点或已确认事实。
 - AI 输出永远先成为草稿；审批前不能改变正式事件、记忆、NPC、检定或地图位置。
+- 通用随机层只记录数字/实体骰的骰面和完整性指纹；CoC7 插件负责解释百分骰候选、
+  成功等级和效果，旧 `raw_dice` 投影继续兼容。
+- 规则书可以提取术语、资源、状态、行动经济、成长和 Skill 指南候选，但所有候选必须
+  保留页码证据；`skill_guidance` 只能作为 `reference_only`，不会自动安装或写状态。
 - 团后摘要按冻结事件窗口和 SHA-256 指纹幂等生成；模型调用在数据库事务外执行，
   候选必须引用窗口内事件，KP 审核批准后才原子写入正式记忆。
 - 世界补全的“批准候选”和“桌面实际接触”是两个边界；只有后者生成带来源的事实落地
@@ -205,9 +211,9 @@ AI_KP_TRUSTED_HOSTS=你的域名或局域网地址
 │   ├── bootstrap/          # 配置、依赖装配、生命周期
 │   ├── api/                # HTTP/WebSocket、鉴权、DTO、分域路由
 │   ├── application/        # 用例与事务编排
-│   ├── platform/           # 规则无关的记忆、模组、场景领域
+│   ├── platform/           # 规则无关的记忆、模组、场景与随机证据
 │   ├── evaluation/         # 可重放模拟团与确定性轨迹断言
-│   ├── director/           # AI KP 上下文、结构化输出与草稿编排
+│   ├── director/           # AI KP 上下文、proposal-only Skill 与草稿编排
 │   ├── rule_authoring/     # 规则候选、来源校验、审核与确定性执行
 │   ├── rulesets/           # 显式规则注册表与 CoC7 插件
 │   ├── infrastructure/     # SQLite、MiniRAG、模型、图片、文档、实时适配器
@@ -269,9 +275,9 @@ real-case；脚本不会打印凭据：
 
 最近一次完整验证（2026-07-31）：
 
-- 后端：393 项测试与 50 个子测试通过；沙盒禁止监听端口的图片 provider real-case
-  需在目标主机单独执行。
-- 前端：24 个 Vitest 文件、104 项测试通过；TypeScript 与 Vite 生产构建通过。
+- 后端：403 项测试与 50 个子测试通过；图片 provider 的 localhost 真实 HTTP 测试
+  已在允许回环绑定的隔离环境中单独通过。
+- 前端：24 个 Vitest 文件、105 项测试通过；TypeScript 与 Vite 生产构建通过。
 - 浏览器 real-case：OldOnes 测试团完成公开 D100 投掷；总值、成功等级、逐骰明细、
   服务器时间和 SHA-256 结果指纹均可见并与持久化记录一致。
 - 局域网 GPT-OSS-20B MXFP4：模型发现与结构化 chat completion 通过；gpt-oss 使用
@@ -283,6 +289,8 @@ real-case；脚本不会打印凭据：
 ## 当前限制
 
 - 可执行规则集目前只有 CoC7；上传 Cyberpunk RED 等规则书不会自动生成可信规则插件。
+- `/rulesets` 只列出显式安装的确定性系统，`/ai-skills` 只列出无权直接落库的提案型
+  Skill；规则页会把它们与已上传知识库分开展示。
 - CoC7 核心游玩状态机已覆盖战斗轮、战技/围攻、伤害与治疗、理智、追逐、成长标记及
   永久变更确认；状态、骰值、规则来源和版本均可重放。详见
   [`docs/COC7_GAMEPLAY_STATE_MACHINE.md`](docs/COC7_GAMEPLAY_STATE_MACHINE.md)。
@@ -323,6 +331,7 @@ real-case；脚本不会打印凭据：
 - [场景导演与只读意图分析](docs/SCENE_DIRECTOR.md)
 - [规则书双存储与三层校验](docs/RULEBOOK_KNOWLEDGE.md)
 - [规则系统边界](docs/RULESET_BOUNDARY.md)
+- [规则插件 v1 契约](docs/RULESET_PLUGIN_SPEC.md)
 - [本地规则来源](docs/RULES_REFERENCE.md)
 - [长期记忆验收](docs/MEMORY_TESTING.md)
 - [世界补全约束](docs/WORLD_EXPANSION.md)

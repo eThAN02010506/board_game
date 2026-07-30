@@ -10,7 +10,7 @@ from typing import Any
 
 from ai_kp.application.ports.repositories import GameplayStore
 from ai_kp.platform.sessions.models import AuthenticatedMember
-from ai_kp.rulesets import get_ruleset
+from ai_kp.rulesets import get_campaign_ruleset, get_ruleset
 from ai_kp.rulesets.coc7.mechanics.gameplay import (
     adjusted_chase_move,
     apply_damage,
@@ -1155,7 +1155,7 @@ class GameplayService:
 
     def _require_coc7_campaign(self, campaign_id: str) -> None:
         campaign = self.repo.get_campaign(campaign_id)
-        ruleset = get_ruleset(str(campaign["system"]))
+        ruleset = get_campaign_ruleset(campaign)
         if ruleset.manifest.slug != "coc7":
             raise ValueError("This gameplay state machine currently supports CoC7 only")
 

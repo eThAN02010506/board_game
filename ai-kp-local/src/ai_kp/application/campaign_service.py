@@ -23,6 +23,10 @@ class CampaignService:
             command.title,
             ruleset.manifest.slug,
             command.current_time,
+            ruleset_id=ruleset.manifest.ruleset_id,
+            ruleset_version=ruleset.manifest.version,
+            character_schema_version=ruleset.manifest.character_schema_version,
+            event_schema_version=ruleset.manifest.event_schema_version,
         )
 
     def list_accessible(self, campaign_id: str | None = None) -> list[dict]:

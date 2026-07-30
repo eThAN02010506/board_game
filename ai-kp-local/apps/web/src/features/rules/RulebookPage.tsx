@@ -14,6 +14,7 @@ import type {
   RuleSource
 } from "../../api/types";
 import { statusLabel } from "../../ui/statusLabels";
+import { RuntimeContractsPanel } from "./RuntimeContractsPanel";
 
 
 type Props = {
@@ -403,6 +404,7 @@ export function RulebookPage({ identity }: Props) {
 
   return (
     <div className="rulebook-page">
+      <RuntimeContractsPanel />
       {canManage && (
         <>
           <section className="page-card rulebook-library-card">

@@ -134,6 +134,11 @@ class RuleObject(ClosedRuleModel):
     title: str = Field(min_length=1, max_length=200)
     rule_type: Literal[
         "check",
+        "terminology",
+        "ruleset_metadata",
+        "resource",
+        "condition",
+        "action_economy",
         "combat",
         "damage",
         "healing",
@@ -143,6 +148,8 @@ class RuleObject(ClosedRuleModel):
         "magic",
         "creature",
         "keeper_guidance",
+        "skill_guidance",
+        "advancement",
         "other",
     ] = "other"
     summary: str = Field(min_length=1, max_length=1500)
@@ -151,6 +158,15 @@ class RuleObject(ClosedRuleModel):
     execution: RuleExecution
     citations: list[Citation] = Field(min_length=1, max_length=64)
     confidence: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def keep_ai_skill_guidance_non_executable(self) -> RuleObject:
+        if (
+            self.rule_type == "skill_guidance"
+            and self.execution.kind != "reference_only"
+        ):
+            raise ValueError("skill_guidance must be reference_only")
+        return self
 
 
 class RuleGoldenCase(ClosedRuleModel):

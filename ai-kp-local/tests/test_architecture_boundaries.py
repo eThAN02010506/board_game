@@ -252,6 +252,53 @@ def test_director_and_rule_authoring_do_not_import_infrastructure() -> None:
     assert violations == {}
 
 
+def test_ai_skill_contracts_cannot_import_delivery_storage_or_concrete_rulesets() -> None:
+    skill_root = PROJECT_ROOT / "src" / "ai_kp" / "director" / "skills"
+    forbidden_prefixes = (
+        "ai_kp.api",
+        "ai_kp.application",
+        "ai_kp.bootstrap",
+        "ai_kp.infrastructure",
+        "ai_kp.rulesets.coc7",
+    )
+    violations: dict[str, list[str]] = {}
+    for path in sorted(skill_root.rglob("*.py")):
+        forbidden = sorted(
+            name
+            for name in _imports(path)
+            if any(
+                name == prefix or name.startswith(f"{prefix}.")
+                for prefix in forbidden_prefixes
+            )
+        )
+        if forbidden:
+            violations[str(path.relative_to(PROJECT_ROOT))] = forbidden
+
+    assert violations == {}
+
+
+def test_platform_randomness_has_no_ruleset_or_delivery_dependencies() -> None:
+    randomness_root = PROJECT_ROOT / "src" / "ai_kp" / "platform" / "randomness"
+    violations: dict[str, list[str]] = {}
+    for path in sorted(randomness_root.rglob("*.py")):
+        forbidden = sorted(
+            name
+            for name in _imports(path)
+            if name.startswith(
+                (
+                    "ai_kp.api",
+                    "ai_kp.application",
+                    "ai_kp.infrastructure",
+                    "ai_kp.rulesets",
+                )
+            )
+        )
+        if forbidden:
+            violations[str(path.relative_to(PROJECT_ROOT))] = forbidden
+
+    assert violations == {}
+
+
 def test_generic_layers_do_not_import_ruleset_implementations_directly() -> None:
     violations: dict[str, list[str]] = {}
     for relative_dir in ("application", "api", "storage"):
@@ -484,7 +531,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 45
+    assert LATEST_SCHEMA_VERSION == 47
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -531,6 +578,8 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (43, "add_dynamic_branch_runs"),
         (44, "add_map_overlay_inheritance_and_route_plans"),
         (45, "add_skill_check_visibility_modes"),
+        (46, "pin_campaign_ruleset_contracts"),
+        (47, "add_check_random_evidence"),
     ]
 
 

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import sqlite3
 import stat
 from pathlib import Path
@@ -14,6 +15,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0023_session_assignment_uniqueness,
     v0024_rule_source_ruleset_hash,
     v0045_check_visibility,
+    v0047_check_random_evidence,
 )
 from ai_kp.storage.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
 
@@ -96,6 +98,49 @@ def test_check_visibility_migration_backfills_legacy_hidden_rows() -> None:
             ).fetchall()
         )
         assert rows == {"hidden": "blind", "public": "public"}
+    finally:
+        connection.close()
+
+
+def test_random_evidence_migration_backfills_legacy_percentile_faces() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute(
+            """
+            CREATE TABLE skill_checks (
+              id TEXT PRIMARY KEY,
+              raw_dice_json TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO skill_checks (id, raw_dice_json)
+            VALUES (
+              'legacy-check',
+              '{"ones_digit":4,"tens_digits":[4,2],"candidates":[44,24]}'
+            )
+            """
+        )
+
+        v0047_check_random_evidence.migrate(connection)
+
+        payload = json.loads(
+            connection.execute(
+                """
+                SELECT random_evidence_json
+                FROM skill_checks
+                WHERE id = 'legacy-check'
+                """
+            ).fetchone()["random_evidence_json"]
+        )
+        assert payload["schema_version"] == "dice-roll.v1"
+        assert payload["rolls"] == {
+            "ones_digit": [4],
+            "tens_digits": [4, 2],
+        }
+        assert len(payload["evidence_fingerprint"]) == 64
     finally:
         connection.close()
 

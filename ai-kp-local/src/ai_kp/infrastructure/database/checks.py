@@ -251,6 +251,12 @@ class SkillCheckRepository(SQLiteRepository):
         result["raw_dice"] = (
             decode_json_field(raw_dice_json, None) if raw_dice_json is not None else None
         )
+        random_evidence_json = result.pop("random_evidence_json", None)
+        result["random_evidence"] = (
+            decode_json_field(random_evidence_json, None)
+            if random_evidence_json is not None
+            else None
+        )
         result["source_reference"] = decode_json_field(
             result.pop("source_reference_json"), {}
         )
@@ -475,6 +481,7 @@ class SkillCheckRepository(SQLiteRepository):
         *,
         actor_member_id: str,
         input_method: str,
+        random_evidence: dict[str, Any],
         resolution: dict[str, Any],
     ) -> dict[str, Any]:
         check = self.get_skill_check(check_id)
@@ -486,7 +493,8 @@ class SkillCheckRepository(SQLiteRepository):
             """
             UPDATE skill_checks
             SET status = 'resolved', input_method = ?, raw_dice_json = ?,
-                selected_roll = ?, threshold = ?, success_level = ?, passed = ?,
+                random_evidence_json = ?, selected_roll = ?, threshold = ?,
+                success_level = ?, passed = ?,
                 resolved_by_member_id = ?, resolved_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND status = 'requested'
@@ -494,6 +502,7 @@ class SkillCheckRepository(SQLiteRepository):
             (
                 input_method,
                 json.dumps(resolution["raw_dice"], ensure_ascii=False),
+                json.dumps(random_evidence, ensure_ascii=False),
                 resolution["selected_roll"],
                 resolution["threshold"],
                 resolution["success_level"],
@@ -507,6 +516,7 @@ class SkillCheckRepository(SQLiteRepository):
         audit_result = {
             "input_method": input_method,
             "raw_dice": resolution["raw_dice"],
+            "random_evidence": random_evidence,
             "selected_roll": resolution["selected_roll"],
             "target": check["target"],
             "threshold": resolution["threshold"],

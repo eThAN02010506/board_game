@@ -9,6 +9,14 @@ The rulebook subsystem deliberately separates three responsibilities:
 3. `rulebook.engine` executes a closed declarative DSL. It never evaluates Python, JavaScript,
    formulas, or natural-language conditions.
 
+The extractor may recover more than dice formulas. Source-bound candidates can describe
+terminology, ruleset/version metadata, character fields, resources, conditions, action economy,
+combat, damage, healing, sanity, chases, advancement, creatures, Keeper guidance, and AI Skill
+guidance. Extraction is discovery, not installation: every candidate retains exact page evidence,
+and only the closed executable subset can be promoted through deterministic golden cases.
+`skill_guidance` is permanently `reference_only`; it may inform a proposal-producing AI Skill but
+can never grant that Skill authority to mutate campaign state.
+
 Campaign memories, NPC memories, modules, and rulebooks use separate storage and retrieval
 namespaces. Deleting or rebuilding a MiniRAG index cannot delete the SQLite source or rule
 objects.
@@ -84,6 +92,11 @@ validated inserts are rejected, and legacy rows without bound human-review evide
 both search and execution.
 `reference_only` material remains available through original-source retrieval rather than being
 misrepresented as executable code.
+
+This means a newly uploaded rulebook can gradually supply the facts needed to author a future
+ruleset package, while knowledge and execution remain separate. The platform does not claim that
+an arbitrary uploaded book is playable: its manifest, schemas, deterministic mechanics, UI
+capabilities, and conformance cases must still be reviewed and installed as a versioned ruleset.
 
 Review takes a short SQLite writer transaction and repeats source/conflict validation after it
 acquires the lock. The final update compares the original `review_required` status and object hash.

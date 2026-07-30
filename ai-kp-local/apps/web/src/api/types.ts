@@ -58,10 +58,59 @@ export type Capability = {
   acceptance: string[];
 };
 
+export type RulesetSupportLevel =
+  | "knowledge_only"
+  | "assisted"
+  | "playable_alpha"
+  | "verified_playable";
+
+export type InstalledRuleset = {
+  contract_version: string;
+  ruleset_id: string;
+  version: string;
+  slug: string;
+  display_name: string;
+  engine_family: string;
+  source_version: string;
+  aliases: string[];
+  character_schema_version: string;
+  event_schema_version: string;
+  knowledge_namespace: string;
+  supported_locales: string[];
+  support_level: RulesetSupportLevel;
+  source_reference: Record<string, unknown>;
+  license: {
+    id: string;
+    content_scope: string;
+    attribution?: string;
+  };
+  capabilities: string[];
+  map_modes: string[];
+  ui_slots: string[];
+};
+
+export type AiSkillManifest = {
+  skill_id: string;
+  version: string;
+  display_name: string;
+  category: string;
+  description: string;
+  input_schema_version: string;
+  output_schema_version: string;
+  allowed_tools: string[];
+  source_requirements: string[];
+  ruleset_scope: string | null;
+  authority: "proposal_only";
+};
+
 export type Campaign = {
   id: string;
   title: string;
   system: string;
+  ruleset_id?: string;
+  ruleset_version?: string;
+  character_schema_version?: string;
+  event_schema_version?: string;
   current_time: string | null;
 };
 
@@ -436,6 +485,17 @@ export type SkillCheck = {
     ones_digit: number;
     tens_digits: number[];
     candidates: number[];
+  } | null;
+  random_evidence?: {
+    schema_version: "dice-roll.v1";
+    components: Array<{
+      key: string;
+      count: number;
+      sides: number;
+      minimum: number;
+    }>;
+    rolls: Record<string, number[]>;
+    evidence_fingerprint: string;
   } | null;
   selected_roll: number | null;
   threshold: number | null;

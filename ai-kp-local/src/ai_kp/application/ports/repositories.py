@@ -18,6 +18,11 @@ class CampaignStore(Protocol):
         title: str,
         system: str = "coc7",
         current_time: str | None = None,
+        *,
+        ruleset_id: str,
+        ruleset_version: str,
+        character_schema_version: str,
+        event_schema_version: str,
     ) -> dict: ...
 
     def get_campaign(self, campaign_id: str) -> dict: ...
@@ -436,6 +441,7 @@ class CheckStore(CampaignStore, SkillGrowthStore, Protocol):
         *,
         actor_member_id: str,
         input_method: str,
+        random_evidence: dict[str, Any],
         resolution: dict[str, Any],
     ) -> dict[str, Any]: ...
 

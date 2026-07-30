@@ -4,8 +4,9 @@ from dataclasses import dataclass
 
 from ai_kp.application.ports.repositories import CheckStore
 from ai_kp.application.skill_growth_service import SkillGrowthService
+from ai_kp.platform.randomness import DiceRollResult, SecureDiceRoller
 from ai_kp.platform.sessions.models import AuthenticatedMember
-from ai_kp.rulesets import get_ruleset
+from ai_kp.rulesets import get_campaign_ruleset, get_ruleset
 
 
 @dataclass(frozen=True)
@@ -52,8 +53,14 @@ class CreateOpposedCheckCommand:
 class CheckService:
     """Authorize checks while delegating mechanics to the campaign ruleset."""
 
-    def __init__(self, repo: CheckStore):
+    def __init__(
+        self,
+        repo: CheckStore,
+        *,
+        dice_roller: SecureDiceRoller | None = None,
+    ):
         self.repo = repo
+        self.dice_roller = dice_roller or SecureDiceRoller()
 
     def create(
         self,
@@ -63,7 +70,7 @@ class CheckService:
     ) -> dict:
         self._require_kp(identity, campaign_id)
         campaign = self.repo.get_campaign(campaign_id)
-        ruleset = get_ruleset(str(campaign["system"]))
+        ruleset = get_campaign_ruleset(campaign)
         ruleset.validate_check(
             target=command.target,
             difficulty=command.difficulty,
@@ -161,7 +168,10 @@ class CheckService:
             raise ValueError("Both sides must have terminal rolled results")
         if left["ruleset_id"] != right["ruleset_id"]:
             raise ValueError("Opposed check rulesets no longer match")
-        ruleset = get_ruleset(str(left["ruleset_id"]))
+        ruleset = get_ruleset(
+            str(left["ruleset_id"]),
+            version=str(left["ruleset_version"]),
+        )
         result = ruleset.resolve_opposed_check(
             left_participant_id=str(left["id"]),
             left_target=int(left["target"]),
@@ -169,24 +179,17 @@ class CheckService:
             right_participant_id=str(right["id"]),
             right_target=int(right["target"]),
             right_roll=int(right["selected_roll"]),
+            left_success_level=(
+                str(left["success_level"])
+                if left["status"] == "overridden"
+                else None
+            ),
+            right_success_level=(
+                str(right["success_level"])
+                if right["status"] == "overridden"
+                else None
+            ),
         )
-        # KP overrides are authoritative inputs, never silently discarded.
-        if left["status"] == "overridden" or right["status"] == "overridden":
-            from ai_kp.rulesets.coc7.mechanics.opposed_check import (
-                OpposedParticipant,
-                resolve_opposed,
-            )
-
-            result = resolve_opposed(
-                OpposedParticipant(
-                    str(left["id"]), int(left["target"]), int(left["selected_roll"]),
-                    left["success_level"],
-                ),
-                OpposedParticipant(
-                    str(right["id"]), int(right["target"]), int(right["selected_roll"]),
-                    right["success_level"],
-                ),
-            ).as_dict()
         result["participant_labels"] = {
             str(left["id"]): left["skill_name"],
             str(right["id"]): right["skill_name"],
@@ -268,18 +271,25 @@ class CheckService:
     ) -> dict:
         check = self.repo.get_skill_check(check_id)
         self._require_visible(check, identity, resolving=True)
-        ruleset = get_ruleset(str(check["ruleset_id"]))
+        ruleset = get_ruleset(
+            str(check["ruleset_id"]),
+            version=str(check["ruleset_version"]),
+        )
         if command.input_method == "digital":
-            raw_dice = ruleset.generate_check_dice(int(check["bonus_dice"]))
+            random_roll = self.dice_roller.roll(
+                ruleset.build_check_roll_request(int(check["bonus_dice"]))
+            )
         elif command.input_method == "physical":
-            if command.ones_digit is None:
-                raise ValueError("Physical dice require the ones digit")
-            raw_dice = {
-                "ones_digit": command.ones_digit,
-                "tens_digits": list(command.tens_digits),
-            }
+            random_roll = ruleset.build_physical_check_roll(
+                bonus_dice=int(check["bonus_dice"]),
+                values={
+                    "ones_digit": command.ones_digit,
+                    "tens_digits": list(command.tens_digits),
+                },
+            )
         else:
             raise ValueError("Input method must be digital or physical")
+        raw_dice = ruleset.check_dice_from_roll(random_roll)
         resolution = ruleset.resolve_check(
             target=int(check["target"]),
             difficulty=check["difficulty"],
@@ -290,6 +300,7 @@ class CheckService:
             check_id,
             actor_member_id=identity.member_id,
             input_method=command.input_method,
+            random_evidence=random_roll.as_dict(),
             resolution=resolution,
         )
         SkillGrowthService(self.repo).sync_check(
@@ -301,12 +312,21 @@ class CheckService:
         check = self.get(check_id, identity)
         if check["status"] not in {"resolved", "overridden"} or not check["raw_dice"]:
             raise ValueError("Only a resolved check can be replayed")
-        ruleset = get_ruleset(str(check["ruleset_id"]))
+        ruleset = get_ruleset(
+            str(check["ruleset_id"]),
+            version=str(check["ruleset_version"]),
+        )
+        random_evidence = check.get("random_evidence")
+        raw_dice = check["raw_dice"]
+        if random_evidence:
+            raw_dice = ruleset.check_dice_from_roll(
+                DiceRollResult.from_dict(random_evidence)
+            )
         replayed = ruleset.resolve_check(
             target=int(check["target"]),
             difficulty=check["difficulty"],
             bonus_dice=int(check["bonus_dice"]),
-            raw_dice=check["raw_dice"],
+            raw_dice=raw_dice,
         )
         recorded = check.get("original_result") if check["status"] == "overridden" else check
         matches = all(

@@ -9,6 +9,7 @@ EXPECTED_HTTP_ROUTES = {
     ("GET", "/"),
     ("GET", "/health"),
     ("GET", "/rulesets"),
+    ("GET", "/ai-skills"),
     ("GET", "/capabilities"),
     ("GET", "/debug/diagnostics"),
     ("GET", "/debug/requests"),

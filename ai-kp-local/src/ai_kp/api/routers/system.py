@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query
 
 from ai_kp.api.schemas import HealthResponse
+from ai_kp.director.skills import list_ai_skills
 from ai_kp.planning.capabilities import list_capabilities
 from ai_kp.rulesets import list_rulesets
 
@@ -17,6 +18,13 @@ def installed_rulesets() -> list[dict]:
     """List executable rule engines; uploaded books alone never appear here."""
 
     return list_rulesets()
+
+
+@router.get("/ai-skills")
+def installed_ai_skills() -> list[dict]:
+    """List proposal-only AI behavior contracts shipped with this server."""
+
+    return list_ai_skills()
 
 
 @router.get("/capabilities")

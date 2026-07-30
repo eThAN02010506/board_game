@@ -50,6 +50,8 @@ from ai_kp.infrastructure.database.migrations import (
     v0043_dynamic_branches,
     v0044_map_overlays_and_routes,
     v0045_check_visibility,
+    v0046_campaign_ruleset_pins,
+    v0047_check_random_evidence,
 )
 
 
@@ -275,6 +277,16 @@ MIGRATIONS = (
         v0045_check_visibility.VERSION,
         v0045_check_visibility.NAME,
         v0045_check_visibility.migrate,
+    ),
+    Migration(
+        v0046_campaign_ruleset_pins.VERSION,
+        v0046_campaign_ruleset_pins.NAME,
+        v0046_campaign_ruleset_pins.migrate,
+    ),
+    Migration(
+        v0047_check_random_evidence.VERSION,
+        v0047_check_random_evidence.NAME,
+        v0047_check_random_evidence.migrate,
     ),
 )
 

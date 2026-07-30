@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  fetchInstalledAiSkills,
+  fetchInstalledRulesets,
   listRuleReviewCandidates,
   requestBinary,
   requestJson,
@@ -10,6 +12,8 @@ import {
 } from "../../api/client";
 import type {
   AuthIdentity,
+  AiSkillManifest,
+  InstalledRuleset,
   RuleQueryResult,
   RuleReviewCandidate,
   RuleSource
@@ -17,11 +21,51 @@ import type {
 import { RulebookPage } from "./RulebookPage";
 
 vi.mock("../../api/client", () => ({
+  fetchInstalledAiSkills: vi.fn(),
+  fetchInstalledRulesets: vi.fn(),
   listRuleReviewCandidates: vi.fn(),
   requestBinary: vi.fn(),
   requestJson: vi.fn(),
   reviewRuleCandidate: vi.fn()
 }));
+
+const installedRuleset: InstalledRuleset = {
+  contract_version: "1.0.0",
+  ruleset_id: "coc7-keeper-cn-2002c",
+  version: "2002c",
+  slug: "coc7",
+  display_name: "克苏鲁的呼唤 第七版",
+  engine_family: "basic-roleplaying-percentile",
+  source_version: "CoC 7e / Keeper Rulebook CN 2002c",
+  aliases: ["coc", "call-of-cthulhu-7e"],
+  character_schema_version: "coc7-investigator-v1",
+  event_schema_version: "coc7-event-v1",
+  knowledge_namespace: "rulesets/coc7/2002c",
+  supported_locales: ["zh-CN"],
+  support_level: "playable_alpha",
+  source_reference: {},
+  license: {
+    id: "user-supplied-proprietary-reference",
+    content_scope: "本地规则实现，不捆绑官方规则文本。"
+  },
+  capabilities: ["character_sheet", "skill_check"],
+  map_modes: ["none", "zone", "freeform"],
+  ui_slots: ["character_sheet", "check_panel"]
+};
+
+const installedSkill: AiSkillManifest = {
+  skill_id: "platform.turn_proposal",
+  version: "1.0.0",
+  display_name: "行动理解与场景提案",
+  category: "action_understanding",
+  description: "理解行动并提出非权威候选。",
+  input_schema_version: "turn-context.v1",
+  output_schema_version: "kp-turn-output.v1",
+  allowed_tools: ["context.read", "proposal.create"],
+  source_requirements: ["campaign_context"],
+  ruleset_scope: null,
+  authority: "proposal_only"
+};
 
 const source: RuleSource = {
   id: "rulesource_1",
@@ -106,6 +150,8 @@ const kpQueryResult: RuleQueryResult = {
 describe("RulebookPage rule review", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fetchInstalledAiSkills).mockResolvedValue([installedSkill]);
+    vi.mocked(fetchInstalledRulesets).mockResolvedValue([installedRuleset]);
     vi.mocked(requestJson).mockImplementation(async (url) => {
       if (url === "/rulebooks/sources") return [source] as never;
       throw new Error(`Unexpected request: ${url}`);
@@ -118,6 +164,16 @@ describe("RulebookPage rule review", () => {
       ...candidate,
       status: "validated"
     });
+  });
+
+  it("separates installed executable rulesets from uploaded knowledge", async () => {
+    render(<RulebookPage identity={kpIdentity} />);
+
+    expect(await screen.findByRole("heading", { name: "运行时契约" })).toBeVisible();
+    expect(screen.getByText("克苏鲁的呼唤 第七版")).toBeVisible();
+    expect(screen.getByText("可玩 Alpha")).toBeVisible();
+    expect(screen.getByText(/行动理解与场景提案 · 只提案/)).toBeVisible();
+    expect(screen.getByText(/上传规则书只会增加隔离知识库/)).toBeVisible();
   });
 
   it("lets a KP approve a candidate with a golden case", async () => {
