@@ -411,6 +411,7 @@ class MapRepository:
         current = self.get_current_map_revision(map_id)
         if current is None or current["id"] != expected_revision_id:
             raise ValueError("Map revision changed; refresh before editing")
+        previous_spec = current["spec"]
         report = require_valid_map_spec(map_spec).to_dict()
         if not report["valid"]:
             raise ValueError("Map specification is invalid")
@@ -493,6 +494,16 @@ class MapRepository:
         revision_id = self._create_map_revision(
             map_id, map_spec, report, created_by=f"kp:{member_id}"
         )
+        self._inherit_hidden_fog_regions(
+            map_id=map_id,
+            from_revision_id=expected_revision_id,
+            to_revision_id=revision_id,
+            old_width=float(previous_spec["canvas"]["width"]),
+            old_height=float(previous_spec["canvas"]["height"]),
+            new_width=float(map_spec["canvas"]["width"]),
+            new_height=float(map_spec["canvas"]["height"]),
+            member_id=member_id,
+        )
         self.connection.execute(
             "UPDATE maps SET current_revision_id = ?, title = ?, width = ?, height = ? WHERE id = ?",
             (
@@ -503,11 +514,14 @@ class MapRepository:
         return self.get_map(map_id)
 
     def list_map_fog_regions(self, map_id: str, *, include_revealed: bool) -> list[dict]:
-        clause = "" if include_revealed else "AND status = 'hidden'"
+        clause = "" if include_revealed else "AND f.status = 'hidden'"
         rows = self.connection.execute(
             f"""
-            SELECT * FROM map_fog_regions WHERE map_id = ? {clause}
-            ORDER BY created_at, id
+            SELECT f.*
+            FROM map_fog_regions f
+            JOIN maps m ON m.id = f.map_id AND m.current_revision_id = f.revision_id
+            WHERE f.map_id = ? {clause}
+            ORDER BY f.created_at, f.id
             """,
             (map_id,),
         ).fetchall()
@@ -526,12 +540,25 @@ class MapRepository:
             raise ValueError("Map requires a current revision")
         if len(polygon) < 3 or len(polygon) > 64:
             raise ValueError("Fog polygon requires 3-64 points")
+        polygon = [
+            {"x": float(point["x"]), "y": float(point["y"])}
+            for point in polygon
+        ]
         width, height = revision["spec"]["canvas"]["width"], revision["spec"]["canvas"]["height"]
         if any(
             not 0 <= float(point["x"]) <= width or not 0 <= float(point["y"]) <= height
             for point in polygon
         ):
             raise ValueError("Fog polygon points must remain inside the map")
+        if len({(point["x"], point["y"]) for point in polygon}) < 3:
+            raise ValueError("Fog polygon requires at least three distinct points")
+        signed_area = sum(
+            point["x"] * polygon[(index + 1) % len(polygon)]["y"]
+            - polygon[(index + 1) % len(polygon)]["x"] * point["y"]
+            for index, point in enumerate(polygon)
+        )
+        if abs(signed_area) < 2:
+            raise ValueError("Fog polygon must cover a visible area")
         fog_id = new_id("fog")
         self.connection.execute(
             """
@@ -542,6 +569,99 @@ class MapRepository:
             (fog_id, map_id, revision["id"], label.strip(), json.dumps(polygon), member_id),
         )
         return next(item for item in self.list_map_fog_regions(map_id, include_revealed=True) if item["id"] == fog_id)
+
+    def update_map_fog_region(
+        self,
+        fog_id: str,
+        *,
+        expected_version: int,
+        label: str,
+        polygon: list[dict],
+        member_id: str,
+    ) -> dict:
+        existing = self.get_map_fog_region(fog_id)
+        if existing["status"] != "hidden":
+            raise ValueError("Revealed fog regions are immutable")
+        map_id = str(existing["map_id"])
+        # Reuse the canonical validation path, then replace rather than keep
+        # the temporary row. This also binds edits to the current revision.
+        replacement = self.create_map_fog_region(
+            map_id,
+            label=label,
+            polygon=polygon,
+            member_id=member_id,
+        )
+        cursor = self.connection.execute(
+            "DELETE FROM map_fog_regions WHERE id = ? AND version = ?",
+            (fog_id, expected_version),
+        )
+        if cursor.rowcount != 1:
+            self.connection.execute(
+                "DELETE FROM map_fog_regions WHERE id = ?", (replacement["id"],)
+            )
+            raise ValueError("Fog region changed; refresh before editing")
+        return replacement
+
+    def delete_map_fog_region(self, fog_id: str, *, expected_version: int) -> None:
+        cursor = self.connection.execute(
+            """
+            DELETE FROM map_fog_regions
+            WHERE id = ? AND version = ? AND status = 'hidden'
+            """,
+            (fog_id, expected_version),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError("Fog region changed or was already revealed")
+
+    def _inherit_hidden_fog_regions(
+        self,
+        *,
+        map_id: str,
+        from_revision_id: str,
+        to_revision_id: str,
+        old_width: float,
+        old_height: float,
+        new_width: float,
+        new_height: float,
+        member_id: str,
+    ) -> None:
+        if old_width <= 0 or old_height <= 0:
+            return
+        rows = self.connection.execute(
+            """
+            SELECT * FROM map_fog_regions
+            WHERE map_id = ? AND revision_id = ? AND status = 'hidden'
+            ORDER BY created_at, id
+            """,
+            (map_id, from_revision_id),
+        ).fetchall()
+        scale_x, scale_y = new_width / old_width, new_height / old_height
+        for row in rows:
+            polygon = json.loads(row["polygon_json"])
+            scaled = [
+                {
+                    "x": min(new_width, max(0.0, float(point["x"]) * scale_x)),
+                    "y": min(new_height, max(0.0, float(point["y"]) * scale_y)),
+                }
+                for point in polygon
+            ]
+            self.connection.execute(
+                """
+                INSERT INTO map_fog_regions
+                  (id, map_id, revision_id, label, polygon_json,
+                   created_by_member_id, inherited_from_fog_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("fog"),
+                    map_id,
+                    to_revision_id,
+                    row["label"],
+                    json.dumps(scaled, ensure_ascii=False),
+                    member_id,
+                    row["id"],
+                ),
+            )
 
     def reveal_map_fog_region(
         self, fog_id: str, *, expected_version: int
@@ -959,14 +1079,23 @@ class MapRepository:
         )
         if updated.rowcount != 1:
             raise ValueError("Map token changed; refresh the map and retry")
+        move_id = new_id("move")
         self.connection.execute(
             """
             INSERT INTO map_token_moves
               (id, token_id, from_location_id, to_location_id, moved_by, note)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (new_id("move"), token_id, from_location_id, to_location_id, moved_by, note),
+            (move_id, token_id, from_location_id, to_location_id, moved_by, note),
         )
+        record_route_move = getattr(self, "record_route_plan_move", None)
+        if record_route_move is not None and from_location_id != to_location_id:
+            record_route_move(
+                token_id=token_id,
+                from_location_name=str(token["location_name"]),
+                to_location_name=to_location_name,
+                move_id=move_id,
+            )
         return self.get_map_token(token_id)
 
     def list_map_token_moves(

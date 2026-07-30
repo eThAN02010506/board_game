@@ -49,6 +49,16 @@ def list_handouts(
     ]
 
 
+@router.get("/campaigns/{campaign_id}/handout-link-options")
+def list_handout_link_options(
+    campaign_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    require_campaign_role(identity, campaign_id, ("kp",))
+    return repo.list_handout_link_options(campaign_id)
+
+
 @router.patch("/handouts/{handout_id}")
 def update_handout(
     handout_id: str,

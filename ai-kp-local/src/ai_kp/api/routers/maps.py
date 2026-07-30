@@ -13,15 +13,23 @@ from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.schemas import (
     MapFogCreate,
     MapFogReveal,
+    MapFogUpdate,
     MapGenerateRequest,
     MapImageGenerateRequest,
     MapPublishRequest,
     MapRevisionCreate,
+    MapRoutePlanCreate,
+    MapRoutePlanStatusUpdate,
     MapTokenCreate,
     MapTokenMove,
 )
 from ai_kp.application.errors import KpSessionEndedError
 from ai_kp.application.map_image_service import MapImageService
+from ai_kp.application.map_route_plan_service import (
+    CreateRoutePlanCommand,
+    MapRoutePlanService,
+    TokenRoute,
+)
 from ai_kp.application.map_service import (
     GenerateMapCommand,
     MapService,
@@ -73,6 +81,39 @@ def create_map_fog_region(
     )
 
 
+@router.patch("/map-fog-regions/{fog_id}")
+def update_map_fog_region(
+    fog_id: str,
+    payload: MapFogUpdate,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    fog = repo.get_map_fog_region(fog_id)
+    campaign_id = campaign_for_map(repo, str(fog["map_id"]))
+    require_campaign_role(identity, campaign_id, ("kp",))
+    return repo.update_map_fog_region(
+        fog_id,
+        expected_version=payload.expected_version,
+        label=payload.label,
+        polygon=payload.polygon,
+        member_id=identity.member_id,
+    )
+
+
+@router.delete("/map-fog-regions/{fog_id}")
+def delete_map_fog_region(
+    fog_id: str,
+    expected_version: int,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    fog = repo.get_map_fog_region(fog_id)
+    campaign_id = campaign_for_map(repo, str(fog["map_id"]))
+    require_campaign_role(identity, campaign_id, ("kp",))
+    repo.delete_map_fog_region(fog_id, expected_version=expected_version)
+    return {"deleted": True, "id": fog_id}
+
+
 @router.post("/map-fog-regions/{fog_id}/reveal")
 def reveal_map_fog_region(
     fog_id: str,
@@ -85,6 +126,93 @@ def reveal_map_fog_region(
     require_campaign_role(identity, campaign_id, ("kp",))
     return repo.reveal_map_fog_region(
         fog_id, expected_version=payload.expected_version
+    )
+
+
+@router.get("/maps/{map_id}/route-plans")
+def list_map_route_plans(
+    map_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    campaign_id = campaign_for_map(repo, map_id)
+    require_campaign_role(identity, campaign_id)
+    if identity.role == "player" and not repo.is_map_published(map_id):
+        raise HTTPException(status_code=404, detail="Map not found")
+    member_token_id = None
+    if identity.role == "player" and identity.pc_id:
+        token = repo.find_map_token_for_actor(map_id, "pc", identity.pc_id)
+        member_token_id = str(token["id"]) if token else None
+    return repo.list_map_route_plans(
+        campaign_id,
+        map_id=map_id,
+        member_token_id=member_token_id,
+        include_kp=identity.role == "kp",
+    )
+
+
+@router.post("/maps/{map_id}/route-plans")
+def create_map_route_plan(
+    map_id: str,
+    payload: MapRoutePlanCreate,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    campaign_id = campaign_for_map(repo, map_id)
+    require_campaign_role(identity, campaign_id)
+    if identity.role == "player":
+        if not repo.is_map_published(map_id):
+            raise HTTPException(status_code=404, detail="Map not found")
+        require_approved_pc_binding(
+            repo,
+            campaign_id,
+            identity.pc_id,
+            owner_profile_id=identity.player_profile_id,
+        )
+        own_token = (
+            repo.find_map_token_for_actor(map_id, "pc", identity.pc_id)
+            if identity.pc_id
+            else None
+        )
+        if own_token is None or any(
+            route.token_id != own_token["id"] for route in payload.token_routes
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Players can only plan a route for their own token",
+            )
+    return MapRoutePlanService(repo).create(
+        campaign_id=campaign_id,
+        map_id=map_id,
+        member_id=identity.member_id,
+        command=CreateRoutePlanCommand(
+            title=payload.title,
+            note=payload.note,
+            token_routes=tuple(
+                TokenRoute(
+                    token_id=route.token_id,
+                    waypoints=tuple(route.waypoints),
+                )
+                for route in payload.token_routes
+            ),
+            player_submission=identity.role == "player",
+        ),
+    )
+
+
+@router.patch("/map-route-plans/{plan_id}")
+def update_map_route_plan(
+    plan_id: str,
+    payload: MapRoutePlanStatusUpdate,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    plan = repo.get_map_route_plan(plan_id)
+    require_campaign_role(identity, str(plan["campaign_id"]), ("kp",))
+    return repo.update_map_route_plan_status(
+        plan_id,
+        expected_version=payload.expected_version,
+        status=payload.status,
     )
 
 

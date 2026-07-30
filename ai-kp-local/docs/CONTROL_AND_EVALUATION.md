@@ -21,21 +21,30 @@ multiple transitions share one timestamp. Restart does not silently return contr
 `campaign_handouts` stores draft, revealed or withdrawn handouts. KP may pin and link a handout to
 a fact, NPC, map, location or module entity. Players query only revealed rows through a server-side
 projection. `PUT /handouts/{id}/read` is idempotent per session member, while KP can inspect read
-receipts. Player responses omit creator, revealer and other-seat receipt metadata.
+receipts. The UI obtains campaign-scoped link choices and the repository validates the selected
+target again on create/update. Player responses omit creator, revealer and other-seat receipt metadata.
 
 ## Map revisions and fog
 
 Editing a MapSpec validates the complete structure, checks the expected current revision and writes
 a new immutable revision. Stable element IDs preserve existing locations and token references.
 Removing an occupied location fails. Routes are rebuilt in the same transaction. Fog polygons are
-bounded to the map canvas and tied to the current revision; players receive only hidden regions,
-which render above map structure and tokens.
+an independent overlay bounded to the map canvas and tied to the current revision. Hidden regions
+are scaled into a new revision when canvas dimensions change; revealed history stays with its source
+revision. Players receive only current-revision hidden regions, rendered above structure and tokens.
+Multi-token route plans are revision-bound, require actual visible edges and advance only when the
+corresponding token movement is persisted.
 
 ## Simulation and observability
 
 Simulation cases are immutable definitions. Each replay records definition hash, runner version,
 trajectory, metrics and result fingerprint. The first runner supports audience-scoped emissions,
-explicit reveal and player-visible/player-hidden assertions.
+explicit reveal and player-visible/player-hidden assertions. `product-service-replay.v3` calls the
+real investigator approval, CoC7 character state, map, token, route-plan, proposal, handout and
+encounter application services inside a SQLite savepoint. `ROLLBACK TO` removes the temporary
+campaign before the run record is persisted, so evaluation cannot pollute a live campaign. Its
+trajectory separates PL, public KP, private model, rules-engine and system records; the evaluation
+API remains KP-only.
 
 The debug console exposes:
 
@@ -65,3 +74,4 @@ transaction back.
 - [Microsoft durable human-in-the-loop workflows](https://learn.microsoft.com/en-us/azure/durable-task/sdks/durable-agents-microsoft-agent-framework)
 - [NIST automated benchmark evaluation guidance](https://www.nist.gov/news-events/news/2026/01/towards-best-practices-automated-benchmark-evaluations)
 - [SQLite transactions](https://www.sqlite.org/lang_transaction.html)
+- [SQLite savepoints](https://www.sqlite.org/lang_savepoint.html)

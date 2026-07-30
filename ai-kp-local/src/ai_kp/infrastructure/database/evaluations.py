@@ -48,6 +48,10 @@ class EvaluationRepository(SQLiteRepository):
     def run_simulation_case(self, case_id: str) -> dict:
         case = self.get_simulation_case(case_id)
         result = run_simulation(case["definition"])
+        return self.record_simulation_run(case_id, result)
+
+    def record_simulation_run(self, case_id: str, result: dict[str, Any]) -> dict:
+        case = self.get_simulation_case(case_id)
         run_id = new_id("simrun")
         self.connection.execute(
             """
@@ -64,6 +68,13 @@ class EvaluationRepository(SQLiteRepository):
             ),
         )
         return next(item for item in self.list_simulation_runs(case_id) if item["id"] == run_id)
+
+    def begin_simulation_sandbox(self) -> None:
+        self.connection.execute("SAVEPOINT product_service_replay")
+
+    def rollback_simulation_sandbox(self) -> None:
+        self.connection.execute("ROLLBACK TO SAVEPOINT product_service_replay")
+        self.connection.execute("RELEASE SAVEPOINT product_service_replay")
 
     def list_simulation_runs(self, case_id: str) -> list[dict]:
         rows = self.connection.execute(

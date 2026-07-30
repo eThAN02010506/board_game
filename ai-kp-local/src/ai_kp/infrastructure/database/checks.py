@@ -333,6 +333,18 @@ class SkillCheckRepository(SQLiteRepository):
             result["actions"].append(action)
         return result
 
+    def find_opposed_check_for_skill_check(
+        self, check_id: str
+    ) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT id FROM opposed_checks
+            WHERE left_check_id = ? OR right_check_id = ?
+            """,
+            (check_id, check_id),
+        ).fetchone()
+        return self.get_opposed_check(str(row["id"])) if row is not None else None
+
     def list_opposed_checks(
         self, campaign_id: str, session_id: str
     ) -> list[dict[str, Any]]:

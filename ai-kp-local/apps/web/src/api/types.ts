@@ -528,6 +528,12 @@ export type Handout = {
   updated_at: string;
 };
 
+export type HandoutLinkOption = {
+  type: NonNullable<Handout["link_type"]>;
+  id: string;
+  label: string;
+};
+
 export type PlayerCharacter = {
   id: string;
   campaign_id: string;
@@ -792,6 +798,77 @@ export type InvestigatorCampaignState = {
   inventory_delta: Record<string, unknown>;
   state_version: number;
   current_game_time: string | null;
+  daily_san_loss?: number;
+  daily_san_start?: number | null;
+  last_san_day?: string | null;
+};
+
+export type Coc7GameplayEvent = {
+  id: string;
+  campaign_id: string;
+  session_id: string;
+  encounter_id: string | null;
+  investigator_id: string | null;
+  event_type: string;
+  command_id: string;
+  visibility: "table" | "kp" | "player";
+  input: Record<string, unknown>;
+  result: Record<string, unknown>;
+  aggregate_version: number;
+  ruleset_id: string;
+  ruleset_version: string;
+  source_reference: Record<string, unknown>;
+  created_at: string;
+};
+
+export type Coc7EncounterParticipant = {
+  participant_id: string;
+  name: string;
+  investigator_id?: string | null;
+  dex: number;
+  move?: number;
+  adjusted_move?: number;
+  max_hp?: number;
+  current_hp?: number;
+  build?: number;
+  conditions?: Array<Record<string, unknown>>;
+  readied_firearm?: boolean;
+  chase_role?: "pursuer" | "fleeing";
+  con_success_level?: SkillCheck["success_level"];
+  location_index?: number;
+  action_points?: number;
+};
+
+export type Coc7Encounter = {
+  id: string;
+  campaign_id: string;
+  session_id: string;
+  kind: "combat" | "chase";
+  title: string;
+  status: "active" | "completed" | "cancelled";
+  round_no: number;
+  turn_index: number;
+  version: number;
+  state: {
+    participants: Coc7EncounterParticipant[];
+    turn_order: string[];
+    defense_reactions?: Record<string, number>;
+    locations?: Array<{
+      location_index: number;
+      label: string;
+      hazard?: Record<string, unknown> | null;
+    }>;
+    slowest_move?: number;
+  };
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type Coc7CharacterGameplayState = {
+  investigator_id: string;
+  state: InvestigatorCampaignState;
+  events: Coc7GameplayEvent[];
 };
 
 export type CampaignInvestigator = {
@@ -1011,6 +1088,32 @@ export type MapFogRegion = {
   polygon: Array<{ x: number; y: number }>;
   status: "hidden" | "revealed";
   version: number;
+  inherited_from_fog_id?: string | null;
+};
+
+export type MapRoutePlanLeg = {
+  id: string;
+  token_id: string;
+  token_label: string;
+  sequence_no: number;
+  from_location_name: string;
+  to_location_name: string;
+  route_element_id: string | null;
+  status: "pending" | "completed" | "skipped";
+  completed_at: string | null;
+};
+
+export type MapRoutePlan = {
+  id: string;
+  campaign_id: string;
+  map_id: string;
+  revision_id: string;
+  title: string;
+  note: string;
+  status: "proposed" | "approved" | "executing" | "completed" | "cancelled";
+  visibility: "session" | "kp";
+  version: number;
+  legs: MapRoutePlanLeg[];
 };
 
 export type MapVisibility = "player" | "table" | "kp";
@@ -1153,6 +1256,76 @@ export type MapToken = {
   y: number;
 };
 
+export type DynamicBranchCondition = {
+  condition_type: "entity_state" | "world_fact" | "scene" | "time";
+  reference: string;
+  operator: "equals" | "not_equals" | "exists" | "not_exists";
+  expected: string | null;
+  rationale: string;
+};
+
+export type DynamicBranchPlan = {
+  goal: string;
+  entry_conditions: DynamicBranchCondition[];
+  beats: Array<{
+    beat_id: string;
+    title: string;
+    character_intent: string;
+    action: string;
+    preconditions: DynamicBranchCondition[];
+    expected_effects: Array<{
+      effect_type:
+        | "narrative_only"
+        | "entity_state_candidate"
+        | "fact_candidate"
+        | "scene_candidate";
+      reference: string | null;
+      description: string;
+      requires_contact: boolean;
+    }>;
+    failure_policy: "skip" | "divert" | "pause_for_kp";
+  }>;
+  anchor_guards: Array<{
+    anchor_entity_id: string;
+    invariant: string;
+    recovery: string;
+  }>;
+  completion_conditions: DynamicBranchCondition[];
+};
+
+export type DynamicBranchRun = {
+  id: string;
+  proposal_id: string;
+  campaign_id: string;
+  module_run_id: string;
+  status: "approved" | "active" | "paused" | "completed" | "abandoned";
+  current_beat_index: number;
+  plan: DynamicBranchPlan;
+  version: number;
+  activated_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  events: Array<{
+    id: string;
+    event_seq: number;
+    event_type:
+      | "approved"
+      | "activated"
+      | "beat_resolved"
+      | "paused"
+      | "resumed"
+      | "completed"
+      | "abandoned";
+    beat_id: string | null;
+    outcome: "succeeded" | "failed" | "skipped" | null;
+    note: string;
+    payload: Record<string, unknown>;
+    aggregate_version: number;
+    created_at: string;
+  }>;
+};
+
 export type TurnProposal = {
   id: string;
   campaign_id: string;
@@ -1201,6 +1374,7 @@ export type TurnProposal = {
         description: string;
         tradeoff: string;
       }>;
+      branch_plan: DynamicBranchPlan | null;
     };
   } | null;
   world_expansion_materialization?: {
@@ -1212,6 +1386,8 @@ export type TurnProposal = {
     map_token_id: string | null;
     investigator_encounter_ids?: string[];
     npc_reappearance_id?: string | null;
+    dynamic_branch_id?: string | null;
+    dynamic_branch_status?: DynamicBranchRun["status"] | null;
     created_at: string;
   } | null;
   player_action: string;

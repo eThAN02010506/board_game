@@ -5,10 +5,13 @@ import sqlite3
 from ai_kp.infrastructure.database.character_timelines import CharacterTimelineRepository
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
 from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
+from ai_kp.infrastructure.database.dynamic_branches import DynamicBranchRepository
 from ai_kp.infrastructure.database.evaluations import EvaluationRepository
 from ai_kp.infrastructure.database.facts import FactRepository
+from ai_kp.infrastructure.database.gameplay import GameplayRepository
 from ai_kp.infrastructure.database.handouts import HandoutRepository
 from ai_kp.infrastructure.database.investigators import InvestigatorRepository
+from ai_kp.infrastructure.database.map_route_plans import MapRoutePlanRepository
 from ai_kp.infrastructure.database.maps import MapRepository
 from ai_kp.infrastructure.database.memory_timeline import MemoryTimelineRepository
 from ai_kp.infrastructure.database.model_configuration import ModelConfigurationRepository
@@ -41,8 +44,11 @@ class Repository(
     EvaluationRepository,
     FactRepository,
     HandoutRepository,
+    GameplayRepository,
+    DynamicBranchRepository,
     TurnRepository,
     MapRepository,
+    MapRoutePlanRepository,
     ContextAssemblyRepository,
     SecurityRepository,
     RealtimeRepository,

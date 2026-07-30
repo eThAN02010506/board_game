@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ai_kp.application.ports.repositories import CheckStore
+from ai_kp.application.skill_growth_service import SkillGrowthService
 from ai_kp.platform.sessions.models import AuthenticatedMember
 from ai_kp.rulesets import get_ruleset
 
@@ -199,11 +200,21 @@ class CheckService:
             str(left["id"]): left["skill_name"],
             str(right["id"]): right["skill_name"],
         }
-        return self.repo.resolve_opposed_check(
+        resolved = self.repo.resolve_opposed_check(
             opposed_check_id,
             actor_member_id=identity.member_id,
             result=result,
         )
+        winner_id = result.get("winner_id")
+        if winner_id:
+            winner = left if left["id"] == winner_id else right
+            SkillGrowthService(self.repo).sync_check(
+                winner,
+                actor_member_id=identity.member_id,
+                from_opposed=True,
+                opposed_check_id=opposed_check_id,
+            )
+        return resolved
 
     def reroll_opposed(
         self, opposed_check_id: str, identity: AuthenticatedMember
@@ -283,12 +294,16 @@ class CheckService:
             bonus_dice=int(check["bonus_dice"]),
             raw_dice=raw_dice,
         )
-        return self.repo.resolve_skill_check(
+        resolved = self.repo.resolve_skill_check(
             check_id,
             actor_member_id=identity.member_id,
             input_method=command.input_method,
             resolution=resolution,
         )
+        SkillGrowthService(self.repo).sync_check(
+            resolved, actor_member_id=identity.member_id
+        )
+        return resolved
 
     def replay(self, check_id: str, identity: AuthenticatedMember) -> dict:
         check = self.get(check_id, identity)
@@ -325,13 +340,17 @@ class CheckService:
     ) -> dict:
         check = self.repo.get_skill_check(check_id)
         self._require_kp_check(identity, check)
-        return self.repo.override_skill_check(
+        overridden = self.repo.override_skill_check(
             check_id,
             actor_member_id=identity.member_id,
             success_level=success_level,
             passed=passed,
             reason=reason,
         )
+        SkillGrowthService(self.repo).sync_check(
+            overridden, actor_member_id=identity.member_id
+        )
+        return overridden
 
     def cancel(
         self, check_id: str, identity: AuthenticatedMember, *, reason: str

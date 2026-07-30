@@ -163,6 +163,7 @@ const worldExpansionProposal: TurnProposal = {
     },
     candidate: {
       expansion_kind: "environment",
+      branch_plan: null,
       subject: "小镇警务设施",
       proposal: "设置一间小型治安官办公室。",
       rationale: "符合年代和聚落规模。",

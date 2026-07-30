@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from ai_kp.application.ai_control_service import AiControlService
 from ai_kp.application.errors import KpSessionEndedError
 from ai_kp.application.ports.director import CheckConsequenceDirector
 from ai_kp.application.ports.repositories import TurnStore
@@ -52,6 +53,10 @@ class CheckConsequenceService:
             return existing
         self._require_ready_action(action)
         origin = self._require_approved_origin(action)
+        control = AiControlService(self.repo).authorize(
+            str(action["campaign_id"]),
+            "check consequence proposal",
+        )
 
         result = await director.handle_check_consequence(
             campaign_id=str(action["campaign_id"]),
@@ -70,6 +75,7 @@ class CheckConsequenceService:
             raise KpSessionEndedError(
                 "KP session ended while the consequence model was running"
             )
+        AiControlService(self.repo).revalidate(control)
         current_action = self.repo.get_player_action(str(action_id))
         current_checks = self.repo.list_skill_checks_for_action(str(action_id))
         current_opposed_checks = self.repo.list_opposed_checks_for_action(str(action_id))

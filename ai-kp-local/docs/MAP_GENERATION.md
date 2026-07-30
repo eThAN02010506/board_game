@@ -52,7 +52,9 @@ KP 预览并选择                      │
 - `layout_hash`：影响结构/渲染的布局哈希；
 - `generation_input_hash`：玩家安全投影、图片提示、Provider、模型、尺寸和 seed 的组合哈希。
 
-棋子移动不创建结构 revision；它只更新棋子 optimistic `version`。当前阶段还没有结构编辑 API，因此创建地图产生 revision 1，后续“编辑并生成新 revision”仍属于部分能力。
+棋子移动不创建结构 revision；它只更新棋子 optimistic `version`。KP 可提交完整
+MapSpec 并以 `expected_revision_id` 创建后续不可变 revision；占用中的地点不能被删除。
+雾区是独立覆盖层，不进入 MapSpec 或背景图片。
 
 ## 确定性校验
 
@@ -232,13 +234,13 @@ pnpm run build
 
 当前能力仍标记为部分可用，主要缺口是：
 
-- MapSpec 结构编辑、revision 2+ 和并发编辑保护；
 - 房间墙体、门窗、多层建筑与可拖动布局编辑器；
-- 按玩家/队伍保存的揭示状态、迷雾和隐藏 overlay；
+- 按玩家/队伍分别保存揭示状态；
 - ComfyUI/ControlNet 布局控制图适配器；
 - 图片任务队列、进度、失败重试和取消；
 - 真实本地图像模型的固定视觉验收集；
 - 备份/恢复时同时打包数据库与 `map-assets`。
 
-下一步应先实现“地图结构编辑 → 新 revision → token/揭示引用完整性”，再接
-ComfyUI/ControlNet。这样图片质量提升不会破坏当前已经稳定的权限和玩法事实层。
+当前结构编辑会保留稳定地点 ID、拒绝删除占用地点，并将当前隐藏雾层按新旧画布比例
+复制到新 revision；玩家只看到当前 revision 的隐藏遮罩。下一步是发布差异预览、
+小队级揭示和 ComfyUI/ControlNet，不改变已稳定的权限与玩法事实层。

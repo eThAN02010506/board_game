@@ -28,6 +28,7 @@ import type {
   ModuleRuntimeEntityStatus,
   TurnProposal
 } from "../../api/types";
+import { DynamicBranchPanel } from "./DynamicBranchPanel";
 
 type Props = {
   run: ModuleRun;
@@ -274,14 +275,14 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
 
       <div className="scene-director-grid">
         <section className="director-control-card" aria-label="导演控制权">
-          <div className="director-card-title"><ShieldAlert size={17} /><div><strong>安全暂停与接管</strong><small>状态持久化，所有切换写入审计</small></div></div>
+          <div className="director-card-title"><ShieldAlert size={17} /><div><strong>安全暂停与接管</strong><small>阻止新调用、取消在途调用，并持久记录切换</small></div></div>
           <label>切换理由<input maxLength={2000} value={controlReason} onChange={(event) => setControlReason(event.target.value)} /></label>
           <div className="director-control-actions">
             <button disabled={busy || controlMode === "safety_paused"} onClick={() => void changeControl("safety_paused")} type="button">安全暂停</button>
             <button disabled={busy || controlMode === "human_kp"} onClick={() => void changeControl("human_kp")} type="button">人类 KP 接管</button>
             <button disabled={busy || controlMode === "ai_assist"} onClick={() => void changeControl("ai_assist")} type="button">交还 AI 辅助</button>
           </div>
-          <small>当前：{controlMode === "ai_assist" ? "AI 可辅助" : controlMode === "human_kp" ? "人类 KP 完全接管" : "AI 安全暂停"}{activeRun.director_control_reason ? ` · ${activeRun.director_control_reason}` : ""}</small>
+          <small>当前：{controlMode === "ai_assist" ? "AI 可辅助" : controlMode === "human_kp" ? "人类 KP 完全接管" : "AI 安全暂停"}{activeRun.director_control_reason ? ` · ${activeRun.director_control_reason}` : ""}。适用于回合、检定后果、世界补全和团后摘要。</small>
         </section>
         <form className="scene-transition-card" onSubmit={(event) => void transitionScene(event)}>
           <div className="director-card-title">
@@ -484,6 +485,10 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
           </p>
         )}
       </section>
+      <DynamicBranchPanel
+        campaignId={activeRun.campaign_id}
+        moduleRunId={activeRun.id}
+      />
 
       <p className="inline-message" role="status">{message}</p>
 

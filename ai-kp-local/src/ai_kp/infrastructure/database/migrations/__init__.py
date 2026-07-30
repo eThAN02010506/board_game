@@ -46,6 +46,9 @@ from ai_kp.infrastructure.database.migrations import (
     v0039_simulation_evals,
     v0040_opposed_rerolls,
     v0041_control_event_sequence,
+    v0042_coc7_gameplay,
+    v0043_dynamic_branches,
+    v0044_map_overlays_and_routes,
 )
 
 
@@ -251,6 +254,21 @@ MIGRATIONS = (
         v0041_control_event_sequence.VERSION,
         v0041_control_event_sequence.NAME,
         v0041_control_event_sequence.migrate,
+    ),
+    Migration(
+        v0042_coc7_gameplay.VERSION,
+        v0042_coc7_gameplay.NAME,
+        v0042_coc7_gameplay.migrate,
+    ),
+    Migration(
+        v0043_dynamic_branches.VERSION,
+        v0043_dynamic_branches.NAME,
+        v0043_dynamic_branches.migrate,
+    ),
+    Migration(
+        v0044_map_overlays_and_routes.VERSION,
+        v0044_map_overlays_and_routes.NAME,
+        v0044_map_overlays_and_routes.migrate,
     ),
 )
 

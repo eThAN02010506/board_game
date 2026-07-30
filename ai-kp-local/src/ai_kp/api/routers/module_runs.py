@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ai_kp.api.authz import require_approved_pc_binding, require_campaign_role
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
-from ai_kp.api.llm import create_llm_client
+from ai_kp.api.llm import create_kp_orchestrator
 from ai_kp.api.schemas import (
     DirectorAnalysisRequest,
     DirectorControlUpdate,
@@ -24,7 +24,6 @@ from ai_kp.application.module_run_service import (
 )
 from ai_kp.application.turn_service import TurnService, WorldExpansionCommand
 from ai_kp.bootstrap.settings import Settings
-from ai_kp.director.orchestrator import KpOrchestrator
 from ai_kp.director.turn_output import StructuredOutputError
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
@@ -119,14 +118,15 @@ def get_module_run_director_state(
 
 
 @router.post("/module-runs/{run_id}/director/control")
-def update_director_control(
+async def update_director_control(
     run_id: str,
     payload: DirectorControlUpdate,
+    request: Request,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
     _require_run_kp(run_id, identity, repo)
-    return ModuleRunService(repo).set_control(
+    updated = ModuleRunService(repo).set_control(
         run_id,
         DirectorControlCommand(
             expected_version=payload.expected_version,
@@ -135,6 +135,11 @@ def update_director_control(
         ),
         member_id=identity.member_id,
     )
+    if payload.mode != "ai_assist":
+        request.app.state.campaign_ai_calls.cancel_campaign(
+            str(updated["campaign_id"])
+        )
+    return updated
 
 
 @router.post("/module-runs/{run_id}/scene-transitions")
@@ -202,8 +207,6 @@ async def create_world_expansion_proposal(
     settings: Settings = Depends(get_app_settings),
 ) -> dict:
     run = _require_run_kp(run_id, identity, repo)
-    if run.get("director_control_mode") != "ai_assist":
-        raise HTTPException(status_code=409, detail="AI director is not in control")
     if payload.pc_id:
         require_approved_pc_binding(repo, str(run["campaign_id"]), payload.pc_id)
     try:
@@ -215,7 +218,7 @@ async def create_world_expansion_proposal(
                 map_id=payload.map_id,
             ),
             identity,
-            KpOrchestrator(repo.connection, create_llm_client(settings, request)),
+            create_kp_orchestrator(repo, settings, request),
             source_model=settings.llm_model,
         )
     except StructuredOutputError as exc:

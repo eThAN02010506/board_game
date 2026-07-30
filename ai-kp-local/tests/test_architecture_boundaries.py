@@ -11,10 +11,13 @@ from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.character_timelines import CharacterTimelineRepository
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
 from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
+from ai_kp.infrastructure.database.dynamic_branches import DynamicBranchRepository
 from ai_kp.infrastructure.database.evaluations import EvaluationRepository
 from ai_kp.infrastructure.database.facts import FactRepository
+from ai_kp.infrastructure.database.gameplay import GameplayRepository
 from ai_kp.infrastructure.database.handouts import HandoutRepository
 from ai_kp.infrastructure.database.investigators import InvestigatorRepository
+from ai_kp.infrastructure.database.map_route_plans import MapRoutePlanRepository
 from ai_kp.infrastructure.database.maps import MapRepository
 from ai_kp.infrastructure.database.memory_timeline import MemoryTimelineRepository
 from ai_kp.infrastructure.database.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
@@ -408,8 +411,11 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         EvaluationRepository,
         FactRepository,
         HandoutRepository,
+        GameplayRepository,
+        DynamicBranchRepository,
         TurnRepository,
         MapRepository,
+        MapRoutePlanRepository,
         ContextAssemblyRepository,
         SecurityRepository,
         RealtimeRepository,
@@ -433,8 +439,17 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     assert Repository.__mro__.count(SQLiteRepository) == 1
     assert Repository.create_campaign is WorldRepository.create_campaign
     assert Repository.append_fact_entry is FactRepository.append_fact_entry
+    assert Repository.create_coc7_encounter is GameplayRepository.create_coc7_encounter
+    assert (
+        Repository.create_dynamic_branch_run
+        is DynamicBranchRepository.create_dynamic_branch_run
+    )
     assert Repository.create_turn_proposal is TurnRepository.create_turn_proposal
     assert Repository.create_map is MapRepository.create_map
+    assert (
+        Repository.create_map_route_plan
+        is MapRoutePlanRepository.create_map_route_plan
+    )
     assert Repository.create_context_assembly is ContextAssemblyRepository.create_context_assembly
     assert Repository.create_campaign_session is SecurityRepository.create_campaign_session
     assert Repository.append_realtime_event is RealtimeRepository.append_realtime_event
@@ -469,7 +484,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 41
+    assert LATEST_SCHEMA_VERSION == 44
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -512,6 +527,9 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (39, "add_simulated_campaign_evaluations"),
         (40, "add_opposed_check_reroll_lineage"),
         (41, "add_director_control_event_sequence"),
+        (42, "add_coc7_gameplay_state_machines"),
+        (43, "add_dynamic_branch_runs"),
+        (44, "add_map_overlay_inheritance_and_route_plans"),
     ]
 
 

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from ai_kp.api.authz import require_campaign_role
 from ai_kp.api.dependencies import get_identity, get_repo
 from ai_kp.api.schemas import SimulationCaseCreate
+from ai_kp.application.simulation_replay_service import SimulationReplayService
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
@@ -42,4 +43,4 @@ def run_case(
 ) -> dict:
     case = repo.get_simulation_case(case_id)
     require_campaign_role(identity, str(case["campaign_id"]), ("kp",))
-    return repo.run_simulation_case(case_id)
+    return SimulationReplayService(repo).run_case(case_id)

@@ -12,8 +12,10 @@ from ai_kp.api.routers import (
     campaigns,
     checks,
     debug,
+    dynamic_branches,
     evaluations,
     facts,
+    gameplay,
     handouts,
     investigators,
     maps,
@@ -41,6 +43,7 @@ from ai_kp.infrastructure.database.schema import connect, init_db
 from ai_kp.infrastructure.images.model_configuration import (
     apply_image_model_configuration,
 )
+from ai_kp.infrastructure.llm.call_registry import CampaignAiCallRegistry
 from ai_kp.infrastructure.llm.local_runtime import LocalModelRuntime
 from ai_kp.infrastructure.llm.model_configuration import apply_model_configuration
 from ai_kp.infrastructure.modules.document_sandbox import DocumentParsePolicy
@@ -93,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.local_model_runtime = LocalModelRuntime(
         resolved_settings.db_path.parent / "model-runtime.log"
     )
+    app.state.campaign_ai_calls = CampaignAiCallRegistry()
     app.state.module_import_worker = ModuleImportWorker(
         resolved_settings.db_path,
         resolved_settings.module_asset_root,
@@ -144,7 +148,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         realtime.router,
         campaigns.router,
         checks.router,
+        dynamic_branches.router,
         facts.router,
+        gameplay.router,
         handouts.router,
         investigators.router,
         models.router,

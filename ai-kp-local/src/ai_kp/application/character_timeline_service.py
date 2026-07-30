@@ -232,6 +232,7 @@ class CharacterTimelineService:
         if new_value < fixed:
             raise ValueError("Skill milestone cannot reduce creation-point components")
         skill["development_points"] = new_value - fixed
+        skill["growth_mark"] = False
         return result
 
 

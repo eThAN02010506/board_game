@@ -2,11 +2,17 @@
 
 from typing import Any, Protocol
 
+from ai_kp.application.ports.dynamic_branches import DynamicBranchStore
 from ai_kp.application.ports.facts import FactStore
 from ai_kp.application.ports.travel_graph import TravelGraphStore
 
 
-class WorldExpansionMaterializationStore(FactStore, TravelGraphStore, Protocol):
+class WorldExpansionMaterializationStore(
+    FactStore,
+    TravelGraphStore,
+    DynamicBranchStore,
+    Protocol,
+):
     def begin_world_expansion_materialization(self) -> None: ...
 
     def finish_world_expansion_materialization(self) -> None: ...

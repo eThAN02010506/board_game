@@ -10,6 +10,7 @@ from ai_kp.application.errors import (
     ResourceNotFoundError,
     UpstreamServiceError,
 )
+from ai_kp.director.errors import CampaignAiCallCancelledError
 from ai_kp.infrastructure.backups import BackupNotFoundError, BackupVerificationError
 
 
@@ -47,6 +48,7 @@ async def integrity_conflict_handler(_request: Request, _exc: Exception) -> JSON
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ResourceNotFoundError, not_found_handler)
     app.add_exception_handler(ConflictError, conflict_handler)
+    app.add_exception_handler(CampaignAiCallCancelledError, conflict_handler)
     app.add_exception_handler(AccessDeniedError, forbidden_handler)
     app.add_exception_handler(InvalidInputError, invalid_input_handler)
     app.add_exception_handler(UpstreamServiceError, upstream_handler)

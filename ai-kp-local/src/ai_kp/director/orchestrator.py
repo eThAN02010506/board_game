@@ -1,16 +1,19 @@
 """Canonical AI KP director orchestration pipeline."""
 
+import asyncio
 import json
 import sqlite3
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
-from typing import Generic, TypeVar
+from typing import Generic, Protocol, TypeVar
 
 from ai_kp.director.check_consequence import (
     check_consequence_output_instructions,
     parse_check_consequence_output,
 )
 from ai_kp.director.context_builder import ContextAssembly, ContextBuilder, estimate_tokens
+from ai_kp.director.errors import CampaignAiCallCancelledError
 from ai_kp.director.session_recap import (
     SessionRecapOutput,
     build_session_recap_context,
@@ -28,6 +31,10 @@ CHECK_CONSEQUENCE_CONTEXT_BUDGET = 12000
 OutputT = TypeVar("OutputT")
 
 
+class AiCallTracker(Protocol):
+    def track(self, campaign_id: str) -> AbstractContextManager[None]: ...
+
+
 @dataclass(frozen=True)
 class KpTurnResult(Generic[OutputT]):
     output: OutputT
@@ -36,9 +43,15 @@ class KpTurnResult(Generic[OutputT]):
 
 
 class KpOrchestrator:
-    def __init__(self, connection: sqlite3.Connection, llm: LlmClient):
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        llm: LlmClient,
+        call_registry: AiCallTracker | None = None,
+    ):
         self.connection = connection
         self.llm = llm
+        self.call_registry = call_registry
 
     async def handle_player_action(
         self,
@@ -61,6 +74,7 @@ class KpOrchestrator:
             visibility_scope="kp",
         )
         return await self._complete_structured(
+            campaign_id,
             context,
             parse_kp_turn_output,
         )
@@ -111,6 +125,7 @@ class KpOrchestrator:
             )
 
         return await self._complete_structured(
+            campaign_id,
             context,
             parse_consequence,
         )
@@ -150,6 +165,7 @@ class KpOrchestrator:
             additional_sources=(analysis_source,),
         )
         return await self._complete_structured(
+            campaign_id,
             context,
             parse_world_expansion_output,
         )
@@ -159,11 +175,28 @@ class KpOrchestrator:
         snapshot: dict,
     ) -> KpTurnResult[SessionRecapOutput]:
         return await self._complete_structured(
+            str(snapshot["campaign_id"]),
             build_session_recap_context(snapshot),
             parse_session_recap_output,
         )
 
     async def _complete_structured(
+        self,
+        campaign_id: str,
+        context: ContextAssembly,
+        parser: Callable[[str], OutputT],
+    ) -> KpTurnResult[OutputT]:
+        if self.call_registry is None:
+            return await self._complete_structured_tracked(context, parser)
+        try:
+            with self.call_registry.track(campaign_id):
+                return await self._complete_structured_tracked(context, parser)
+        except asyncio.CancelledError as exc:
+            raise CampaignAiCallCancelledError(
+                "Campaign AI call was cancelled by safety pause or human KP takeover"
+            ) from exc
+
+    async def _complete_structured_tracked(
         self,
         context: ContextAssembly,
         parser: Callable[[str], OutputT],

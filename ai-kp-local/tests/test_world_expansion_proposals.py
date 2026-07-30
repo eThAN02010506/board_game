@@ -13,8 +13,10 @@ from ai_kp.application.turn_service import (
 )
 from ai_kp.director.context_builder import ContextAssembly
 from ai_kp.director.world_expansion import (
+    WorldExpansionCandidate,
     WorldExpansionOutput,
     parse_world_expansion_output,
+    validate_world_expansion_plan,
 )
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.schema import connect, init_db
@@ -130,6 +132,110 @@ def test_world_expansion_output_requires_real_alternatives() -> None:
                 ]
               }
             }"""
+        )
+
+
+def test_dynamic_branch_requires_causal_plan_and_known_references() -> None:
+    base = {
+        "expansion_kind": "reactive_branch",
+        "subject": "治安官的调查",
+        "proposal": "治安官先核实访客身份，再决定是否提供旧档案。",
+        "rationale": "给出有动机且可中止的调查支线。",
+        "confidence": "medium",
+        "assumptions": [],
+        "conflicts": [],
+        "alternatives": [
+            {"title": "拒绝", "description": "不提供档案", "tradeoff": "线索较慢"},
+            {"title": "陪同", "description": "陪同查阅", "tradeoff": "行动受监督"},
+        ],
+    }
+    with pytest.raises(ValueError, match="branch_plan"):
+        WorldExpansionCandidate.model_validate(base)
+
+    planned = {
+        **base,
+        "branch_plan": {
+            "goal": "在不破坏钟楼锚点的情况下回应调查。",
+            "entry_conditions": [
+                {
+                    "condition_type": "entity_state",
+                    "reference": "npc_sheriff",
+                    "operator": "equals",
+                    "expected": "available",
+                    "rationale": "治安官必须可以行动。",
+                }
+            ],
+            "beats": [
+                {
+                    "beat_id": "verify_visitors",
+                    "title": "核实访客",
+                    "character_intent": "治安官想避免泄露敏感档案。",
+                    "action": "询问来意并检查介绍信。",
+                    "preconditions": [],
+                    "expected_effects": [
+                        {
+                            "effect_type": "narrative_only",
+                            "reference": None,
+                            "description": "治安官形成初步态度。",
+                            "requires_contact": True,
+                        }
+                    ],
+                    "failure_policy": "pause_for_kp",
+                }
+            ],
+            "anchor_guards": [],
+            "completion_conditions": [
+                {
+                    "condition_type": "scene",
+                        "reference": "current_scene_key",
+                    "operator": "equals",
+                    "expected": "town",
+                    "rationale": "支线只在当前小镇场景内结算。",
+                }
+            ],
+        },
+    }
+    candidate = WorldExpansionCandidate.model_validate(planned)
+    validate_world_expansion_plan(
+        candidate,
+        {
+            "entity_states": [
+                {
+                    "entity_id": "npc_sheriff",
+                    "entity_type": "npc",
+                    "name": "治安官",
+                    "status": "available",
+                }
+            ],
+            "anchors": [],
+            "world_fact_heads": [],
+        },
+    )
+    broken = WorldExpansionCandidate.model_validate(
+        {
+            **planned,
+            "branch_plan": {
+                **planned["branch_plan"],
+                "entry_conditions": [
+                    {
+                        "condition_type": "entity_state",
+                        "reference": "invented_npc",
+                        "operator": "exists",
+                        "expected": None,
+                        "rationale": "模型编造的引用。",
+                    }
+                ],
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="unknown entity"):
+        validate_world_expansion_plan(
+            broken,
+            {
+                "entity_states": [],
+                "anchors": [],
+                "world_fact_heads": [],
+            },
         )
 
 

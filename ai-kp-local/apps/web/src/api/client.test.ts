@@ -2,11 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   analyzeModuleRunIntent,
+  abandonDynamicBranch,
   getCurrentModuleRun,
   getModuleRunDirectorState,
   generateWorldExpansionProposal,
+  listDynamicBranches,
   listNpcReappearanceCandidates,
   materializeWorldExpansionEncounter,
+  resolveDynamicBranchBeat,
+  resumeDynamicBranch,
   listModuleRuns,
   listRuleReviewCandidates,
   requestJson,
@@ -201,6 +205,57 @@ describe("API client", () => {
         }]
       })
     });
+  });
+
+  it("uses optimistic, idempotent dynamic-branch commands", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ branch: {}, event: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await listDynamicBranches("camp/1", "active");
+    await resolveDynamicBranchBeat("branch/1", {
+      expected_version: 2,
+      command_id: "resolve:branch-001",
+      outcome: "succeeded",
+      note: "已发生",
+      observed_effects: ["治安官确认身份"]
+    });
+    await resumeDynamicBranch("branch/1", {
+      expected_version: 3,
+      command_id: "resume:branch-001",
+      note: "KP 确认恢复"
+    });
+    await abandonDynamicBranch("branch/1", {
+      expected_version: 4,
+      command_id: "abandon:branch-001",
+      note: "玩家离开小镇"
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/campaigns/camp%2F1/dynamic-branches?status=active"
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "/api/dynamic-branches/branch%2F1/beats/resolve"
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        expected_version: 2,
+        command_id: "resolve:branch-001",
+        outcome: "succeeded",
+        note: "已发生",
+        observed_effects: ["治安官确认身份"]
+      })
+    });
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      "/api/dynamic-branches/branch%2F1/resume"
+    );
+    expect(fetchMock.mock.calls[3]?.[0]).toBe(
+      "/api/dynamic-branches/branch%2F1/abandon"
+    );
   });
 
   it("encodes the server-authorized NPC reappearance query", async () => {

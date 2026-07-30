@@ -43,6 +43,11 @@ class Coc7Ruleset:
             "skill_recommendation",
             "skill_check",
             "opposed_check",
+            "combat_state_machine",
+            "damage_and_healing",
+            "sanity_state_machine",
+            "chase_state_machine",
+            "development_phase",
         ),
     )
 

@@ -36,8 +36,10 @@ import { useCredentials } from "../auth/credentials";
 import { ActionPanel } from "../features/actions/ActionPanel";
 import { CampaignPanel } from "../features/campaigns/CampaignPanel";
 import { CheckPanel } from "../features/checks/CheckPanel";
+import { GameplayWorkbench } from "../features/gameplay/GameplayWorkbench";
 import { MapGeneratorPanel } from "../features/maps/MapGeneratorPanel";
 import { MapStage } from "../features/maps/MapStage";
+import { RoutePlanPanel } from "../features/maps/RoutePlanPanel";
 import { MapStructureEditor } from "../features/maps/MapStructureEditor";
 import { TokenPanel } from "../features/maps/TokenPanel";
 import { PlanningPanel } from "../features/planning/PlanningPanel";
@@ -1597,6 +1599,8 @@ export default function App() {
             tokenLocation={tokenLocation}
           />
 
+          <RoutePlanPanel map={activeMap} identity={authIdentity} />
+
           {authIdentity?.role === "kp" && (
             <MapStructureEditor
               map={activeMap}
@@ -1680,9 +1684,11 @@ export default function App() {
               role={authIdentity?.role}
               showReviewControls={false}
             />
+            <RoutePlanPanel map={activeMap} identity={authIdentity} />
           </div>
 
           <div className="play-action-column">
+          <GameplayWorkbench campaign={activeCampaign} identity={authIdentity} />
           <CheckPanel
             checks={skillChecks}
             opposedChecks={opposedChecks}

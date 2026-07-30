@@ -5,6 +5,7 @@ import type {
   ModuleRuntimeEntityStatus,
   SceneTransitionInput,
   DirectorAnalysis,
+  DynamicBranchRun,
   ModuleRunStart,
   ModuleRunUpdate,
   NpcReappearanceCandidate,
@@ -426,6 +427,64 @@ export function materializeWorldExpansionEncounter(
       method: "POST",
       body: JSON.stringify(payload)
     }
+  );
+}
+
+export function listDynamicBranches(
+  campaignId: string,
+  status?: DynamicBranchRun["status"]
+): Promise<DynamicBranchRun[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  return requestJson<DynamicBranchRun[]>(
+    `/campaigns/${encodeURIComponent(campaignId)}/dynamic-branches${query}`
+  );
+}
+
+export function resolveDynamicBranchBeat(
+  branchId: string,
+  payload: {
+    expected_version: number;
+    command_id: string;
+    outcome: "succeeded" | "failed" | "skipped";
+    note: string;
+    observed_effects: string[];
+  }
+): Promise<{
+  branch: DynamicBranchRun;
+  event: DynamicBranchRun["events"][number];
+  idempotent_replay: boolean;
+}> {
+  return requestJson(
+    `/dynamic-branches/${encodeURIComponent(branchId)}/beats/resolve`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function resumeDynamicBranch(
+  branchId: string,
+  payload: { expected_version: number; command_id: string; note: string }
+): Promise<{
+  branch: DynamicBranchRun;
+  event: DynamicBranchRun["events"][number];
+  idempotent_replay: boolean;
+}> {
+  return requestJson(
+    `/dynamic-branches/${encodeURIComponent(branchId)}/resume`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function abandonDynamicBranch(
+  branchId: string,
+  payload: { expected_version: number; command_id: string; note: string }
+): Promise<{
+  branch: DynamicBranchRun;
+  event: DynamicBranchRun["events"][number];
+  idempotent_replay: boolean;
+}> {
+  return requestJson(
+    `/dynamic-branches/${encodeURIComponent(branchId)}/abandon`,
+    { method: "POST", body: JSON.stringify(payload) }
   );
 }
 

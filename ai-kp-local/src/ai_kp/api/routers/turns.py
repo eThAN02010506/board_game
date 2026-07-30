@@ -8,7 +8,7 @@ from ai_kp.api.authz import (
     require_campaign_role,
 )
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
-from ai_kp.api.llm import create_llm_client
+from ai_kp.api.llm import create_kp_orchestrator
 from ai_kp.api.schemas import (
     KpTurnRequest,
     PlayerActionCreate,
@@ -30,21 +30,11 @@ from ai_kp.application.world_expansion_materialization_service import (
     WorldExpansionMaterializationService,
 )
 from ai_kp.bootstrap.settings import Settings
-from ai_kp.director.orchestrator import KpOrchestrator
 from ai_kp.director.turn_output import StructuredOutputError
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
 router = APIRouter()
-
-
-def _require_ai_director_control(repo: Repository, campaign_id: str) -> None:
-    run = repo.get_active_campaign_module_run(campaign_id)
-    if run is not None and run.get("director_control_mode") != "ai_assist":
-        raise HTTPException(
-            status_code=409,
-            detail="AI director is paused or controlled by the human KP",
-        )
 
 
 @router.post("/campaigns/{campaign_id}/actions")
@@ -237,7 +227,6 @@ async def kp_turn(
     settings: Settings = Depends(get_app_settings),
 ) -> dict:
     require_campaign_role(identity, payload.campaign_id, ("kp",))
-    _require_ai_director_control(repo, payload.campaign_id)
     if payload.pc_id:
         require_approved_pc_binding(repo, payload.campaign_id, payload.pc_id)
     try:
@@ -253,7 +242,7 @@ async def kp_turn(
                 active_spoiler_tags=tuple(payload.active_spoiler_tags),
             ),
             identity,
-            KpOrchestrator(repo.connection, create_llm_client(settings, request)),
+            create_kp_orchestrator(repo, settings, request),
             source_model=settings.llm_model,
         )
     except StructuredOutputError as exc:
@@ -277,12 +266,11 @@ async def create_check_consequence_proposal(
 ) -> dict:
     check = repo.get_skill_check(check_id)
     require_campaign_role(identity, str(check["campaign_id"]), ("kp",))
-    _require_ai_director_control(repo, str(check["campaign_id"]))
     try:
         return await CheckConsequenceService(repo).generate(
             GenerateCheckConsequenceCommand(check_id=check_id),
             identity,
-            KpOrchestrator(repo.connection, create_llm_client(settings, request)),
+            create_kp_orchestrator(repo, settings, request),
             source_model=settings.llm_model,
         )
     except StructuredOutputError as exc:

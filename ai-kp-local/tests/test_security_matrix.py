@@ -91,6 +91,30 @@ def test_authorization_matrix_and_cross_campaign_isolation(tmp_path: Path) -> No
                 "routes": [["Hall", "Study"]],
             },
         ).json()
+        encounter = client.post(
+            f"/campaigns/{campaign_a['id']}/coc7/encounters",
+            headers=kp_a,
+            json={
+                "kind": "combat",
+                "title": "Security encounter",
+                "participants": [
+                    {
+                        "participant_id": "keeper-a",
+                        "name": "Keeper A",
+                        "dex": 60,
+                        "max_hp": 10,
+                        "current_hp": 10,
+                    },
+                    {
+                        "participant_id": "keeper-b",
+                        "name": "Keeper B",
+                        "dex": 50,
+                        "max_hp": 10,
+                        "current_hp": 10,
+                    },
+                ],
+            },
+        ).json()
 
         matrix = [
             ("anonymous_list", "get", f"/campaigns/{campaign_a['id']}/handouts", None, None, 401),
@@ -106,8 +130,14 @@ def test_authorization_matrix_and_cross_campaign_isolation(tmp_path: Path) -> No
             ("other_kp_resolve_opposed", "post", f"/opposed-checks/{opposed['id']}/resolve", kp_b, None, 403),
             ("player_director_control", "post", f"/module-runs/{run['id']}/director/control", player_a, {"expected_version": run["version"], "mode": "human_kp", "reason": "unauthorized"}, 403),
             ("other_kp_director_control", "post", f"/module-runs/{run['id']}/director/control", kp_b, {"expected_version": run["version"], "mode": "human_kp", "reason": "cross campaign"}, 404),
+            ("player_list_dynamic_branches", "get", f"/campaigns/{campaign_a['id']}/dynamic-branches", player_a, None, 403),
+            ("other_kp_list_dynamic_branches", "get", f"/campaigns/{campaign_a['id']}/dynamic-branches", kp_b, None, 404),
             ("player_map_revision", "post", f"/maps/{saved_map['id']}/revisions", player_a, {"expected_revision_id": saved_map["revision_id"], "map_spec": saved_map["map_spec"]}, 403),
             ("other_kp_map_fog", "post", f"/maps/{saved_map['id']}/fog-regions", kp_b, {"label": "cross campaign", "polygon": [{"x": 10, "y": 10}, {"x": 100, "y": 10}, {"x": 100, "y": 100}]}, 404),
+            ("player_create_encounter", "post", f"/campaigns/{campaign_a['id']}/coc7/encounters", player_a, {"kind": "combat", "title": "x", "participants": [{"participant_id": "a", "name": "A"}, {"participant_id": "b", "name": "B"}]}, 403),
+            ("other_player_read_encounter", "get", f"/coc7/encounters/{encounter['id']}", player_b, None, 404),
+            ("player_mutate_encounter", "post", f"/coc7/encounters/{encounter['id']}/commands", player_a, {"command_id": "unauthorized-gameplay-0001", "expected_version": 0, "command_type": "advance_turn", "payload": {}}, 403),
+            ("other_kp_mutate_encounter", "post", f"/coc7/encounters/{encounter['id']}/commands", kp_b, {"command_id": "cross-campaign-gameplay-0001", "expected_version": 0, "command_type": "advance_turn", "payload": {}}, 404),
         ]
         for name, method, url, headers, payload, expected in matrix:
             response = client.request(method, url, headers=headers, json=payload)

@@ -5,12 +5,17 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ai_kp.application.ai_control_service import AiControlService
 from ai_kp.application.errors import ConflictError, InvalidInputError, KpSessionEndedError
 from ai_kp.application.fact_service import AssertWorldFactCommand, FactService
 from ai_kp.application.module_run_service import ModuleRunService
 from ai_kp.application.play.proposal_approval import plan_proposed_checks
 from ai_kp.application.ports.director import KpDirector, WorldExpansionDirector
 from ai_kp.application.ports.repositories import TurnStore
+from ai_kp.director.world_expansion import (
+    WorldExpansionCandidate,
+    validate_world_expansion_plan,
+)
 from ai_kp.platform.resolution.proposals import validate_unresolved_check_boundary
 from ai_kp.platform.sessions.models import AuthenticatedMember
 from ai_kp.rulesets import get_ruleset
@@ -127,6 +132,10 @@ class TurnService:
         *,
         source_model: str,
     ) -> dict:
+        control = AiControlService(self.repo).authorize(
+            command.campaign_id,
+            "AI turn proposal",
+        )
         queued_action = self._queued_action(
             command.player_action_id,
             command.campaign_id,
@@ -152,6 +161,7 @@ class TurnService:
         self.repo.begin_immediate()
         if not self.repo.is_session_member_active(identity.member_id, identity.session_id):
             raise KpSessionEndedError("KP session ended while the model was running")
+        AiControlService(self.repo).revalidate(control)
 
         output = result.output
         proposal = self.repo.create_turn_proposal(
@@ -194,6 +204,11 @@ class TurnService:
         *,
         source_model: str,
     ) -> dict:
+        run = self.repo.get_campaign_module_run(command.run_id)
+        control = AiControlService(self.repo).authorize(
+            str(run["campaign_id"]),
+            "world expansion proposal",
+        )
         intent = unicodedata.normalize("NFKC", command.player_intent).strip()
         if not intent:
             raise InvalidInputError("Player intent is required")
@@ -208,9 +223,8 @@ class TurnService:
                 "World expansion is blocked by explicit module graph conflicts"
             )
         run = self.repo.get_campaign_module_run(command.run_id)
-        world_fact_head_hash = self._world_fact_head_hash(
-            self.repo.list_fact_heads(str(run["campaign_id"]))
-        )
+        world_fact_heads = self.repo.list_fact_heads(str(run["campaign_id"]))
+        world_fact_head_hash = self._world_fact_head_hash(world_fact_heads)
         fingerprint = self._world_expansion_fingerprint(
             run,
             intent,
@@ -235,6 +249,7 @@ class TurnService:
             analysis,
             fingerprint,
             world_fact_head_hash,
+            world_fact_heads,
         )
         result = await director.handle_world_expansion(
             campaign_id=str(run["campaign_id"]),
@@ -246,11 +261,14 @@ class TurnService:
             active_spoiler_tags=tuple(run["active_spoiler_tags"]),
         )
 
+        validate_world_expansion_plan(output_candidate := result.output.candidate, analysis_snapshot)
+
         # The LLM call stays outside the write transaction. Revalidate the
         # session, run version and gap decision before persisting its draft.
         self.repo.begin_immediate()
         if not self.repo.is_session_member_active(identity.member_id, identity.session_id):
             raise KpSessionEndedError("KP session ended while the model was running")
+        AiControlService(self.repo).revalidate(control)
         refreshed = self.repo.get_campaign_module_run(command.run_id)
         refreshed_fact_hash = self._world_fact_head_hash(
             self.repo.list_fact_heads(str(run["campaign_id"]))
@@ -298,7 +316,7 @@ class TurnService:
             module_run_version=int(run["version"]),
             fingerprint=fingerprint,
             analysis=analysis_snapshot,
-            candidate=output.candidate.model_dump(mode="json"),
+            candidate=output_candidate.model_dump(mode="json"),
         )
         self.repo.create_context_assembly(
             proposal_id=proposal["id"],
@@ -350,6 +368,7 @@ class TurnService:
             note=note,
             override_public_narration=override_public_narration,
         )
+        self._create_dynamic_branch_if_planned(pending, identity)
         applied_facts = []
         if pending["proposed_facts"]:
             fact_service = FactService(self.repo)
@@ -511,6 +530,27 @@ class TurnService:
                 "World expansion proposal is stale because its module run changed; "
                 "reject it and analyze again"
             )
+        candidate = WorldExpansionCandidate.model_validate(basis["candidate"])
+        validate_world_expansion_plan(candidate, basis["analysis"])
+
+    def _create_dynamic_branch_if_planned(
+        self,
+        proposal: dict,
+        identity: AuthenticatedMember,
+    ) -> None:
+        basis = proposal.get("world_expansion")
+        if basis is None:
+            return
+        candidate = WorldExpansionCandidate.model_validate(basis["candidate"])
+        if candidate.branch_plan is None:
+            return
+        self.repo.create_dynamic_branch_run(
+            proposal_id=str(proposal["id"]),
+            campaign_id=str(proposal["campaign_id"]),
+            module_run_id=str(basis["module_run_id"]),
+            plan=candidate.branch_plan.model_dump(mode="json"),
+            member_id=identity.member_id,
+        )
 
     @staticmethod
     def _world_expansion_fingerprint(
@@ -537,6 +577,7 @@ class TurnService:
         analysis: dict,
         fingerprint: str,
         world_fact_head_hash: str,
+        world_fact_heads: Sequence[Any],
     ) -> dict:
         return {
             "fingerprint": fingerprint,
@@ -552,8 +593,45 @@ class TurnService:
             "unreachable_anchor_count": analysis["unreachable_anchor_count"],
             "deferred_source_count": analysis["deferred_source_count"],
             "world_fact_head_hash": world_fact_head_hash,
+            "world_fact_heads": TurnService._fact_head_snapshot(world_fact_heads),
+            "entity_states": [
+                {
+                    "entity_id": item["entity_id"],
+                    "entity_type": item["entity_type"],
+                    "name": item["name"],
+                    "status": item["status"],
+                }
+                for item in analysis["entity_states"]
+            ],
+            "anchors": [
+                {
+                    "entity_id": item["entity_id"],
+                    "name": item["name"],
+                    "reachable": item["reachable"],
+                }
+                for item in analysis["reachability"].get("anchors", [])
+            ],
             "writes_performed": analysis["writes_performed"],
         }
+
+    @staticmethod
+    def _fact_head_snapshot(heads: Sequence[Any]) -> list[dict[str, Any]]:
+        payload = [
+            item.as_dict() if hasattr(item, "as_dict") else dict(item)
+            for item in heads
+        ]
+        return [
+            {
+                "fact_key": item.get("fact_key"),
+                "category": (item.get("fact") or {}).get("category"),
+                "subject": (item.get("fact") or {}).get("subject"),
+                "predicate": (item.get("fact") or {}).get("predicate"),
+                "object_text": (item.get("fact") or {}).get("object_text"),
+            }
+            for item in sorted(
+                payload, key=lambda value: str(value.get("fact_key", ""))
+            )
+        ]
 
     @staticmethod
     def _world_fact_head_hash(heads: Sequence[Any]) -> str:

@@ -2,6 +2,8 @@
 
 from typing import Any, Protocol
 
+from ai_kp.application.ports.ai_control import AiControlStore
+from ai_kp.application.ports.dynamic_branches import DynamicBranchStore
 from ai_kp.platform.memory.npc_candidates import NpcCandidate
 from ai_kp.platform.memory.retrieval import RetrievedMemory
 from ai_kp.platform.modules.graph import ModuleEntityCreate, ModuleRelationCreate
@@ -23,6 +25,50 @@ class CampaignStore(Protocol):
     def list_campaigns(self) -> list[dict]: ...
 
 
+class GameplayStore(Protocol):
+    def begin_immediate(self) -> None: ...
+
+    def get_campaign(self, campaign_id: str) -> dict: ...
+
+    def get_campaign_session(self, session_id: str) -> dict: ...
+
+    def get_campaign_investigator(
+        self, campaign_id: str, investigator_id: str
+    ) -> dict: ...
+
+    def create_coc7_encounter(self, **values: Any) -> dict[str, Any]: ...
+
+    def get_coc7_encounter(self, encounter_id: str) -> dict[str, Any]: ...
+
+    def list_coc7_encounters(
+        self, campaign_id: str, session_id: str
+    ) -> list[dict[str, Any]]: ...
+
+    def list_coc7_gameplay_events(self, **values: Any) -> list[dict[str, Any]]: ...
+
+    def transition_coc7_encounter(
+        self, encounter_id: str, **values: Any
+    ) -> dict[str, Any]: ...
+
+    def transition_coc7_character_state(self, **values: Any) -> dict[str, Any]: ...
+
+    def append_event(self, *args: Any, **values: Any) -> dict: ...
+
+    def create_permanent_change_proposal(self, **values: Any) -> dict: ...
+
+
+class SkillGrowthStore(Protocol):
+    def get_campaign_investigator(
+        self, campaign_id: str, investigator_id: str
+    ) -> dict: ...
+
+    def find_opposed_check_for_skill_check(
+        self, check_id: str
+    ) -> dict[str, Any] | None: ...
+
+    def transition_coc7_character_state(self, **values: Any) -> dict[str, Any]: ...
+
+
 class RealtimeOutbox(Protocol):
     def append_realtime_event(
         self,
@@ -38,7 +84,7 @@ class RealtimeOutbox(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class SessionRecapStore(RealtimeOutbox, Protocol):
+class SessionRecapStore(RealtimeOutbox, AiControlStore, Protocol):
     def begin_immediate(self) -> None: ...
 
     def is_session_member_active(self, member_id: str, session_id: str) -> bool: ...
@@ -237,6 +283,8 @@ class ModuleGraphStore(Protocol):
 
 
 class ModuleRunStore(Protocol):
+    def get_active_campaign_module_run(self, campaign_id: str) -> dict | None: ...
+
     def get_campaign_module_run(self, run_id: str) -> dict: ...
 
     def start_campaign_module_run(
@@ -316,7 +364,7 @@ class ModuleRunStore(Protocol):
     ) -> dict: ...
 
 
-class CheckStore(CampaignStore, Protocol):
+class CheckStore(CampaignStore, SkillGrowthStore, Protocol):
     def create_skill_check(
         self,
         *,
@@ -887,7 +935,13 @@ class RulebookStore(Protocol):
     ) -> list[dict]: ...
 
 
-class TurnStore(CheckStore, ModuleRunStore, RealtimeOutbox, Protocol):
+class TurnStore(
+    CheckStore,
+    ModuleRunStore,
+    RealtimeOutbox,
+    DynamicBranchStore,
+    Protocol,
+):
     def begin_immediate(self) -> None: ...
 
     def create_player_action(

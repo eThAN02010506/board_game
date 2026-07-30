@@ -32,7 +32,6 @@ class CapabilityPlaceholderTests(unittest.TestCase):
             "module_document_import",
             "scene_director",
             "world_expansion",
-            "party_route_planning",
             "check_resolution",
             "ruleset_plugins",
             "npc_reappearance",

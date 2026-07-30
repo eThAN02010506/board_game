@@ -179,6 +179,71 @@ class SkillCheckResolve(BaseModel):
     tens_digits: list[int] = Field(default_factory=list, max_length=3)
 
 
+class Coc7EncounterParticipant(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    participant_id: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=160)
+    investigator_id: str | None = Field(default=None, max_length=160)
+    dex: int = Field(default=50, ge=0, le=500)
+    move: int = Field(default=8, ge=0, le=100)
+    max_hp: int = Field(default=10, ge=1, le=10_000)
+    current_hp: int = Field(default=10, ge=0, le=10_000)
+    build: int = Field(default=0, ge=-5, le=20)
+    conditions: list[dict[str, Any]] = Field(default_factory=list, max_length=30)
+    readied_firearm: bool = False
+    chase_role: Literal["pursuer", "fleeing"] | None = None
+    con_success_level: Literal[
+        "fumble", "failure", "regular", "hard", "extreme", "critical"
+    ] = "regular"
+    location_index: int = Field(default=0, ge=0, le=1_000)
+
+
+class Coc7ChaseLocation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=160)
+    hazard: dict[str, Any] | None = None
+
+
+class Coc7EncounterCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["combat", "chase"]
+    title: str = Field(min_length=1, max_length=200)
+    participants: list[Coc7EncounterParticipant] = Field(min_length=2, max_length=50)
+    locations: list[Coc7ChaseLocation] = Field(default_factory=list, max_length=100)
+
+
+class Coc7GameplayCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=200)
+    expected_version: int = Field(ge=0)
+    command_type: Literal[
+        "advance_turn",
+        "melee",
+        "maneuver",
+        "firearm",
+        "damage",
+        "move",
+        "hazard",
+        "complete",
+        "cancel",
+        "major_wound_con",
+        "dying_con",
+        "first_aid",
+        "medicine",
+        "natural_healing",
+        "sanity",
+        "end_bout",
+        "reset_san_day",
+        "development",
+    ]
+    payload: dict[str, Any] = Field(default_factory=dict)
+    visibility: Literal["table", "kp", "player"] = "table"
+
+
 class SkillCheckOverride(BaseModel):
     success_level: Literal[
         "fumble", "failure", "regular", "hard", "extreme", "critical"
@@ -407,6 +472,32 @@ class MapFogReveal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_version: int = Field(ge=0)
+
+
+class MapFogUpdate(MapFogCreate):
+    expected_version: int = Field(ge=0)
+
+
+class MapRouteTokenPath(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token_id: str = Field(min_length=1, max_length=160)
+    waypoints: list[str] = Field(min_length=2, max_length=32)
+
+
+class MapRoutePlanCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=200)
+    note: str = Field(default="", max_length=2000)
+    token_routes: list[MapRouteTokenPath] = Field(min_length=1, max_length=16)
+
+
+class MapRoutePlanStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+    status: Literal["approved", "executing", "completed", "cancelled"]
 
 
 class SimulationCaseCreate(BaseModel):

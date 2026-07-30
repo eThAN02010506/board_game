@@ -208,7 +208,8 @@ CAPABILITIES: tuple[Capability, ...] = (
             "head 哈希和上下文快照的 AI 补全草稿；草稿包含理由、假设、冲突与替代方案，"
             "并复用现有 KP 审批流。已批准候选可在玩家实际接触后，以幂等原子事务落地"
             "严格事实、跨团 NPC 身份与已审核地点上的地图棋子。跨团 NPC 已有确定性"
-            "年代/地点/职业/预算门控；尚缺剧情锚点动态桥接和三种自动化模式。"
+            "年代/地点/职业/预算门控。反应性支线与锚点桥接已有条件化因果节拍、"
+            "图可达性保护和追加式进度审计；尚缺三种自动化强度和整团重放验证。"
         ),
         dependencies=(
             "scene_director",
@@ -226,10 +227,10 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="party_route_planning",
         label="分队路线规划",
-        status="planned",
+        status="available",
         phase="F2",
         audience="all",
-        summary="为多个角色规划各自路线、时间与冲突，并保持线下跑团式棋子操作。",
+        summary="玩家可提交本人路线，KP 可批准多棋子分队方案；实际移动逐段核销且不互相覆盖。",
         dependencies=("map_workspace", "character_sheets"),
         acceptance=("两名玩家可同时规划不同路线，不会相互覆盖棋子状态。",),
     ),
@@ -362,7 +363,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="partial",
         phase="F4",
         audience="kp",
-        summary="已支持验证后保存地点/路线新 revision、绘制雾区和显式揭开；尚待图形化多边形编辑、发布差异预览与真人桌面验证。",
+        summary="已支持地点/路线新 revision、独立自由多边形雾层、比例继承、删除与显式揭开；尚待发布差异预览、小队级揭示和真人桌面验证。",
         dependencies=("map_workspace",),
         acceptance=("揭示前玩家无法从列表、SVG、移动历史或实时事件推断隐藏地点。",),
     ),
@@ -438,7 +439,11 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="partial",
         phase="F5",
         audience="kp",
-        summary="已有草稿裁定、持久安全暂停、人类完全接管与显式交还；模型入口在非 AI 控制态由服务端拒绝，尚待真人团验证交接体验。",
+        summary=(
+            "已有草稿裁定、持久安全暂停、人类完全接管与显式交还；回合、检定后果、"
+            "世界补全和团后摘要共用应用层控制快照，非 AI 控制态拒绝新调用、取消"
+            "同进程在途调用，并在落库前重验。尚待真人团验证交接体验。"
+        ),
         dependencies=("proposal_approval", "check_resolution"),
         acceptance=("人类 KP 接管后 AI 停止推进，交还时 AI 从已确认事实继续。",),
     ),
@@ -462,8 +467,9 @@ CAPABILITIES: tuple[Capability, ...] = (
         phase="F5",
         audience="kp",
         summary=(
-            "已有持久化 case/run、定义哈希、runner 版本、确定性轨迹、可见性断言和"
-            "结果指纹；尚待扩充完整 golden campaign、模型对比和外部依赖故障库。"
+            "除轻量 contract runner 外，产品服务回放会在回滚沙盒中实际调用地图、路线、"
+            "提案、线索和 CoC7 遭遇服务并保存轨迹；尚待完整 golden campaign、模型"
+            "对比和外部依赖故障库。"
         ),
         dependencies=("proposal_approval", "memory_foundation"),
         acceptance=("同一定义和 runner 版本重放得到相同指纹，秘密可见性失败必须告警。",),

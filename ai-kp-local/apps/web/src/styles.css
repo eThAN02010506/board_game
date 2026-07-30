@@ -3204,9 +3204,225 @@ h2 {
 }
 
 .play-action-column .action-panel,
+.play-action-column .gameplay-workbench,
 .play-action-column .proposal-panel,
 .play-action-column .response-panel {
   grid-column: auto;
+}
+
+.gameplay-workbench {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.gameplay-toolbar,
+.gameplay-character-state > div:first-child,
+.encounter-console > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gameplay-toolbar > span {
+  color: #657069;
+  font-size: 12px;
+  text-align: right;
+}
+
+.gameplay-vitals,
+.encounter-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  gap: 8px;
+}
+
+.gameplay-vitals button,
+.encounter-selector button {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #d8d1c4;
+  border-radius: 10px;
+  background: #faf7ef;
+  color: #28352e;
+  padding: 10px;
+  text-align: left;
+}
+
+.gameplay-vitals button.active,
+.encounter-selector button.active {
+  border-color: #8d6a35;
+  background: #f3ead8;
+  box-shadow: inset 0 0 0 1px rgb(141 106 53 / 18%);
+}
+
+.gameplay-vitals span,
+.encounter-selector span,
+.gameplay-character-state small,
+.encounter-console small {
+  color: #68736c;
+  font-size: 11px;
+}
+
+.gameplay-character-state,
+.encounter-console {
+  display: grid;
+  gap: 11px;
+  border: 1px solid #ded7ca;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 72%), rgb(244 239 227 / 82%));
+  padding: 12px;
+}
+
+.gameplay-character-state > div:first-child > strong {
+  flex: 1;
+}
+
+.condition-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.condition-chips span {
+  border-radius: 999px;
+  background: #eadbc4;
+  color: #664d2d;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.condition-chips span.quiet {
+  background: #e7ece7;
+  color: #647069;
+}
+
+.gameplay-create,
+.gameplay-character-state details,
+.encounter-console details {
+  border-top: 1px solid #ded7ca;
+  padding-top: 9px;
+}
+
+.gameplay-create > summary,
+.gameplay-character-state summary,
+.encounter-console summary {
+  cursor: pointer;
+  color: #4c5a51;
+  font-weight: 700;
+}
+
+.gameplay-command-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.gameplay-command-grid label {
+  min-width: 0;
+  font-size: 11px;
+}
+
+.gameplay-command-grid label.wide {
+  grid-column: 1 / -1;
+}
+
+.gameplay-command-grid input,
+.gameplay-command-grid select {
+  width: 100%;
+}
+
+.gameplay-command-grid button {
+  min-height: 38px;
+}
+
+.gameplay-command-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.gameplay-command-stack .gameplay-command-grid + .gameplay-command-grid {
+  border-top: 1px dashed #d8d0c1;
+  padding-top: 9px;
+}
+
+.participant-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.participant-picker label,
+.gameplay-command-grid .inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.participant-picker input,
+.gameplay-command-grid .inline-check input {
+  width: auto;
+}
+
+.encounter-console > header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.encounter-header-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.encounter-participants {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  gap: 7px;
+}
+
+.encounter-participants > div {
+  display: grid;
+  gap: 2px;
+  border-radius: 8px;
+  background: #eee8db;
+  padding: 8px;
+  font-size: 11px;
+}
+
+.paired-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.gameplay-event-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.gameplay-event-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+}
+
+.gameplay-event-list span {
+  color: #68736c;
+  font-size: 10px;
+}
+
+.gameplay-event-list small {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
 }
 
 .memory-workspace {
@@ -4415,11 +4631,109 @@ textarea {
   gap: 0.6rem;
 }
 
+.fog-overlay-editor,
+.fog-overlay-editor header,
+.fog-region-list,
+.route-plan-panel,
+.route-plan-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.fog-overlay-editor {
+  margin-top: 0.8rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.fog-overlay-editor header {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.45fr);
+  align-items: end;
+}
+
+.fog-overlay-editor header div,
+.fog-overlay-editor header span,
+.route-plan-list article,
+.route-plan-list article header {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.fog-drawing-canvas {
+  width: 100%;
+  aspect-ratio: var(--map-aspect, 3 / 2);
+  overflow: hidden;
+  border: 1px solid #bcae93;
+  border-radius: 12px;
+  background: #1b2027;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.fog-region-list article,
+.route-plan-list article {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbf8f0;
+}
+
+.fog-region-list article,
+.route-plan-list article header,
+.route-plan-builder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.route-plan-builder {
+  align-items: end;
+}
+
+.route-plan-builder label {
+  flex: 1 1 180px;
+}
+
+.route-drafts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.route-drafts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  background: #eee7d8;
+  font-size: 0.78rem;
+}
+
+.route-drafts > span button {
+  min-height: auto;
+  padding: 0.1rem;
+  border: 0;
+  background: transparent;
+}
+
 .simulation-workbench,
 .simulation-case-list,
 .simulation-case-list article {
   display: grid;
   gap: 0.7rem;
+}
+
+.simulation-case-list article details {
+  grid-column: 1 / -1;
+}
+
+.simulation-case-list article pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: 0.72rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .simulation-workbench textarea {
@@ -5878,5 +6192,220 @@ textarea::placeholder {
 
   .fact-create-panel {
     grid-column: auto;
+  }
+}
+.branch-plan-preview,
+.dynamic-branch-panel {
+  border: 1px solid color-mix(in srgb, var(--ember-700) 24%, var(--line));
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 90% 0%, rgb(176 128 76 / 10%), transparent 42%),
+    color-mix(in srgb, var(--paper) 94%, transparent);
+  box-shadow: 0 14px 34px rgb(24 18 12 / 7%);
+}
+
+.branch-plan-preview {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+}
+
+.branch-plan-preview > header,
+.branch-plan-preview > header > span,
+.dynamic-branch-panel > header > div,
+.dynamic-branch-panel > header > div > span {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.branch-plan-preview > header > span,
+.dynamic-branch-panel > header > div > span {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.branch-plan-preview ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 24px;
+}
+
+.branch-plan-preview li {
+  padding-left: 4px;
+}
+
+.branch-plan-preview li span,
+.branch-plan-preview li small,
+.branch-plan-preview details li span {
+  display: block;
+}
+
+.dynamic-branch-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.dynamic-branch-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dynamic-branch-panel > nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.dynamic-branch-panel > nav > button {
+  display: grid;
+  gap: 4px;
+  min-height: 92px;
+  padding: 12px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+}
+
+.dynamic-branch-panel > nav > button.selected {
+  border-color: color-mix(in srgb, var(--ember-700) 70%, var(--line));
+  box-shadow: inset 3px 0 0 var(--ember-700);
+}
+
+.dynamic-branch-detail {
+  display: grid;
+  gap: 11px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--paper-soft) 70%, transparent);
+}
+
+.branch-progress {
+  display: flex;
+  gap: 5px;
+}
+
+.branch-progress > span {
+  flex: 1;
+  height: 5px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--line) 76%, transparent);
+}
+
+.branch-progress > span.done {
+  background: var(--forest-700);
+}
+
+.branch-progress > span.current {
+  background: var(--ember-700);
+}
+
+.branch-status-line,
+.branch-command-form > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.branch-status {
+  padding: 4px 9px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--line) 45%, transparent);
+}
+
+.branch-status.active {
+  color: var(--forest-700);
+  background: color-mix(in srgb, var(--forest-700) 12%, transparent);
+}
+
+.branch-status.paused {
+  color: #8a641f;
+  background: color-mix(in srgb, var(--gold-500) 12%, transparent);
+}
+
+.branch-command-form {
+  display: grid;
+  gap: 9px;
+}
+
+.branch-command-form label {
+  display: grid;
+  gap: 5px;
+}
+
+.dynamic-branch-panel output {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 720px) {
+  .dynamic-branch-panel > nav {
+    grid-template-columns: 1fr;
+  }
+}
+.simulation-log {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.75rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.simulation-log li {
+  display: grid;
+  grid-template-columns: 3.25rem minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: start;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--paper) 82%, transparent);
+}
+
+.simulation-log p,
+.simulation-log small {
+  margin: 0;
+}
+
+.simulation-log small {
+  color: var(--ink-muted);
+}
+
+.simulation-log-actor {
+  display: inline-flex;
+  justify-content: center;
+  padding: 0.18rem 0.35rem;
+  border-radius: 999px;
+  background: var(--paper-soft);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.simulation-log-actor.actor-model {
+  background: color-mix(in srgb, var(--ember-600) 18%, var(--paper-soft));
+  color: var(--ember-700);
+}
+
+.simulation-log-actor.actor-rules_engine {
+  background: color-mix(in srgb, var(--forest-700) 20%, var(--paper-soft));
+}
+
+@media (max-width: 720px) {
+  .simulation-log li {
+    grid-template-columns: auto 1fr;
+  }
+
+  .simulation-log li > small {
+    grid-column: 2;
   }
 }

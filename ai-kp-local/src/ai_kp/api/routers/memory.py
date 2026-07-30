@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ai_kp.api.authz import require_approved_pc_binding, require_campaign_role
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
-from ai_kp.api.llm import create_llm_client
+from ai_kp.api.llm import create_kp_orchestrator
 from ai_kp.api.schemas import MemoryCurationCreate, SessionRecapReview
 from ai_kp.application.errors import KpSessionEndedError
 from ai_kp.application.memory_timeline_service import (
@@ -18,7 +18,6 @@ from ai_kp.application.session_recap_service import (
     SessionRecapService,
 )
 from ai_kp.bootstrap.settings import Settings
-from ai_kp.director.orchestrator import KpOrchestrator
 from ai_kp.director.turn_output import StructuredOutputError
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
@@ -39,7 +38,7 @@ async def generate_session_recap(
     try:
         return await SessionRecapService(repo).generate(
             identity,
-            KpOrchestrator(repo.connection, create_llm_client(settings, request)),
+            create_kp_orchestrator(repo, settings, request),
             source_model=settings.llm_model,
         )
     except StructuredOutputError as exc:

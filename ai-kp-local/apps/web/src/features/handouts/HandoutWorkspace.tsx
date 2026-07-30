@@ -2,7 +2,7 @@ import { BookOpenCheck, Pin, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { requestJson } from "../../api/client";
-import type { AuthIdentity, Campaign, Handout } from "../../api/types";
+import type { AuthIdentity, Campaign, Handout, HandoutLinkOption } from "../../api/types";
 
 type Props = { campaign: Campaign | null; identity: AuthIdentity | null };
 
@@ -10,12 +10,20 @@ export function HandoutWorkspace({ campaign, identity }: Props) {
   const [items, setItems] = useState<Handout[]>([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [linkOptions, setLinkOptions] = useState<HandoutLinkOption[]>([]);
+  const [selectedLink, setSelectedLink] = useState("");
   const [message, setMessage] = useState("选择团会话后读取线索。");
 
   async function load() {
     if (!campaign || !identity) return;
     try {
-      setItems(await requestJson(`/campaigns/${campaign.id}/handouts`));
+      const loaded = await requestJson<Handout[]>(`/campaigns/${campaign.id}/handouts`);
+      setItems(loaded);
+      if (identity.role === "kp") {
+        setLinkOptions(
+          await requestJson(`/campaigns/${campaign.id}/handout-link-options`)
+        );
+      }
       setMessage("手册与线索已同步。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -26,11 +34,20 @@ export function HandoutWorkspace({ campaign, identity }: Props) {
 
   async function create() {
     if (!campaign) return;
+    const [linkType, linkId] = selectedLink
+      ? JSON.parse(selectedLink) as [HandoutLinkOption["type"], string]
+      : [null, null];
     await requestJson(`/campaigns/${campaign.id}/handouts`, {
       method: "POST",
-      body: JSON.stringify({ title, body, kind: "clue", link_type: null, link_id: null })
+      body: JSON.stringify({
+        title,
+        body,
+        kind: "clue",
+        link_type: linkType || null,
+        link_id: linkId || null
+      })
     });
-    setTitle(""); setBody(""); await load();
+    setTitle(""); setBody(""); setSelectedLink(""); await load();
   }
 
   async function update(item: Handout, changes: Partial<Pick<Handout, "status" | "pinned">>) {
@@ -59,6 +76,16 @@ export function HandoutWorkspace({ campaign, identity }: Props) {
     {identity.role === "kp" && <section className="handout-create">
       <label>标题<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
       <label>内容<textarea rows={4} value={body} onChange={(event) => setBody(event.target.value)} /></label>
+      <label>关联事实 / NPC / 地图 / 地点 / 模组实体
+        <select value={selectedLink} onChange={(event) => setSelectedLink(event.target.value)}>
+          <option value="">不关联</option>
+          {linkOptions.map((option) => (
+            <option key={`${option.type}:${option.id}`} value={JSON.stringify([option.type, option.id])}>
+              {option.type} · {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
       <button className="primary-button" disabled={!title.trim() || !body.trim()} onClick={() => void create()}><BookOpenCheck size={15} />保存草稿</button>
     </section>}
     <div className="handout-grid">{items.map((item) => <article className={`handout-card ${item.status}`} key={item.id}>

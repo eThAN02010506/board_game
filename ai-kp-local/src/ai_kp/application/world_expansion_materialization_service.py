@@ -9,6 +9,7 @@ import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Literal
 
+from ai_kp.application.dynamic_branch_service import DynamicBranchService
 from ai_kp.application.errors import ConflictError, InvalidInputError
 from ai_kp.application.npc_reappearance_service import NpcReappearanceService
 from ai_kp.application.ports.world_expansion_materializations import (
@@ -271,6 +272,11 @@ class WorldExpansionMaterializationService:
                         happened_at=command.happened_at,
                     )
                 )
+        dynamic_branch = DynamicBranchService(self.repo).activate_after_contact(
+            proposal_id,
+            identity,
+            command_id=f"contact:{materialization_id}",
+        )
         action_payload = {
             "schema_version": "world-expansion-materialization.v1",
             "materialization_id": materialization["id"],
@@ -282,6 +288,10 @@ class WorldExpansionMaterializationService:
                 item["id"] for item in investigator_encounters
             ],
             "npc_reappearance_id": appearance["id"] if appearance else None,
+            "dynamic_branch_id": dynamic_branch["id"] if dynamic_branch else None,
+            "dynamic_branch_status": (
+                dynamic_branch["status"] if dynamic_branch else None
+            ),
             "created_at": materialization["created_at"],
         }
         self.repo.add_proposal_action(

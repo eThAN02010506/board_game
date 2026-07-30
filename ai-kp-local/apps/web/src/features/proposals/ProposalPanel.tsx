@@ -9,6 +9,7 @@ import type {
 } from "../../api/types";
 import { ProposalEffectList } from "../../shared/ProposalEffectList";
 import { statusLabel } from "../../ui/statusLabels";
+import { DynamicBranchPlanPreview } from "./DynamicBranchPlanPreview";
 import { WorldExpansionContactForm } from "./WorldExpansionContactForm";
 
 type Props = {
@@ -83,6 +84,11 @@ export function ProposalPanel(props: Props) {
                 </header>
                 <p>{props.activeProposal.world_expansion.candidate.proposal}</p>
                 <small>{props.activeProposal.world_expansion.candidate.rationale}</small>
+                {props.activeProposal.world_expansion.candidate.branch_plan && (
+                  <DynamicBranchPlanPreview
+                    plan={props.activeProposal.world_expansion.candidate.branch_plan}
+                  />
+                )}
                 {!!props.activeProposal.world_expansion.candidate.assumptions.length && (
                   <details>
                     <summary>待确认假设</summary>

@@ -6,6 +6,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from ai_kp.application.ai_control_service import AiControlService
 from ai_kp.application.errors import ConflictError, InvalidInputError
 from ai_kp.application.ports.director import SessionRecapDirector
 from ai_kp.application.ports.repositories import SessionRecapStore
@@ -51,7 +52,12 @@ class SessionRecapService:
 
         output = None
         repaired = False
+        control = None
         if snapshot["events"]:
+            control = AiControlService(self.repo).authorize(
+                identity.campaign_id,
+                "session recap generation",
+            )
             result = await director.handle_session_recap(snapshot)
             output = result.output
             repaired = bool(result.repaired)
@@ -64,6 +70,8 @@ class SessionRecapService:
         self.repo.begin_immediate()
         if not self.repo.is_session_member_active(identity.member_id, identity.session_id):
             raise ConflictError("KP session ended while recap generation was running")
+        if control is not None:
+            AiControlService(self.repo).revalidate(control)
         refreshed = self._snapshot(identity.session_id)
         if refreshed["event_window_hash"] != snapshot["event_window_hash"]:
             raise ConflictError("Session events changed while recap generation was running")
@@ -196,6 +204,7 @@ class SessionRecapService:
         event_window_hash = hashlib.sha256(canonical_events.encode("utf-8")).hexdigest()
         return {
             **context,
+            "campaign_id": str(context["session"]["campaign_id"]),
             "events": events,
             "generation_cutoff": cutoff,
             "event_window_hash": event_window_hash,

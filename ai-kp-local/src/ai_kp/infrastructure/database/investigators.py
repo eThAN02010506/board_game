@@ -796,6 +796,17 @@ class InvestigatorRepository(SQLiteRepository):
                 raise ValueError(f"{key} must be between 0 and {limit}")
             assignments.append(f"{key} = ?")
             params.append(value)
+        for key, limit in (
+            ("daily_san_loss", 99),
+            ("daily_san_start", 99),
+        ):
+            if key not in changes or changes[key] is None:
+                continue
+            value = int(changes[key])
+            if not 0 <= value <= limit:
+                raise ValueError(f"{key} must be between 0 and {limit}")
+            assignments.append(f"{key} = ?")
+            params.append(value)
         for key, column, default in (
             ("conditions", "conditions_json", []),
             ("inventory_delta", "inventory_delta_json", {}),
@@ -809,4 +820,7 @@ class InvestigatorRepository(SQLiteRepository):
         if "current_game_time" in changes and changes["current_game_time"] is not None:
             assignments.append("current_game_time = ?")
             params.append(str(changes["current_game_time"]))
+        if "last_san_day" in changes and changes["last_san_day"] is not None:
+            assignments.append("last_san_day = ?")
+            params.append(str(changes["last_san_day"]))
         return assignments, params

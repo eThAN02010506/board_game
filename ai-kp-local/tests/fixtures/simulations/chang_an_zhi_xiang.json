@@ -1,0 +1,311 @@
+{
+  "mode": "service_replay",
+  "source": {
+    "title": "常暗之厢（7版规则，简体修正版）",
+    "scope": "关键流程黄金回放",
+    "ending": "A"
+  },
+  "steps": [
+    {
+      "action": "create_investigator",
+      "alias": "investigator",
+      "player_name": "PL-01",
+      "sheet": {
+        "ruleset_id": "coc7-keeper-cn-2002c",
+        "identity": {
+          "name": "林默",
+          "age": 29,
+          "era": "现代",
+          "occupation": "记者"
+        },
+        "characteristics": {
+          "str": 55,
+          "con": 60,
+          "siz": 50,
+          "dex": 70,
+          "app": 50,
+          "int": 65,
+          "pow": 60,
+          "edu": 70,
+          "luck": 55
+        },
+        "skills": [
+          {
+            "skill_key": "coc7.spot_hidden",
+            "display_name": "侦查",
+            "base_value": 25,
+            "occupation_points": 35
+          },
+          {
+            "skill_key": "coc7.first_aid",
+            "display_name": "急救",
+            "base_value": 30,
+            "occupation_points": 30
+          },
+          {
+            "skill_key": "coc7.stealth",
+            "display_name": "潜行",
+            "base_value": 20,
+            "occupation_points": 30
+          }
+        ],
+        "provenance": {
+          "source_type": "manual",
+          "occupation_point_formula": "edu4"
+        }
+      }
+    },
+    {
+      "action": "generate_map",
+      "alias": "train",
+      "title": "末班电车",
+      "prompt": "2013 年末班电车内部结构图",
+      "locations": ["6号车厢", "5号车厢", "4号车厢", "3号车厢", "2号车厢", "先头车厢"],
+      "routes": [
+        ["6号车厢", "5号车厢"],
+        ["5号车厢", "4号车厢"],
+        ["4号车厢", "3号车厢"],
+        ["3号车厢", "2号车厢"],
+        ["2号车厢", "先头车厢"]
+      ]
+    },
+    {
+      "action": "place_token",
+      "alias": "hero",
+      "map_ref": "train",
+      "label": "林默",
+      "location": "6号车厢"
+    },
+    {
+      "action": "plan_routes",
+      "alias": "escape_route",
+      "map_ref": "train",
+      "title": "向车头撤离",
+      "token_routes": [
+        {
+          "token_ref": "hero",
+          "waypoints": ["6号车厢", "5号车厢", "4号车厢", "3号车厢", "2号车厢", "先头车厢"]
+        }
+      ]
+    },
+    {
+      "action": "create_proposal",
+      "alias": "note_scene",
+      "player_action": "我撕下门上的便签，检查背面。",
+      "public_narration": "便签背面留下了关于第三节车厢与钥匙的提示。",
+      "kp_notes": "只公开提示，不解释钥匙用途。",
+      "proposed_facts": [
+        {
+          "fact_type": "canonical_fact",
+          "subject": "便签",
+          "predicate": "背面提示",
+          "object_text": "第三个箱子里藏着钥匙"
+        }
+      ]
+    },
+    {"action": "approve_proposal", "proposal_ref": "note_scene"},
+    {
+      "action": "create_handout",
+      "alias": "note_clue",
+      "title": "门上便签",
+      "body": "只管前进；背面提到第三个箱子与钥匙。"
+    },
+    {
+      "action": "update_handout",
+      "handout_ref": "note_clue",
+      "status": "revealed",
+      "pinned": true
+    },
+    {
+      "action": "character_command",
+      "alias": "san_after_omen",
+      "investigator_ref": "investigator",
+      "command_id": "chang-an-san-omen",
+      "command_type": "sanity",
+      "payload": {
+        "sanity_roll": 88,
+        "success_loss": 0,
+        "failure_loss": 1
+      }
+    },
+    {"action": "move_token", "token_ref": "hero", "to": "5号车厢"},
+    {
+      "action": "create_proposal",
+      "alias": "newspaper_scene",
+      "player_action": "我检查报纸的日期和报道。",
+      "public_narration": "报纸日期来自明天，报道的正是这趟末班车。",
+      "kp_notes": "保留梦境真相，不向玩家解释幕后原因。"
+    },
+    {"action": "approve_proposal", "proposal_ref": "newspaper_scene"},
+    {
+      "action": "create_handout",
+      "alias": "newspaper_clue",
+      "title": "来自明日的报纸",
+      "body": "明日的报纸报道本次末班车事故。"
+    },
+    {
+      "action": "update_handout",
+      "handout_ref": "newspaper_clue",
+      "status": "revealed"
+    },
+    {"action": "move_token", "token_ref": "hero", "to": "4号车厢"},
+    {
+      "action": "create_proposal",
+      "alias": "conductor_scene",
+      "player_action": "我为受伤乘务员急救，并询问袭击者和钥匙。",
+      "public_narration": "乘务员恢复意识：怪物依声音追猎；驾驶室与面板钥匙遗失在3号车厢前门附近。",
+      "kp_notes": "急救成功；乘务员仍倾向让列车减速。"
+    },
+    {"action": "approve_proposal", "proposal_ref": "conductor_scene"},
+    {
+      "action": "create_handout",
+      "alias": "conductor_clue",
+      "title": "乘务员证词",
+      "body": "怪物依声音追猎；两把钥匙遗失在3号车厢前门附近。"
+    },
+    {
+      "action": "update_handout",
+      "handout_ref": "conductor_clue",
+      "status": "revealed",
+      "pinned": true
+    },
+    {"action": "move_token", "token_ref": "hero", "to": "3号车厢"},
+    {
+      "action": "create_proposal",
+      "alias": "key_scene",
+      "player_action": "我按乘务员指示清理行李并寻找黑包。",
+      "public_narration": "你在前门附近找到断带黑包，取得驾驶室与控制面板钥匙。",
+      "kp_notes": "钥匙已进入严格事实；之后不允许无理由遗失。",
+      "proposed_facts": [
+        {
+          "fact_type": "canonical_fact",
+          "subject": "林默",
+          "predicate": "持有",
+          "object_text": "驾驶室钥匙与控制面板钥匙"
+        }
+      ]
+    },
+    {"action": "approve_proposal", "proposal_ref": "key_scene"},
+    {
+      "action": "create_handout",
+      "alias": "key_clue",
+      "title": "两把钥匙",
+      "body": "驾驶室钥匙与控制面板钥匙。"
+    },
+    {
+      "action": "update_handout",
+      "handout_ref": "key_clue",
+      "status": "revealed",
+      "pinned": true
+    },
+    {"action": "move_token", "token_ref": "hero", "to": "2号车厢"},
+    {
+      "action": "character_command",
+      "alias": "san_after_clicker",
+      "investigator_ref": "investigator",
+      "command_id": "chang-an-san-clicker",
+      "command_type": "sanity",
+      "payload": {
+        "sanity_roll": 90,
+        "success_loss": 1,
+        "failure_loss": 1
+      }
+    },
+    {
+      "action": "create_encounter",
+      "alias": "clicker_chase",
+      "kind": "chase",
+      "title": "循声者逼近",
+      "participants": [
+        {
+          "participant_id": "investigator",
+          "name": "林默",
+          "dex": 70,
+          "move": 8,
+          "max_hp": 11,
+          "current_hp": 11,
+          "chase_role": "fleeing",
+          "con_success_level": "regular",
+          "location_index": 1
+        },
+        {
+          "participant_id": "clicker",
+          "name": "循声者",
+          "dex": 40,
+          "move": 7,
+          "max_hp": 14,
+          "current_hp": 14,
+          "chase_role": "pursuer",
+          "con_success_level": "regular",
+          "location_index": 0
+        }
+      ],
+      "locations": [
+        {"label": "车厢后段"},
+        {"label": "散落行李"},
+        {"label": "先头车门"}
+      ]
+    },
+    {
+      "action": "encounter_command",
+      "encounter_ref": "clicker_chase",
+      "command_id": "chang-an-chase-move",
+      "command_type": "move",
+      "payload": {
+        "participant_id": "investigator",
+        "steps": 1,
+        "direction": "forward"
+      }
+    },
+    {
+      "action": "create_proposal",
+      "alias": "clicker_scene",
+      "player_action": "我把手机闹铃丢向车厢后方，趁怪物追声时穿过车厢并关门。",
+      "public_narration": "持续铃声引开了循声者，你抵达先头车门并将怪物隔在身后。",
+      "kp_notes": "依据已揭示的声音弱点，合理方案自动成功。"
+    },
+    {"action": "approve_proposal", "proposal_ref": "clicker_scene"},
+    {"action": "move_token", "token_ref": "hero", "to": "先头车厢"},
+    {
+      "action": "create_proposal",
+      "alias": "ending_scene",
+      "player_action": "我用两把钥匙启动面板，把右侧控制杆推到最大加速。",
+      "public_narration": "列车冲入白光；你在现实的终点站醒来，成功生还。",
+      "kp_notes": "结局 A；结算生还奖励时另开角色成长事务。",
+      "proposed_facts": [
+        {
+          "fact_type": "canonical_fact",
+          "subject": "本次模组",
+          "predicate": "结局",
+          "object_text": "A：调查员从梦境列车生还"
+        }
+      ]
+    },
+    {"action": "approve_proposal", "proposal_ref": "ending_scene"},
+    {
+      "action": "assert_equals",
+      "ref": "hero",
+      "path": "location_name",
+      "value": "先头车厢"
+    },
+    {
+      "action": "assert_equals",
+      "ref": "investigator",
+      "path": "state.current_san",
+      "value": 58
+    },
+    {"action": "capture_player_handouts", "alias": "player_clues"},
+    {
+      "action": "assert_contains",
+      "ref": "player_clues",
+      "path": "value",
+      "value": "驾驶室钥匙"
+    },
+    {
+      "action": "assert_not_contains",
+      "ref": "player_clues",
+      "path": "value",
+      "value": "梦境真相"
+    }
+  ]
+}
