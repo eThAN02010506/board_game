@@ -12,6 +12,9 @@ import type {
   NpcAvailabilityProfile,
   NpcReappearancePolicy,
   HiddenAppearanceDestination,
+  MemoryClassification,
+  MemoryCurationInput,
+  MemoryTimelineItem,
   NpcHiddenAppearanceResolution,
   TravelGraph,
   TravelLocation,
@@ -161,6 +164,37 @@ export function requestJsonWithAccessToken<T>(
   init?: RequestInit
 ): Promise<T> {
   return sendJson(url, init, accessToken, credentials.adminToken);
+}
+
+export function listMemoryTimeline(
+  campaignId: string,
+  options: {
+    pcId?: string;
+    classification?: MemoryClassification;
+    query?: string;
+    includeHidden?: boolean;
+  } = {}
+): Promise<MemoryTimelineItem[]> {
+  const params = new URLSearchParams();
+  if (options.pcId) params.set("pc_id", options.pcId);
+  if (options.classification) params.set("classification", options.classification);
+  if (options.query?.trim()) params.set("q", options.query.trim());
+  if (options.includeHidden) params.set("include_hidden", "true");
+  const query = params.size ? `?${params.toString()}` : "";
+  return requestJson<MemoryTimelineItem[]>(
+    `/campaigns/${encodeURIComponent(campaignId)}/memory/timeline${query}`
+  );
+}
+
+export function curateMemory(
+  campaignId: string,
+  memoryId: string,
+  payload: MemoryCurationInput
+): Promise<Record<string, unknown>> {
+  return requestJson(
+    `/campaigns/${encodeURIComponent(campaignId)}/memories/${encodeURIComponent(memoryId)}/curation`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
 }
 
 export async function requestBlob(url: string, signal?: AbortSignal): Promise<Blob> {

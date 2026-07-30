@@ -1,6 +1,5 @@
 import {
-  AlertCircle,
-  Brain
+  AlertCircle
 } from "lucide-react";
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -78,6 +77,11 @@ const ModuleLibraryPage = lazy(() =>
 const NpcWorkspace = lazy(() =>
   import("../features/npcs/NpcWorkspace").then((module) => ({
     default: module.NpcWorkspace
+  }))
+);
+const MemoryWorkspace = lazy(() =>
+  import("../features/memory/MemoryWorkspace").then((module) => ({
+    default: module.MemoryWorkspace
   }))
 );
 
@@ -1689,15 +1693,11 @@ export default function App() {
         </div>
         }
 
-        {activeNav === "memory" && <section className="page-card memory-page">
-          <div className="page-intro">
-            <div><p className="eyebrow">角色时间线与召回</p><h2>角色记忆</h2></div>
-            <Brain size={24} />
-          </div>
-          <label>寻找事件、人物或线索<textarea value={playerAction} onChange={(event) => setPlayerAction(event.target.value)} /></label>
-          <button className="primary-button" disabled={!authIdentity} onClick={() => void searchMemory()} type="button"><Brain size={16} />检索当前角色记忆</button>
-          <pre>{log}</pre>
-        </section>}
+        {activeNav === "memory" && (
+          <Suspense fallback={<section className="page-card">正在载入角色记忆……</section>}>
+            <MemoryWorkspace campaign={activeCampaign} identity={authIdentity} pcs={pcs} />
+          </Suspense>
+        )}
 
         <PlanningPanel
           activeNav={activeNav}

@@ -128,6 +128,8 @@ EXPECTED_HTTP_ROUTES = {
     ("POST", "/modules/{module_id}/relations"),
     ("POST", "/modules/{module_id}/graph/reachability"),
     ("GET", "/campaigns/{campaign_id}/memory/search"),
+    ("GET", "/campaigns/{campaign_id}/memory/timeline"),
+    ("POST", "/campaigns/{campaign_id}/memories/{memory_id}/curation"),
     ("GET", "/campaigns/{campaign_id}/maps"),
     ("POST", "/campaigns/{campaign_id}/maps/generate"),
     ("GET", "/maps/{map_id}"),

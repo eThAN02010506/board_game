@@ -436,6 +436,45 @@ export type PlayerCharacter = {
   };
 };
 
+export type MemoryClassification = "major" | "side" | "npc" | "clue" | "other";
+
+export type MemoryTimelineItem = {
+  id: string;
+  campaign_id: string;
+  pc_id: string | null;
+  pc_name: string | null;
+  investigator_id: string | null;
+  investigator_name: string | null;
+  npc_id: string | null;
+  npc_name: string | null;
+  scope: string;
+  classification: MemoryClassification;
+  importance: number;
+  visibility: string;
+  hidden: boolean;
+  text: string;
+  happened_at: string | null;
+  effective_time: string;
+  source_event_id: string | null;
+  source_event_type: string | null;
+  source_event_summary: string | null;
+  source_event_happened_at: string | null;
+  source_event_created_at: string | null;
+  curation_head_id?: string | null;
+  curation_reason?: string | null;
+  curated_by_member_id?: string | null;
+  curated_at?: string | null;
+  created_at: string;
+};
+
+export type MemoryCurationInput = {
+  classification: MemoryClassification;
+  importance: number;
+  hidden: boolean;
+  reason: string;
+  expected_head_action_id: string | null;
+};
+
 export type PlayerProfile = {
   id: string;
   display_name: string;

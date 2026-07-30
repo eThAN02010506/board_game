@@ -626,6 +626,14 @@ class MemoryCreate(BaseModel):
     source_event_id: str | None = None
 
 
+class MemoryCurationCreate(BaseModel):
+    classification: Literal["major", "side", "npc", "clue", "other"]
+    importance: int = Field(ge=1, le=5)
+    hidden: bool = False
+    reason: str = Field(min_length=1, max_length=1000)
+    expected_head_action_id: str | None = None
+
+
 class KpTurnRequest(BaseModel):
     campaign_id: str
     player_action: str = Field(min_length=1, max_length=4000)

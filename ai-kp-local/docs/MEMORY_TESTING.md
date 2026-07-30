@@ -20,6 +20,13 @@ Use a fixed fixture campaign such as `雾港 1928` to test memory behavior after
     reads.
 12. NPC matching normalization: location and profession hints ignore surrounding whitespace and
     case, while Chinese action text can overlap Chinese notes without relying on spaces.
+13. Timeline provenance: a visible memory retains its source event ID, while a KP-only source
+    summary is redacted rather than causing the whole memory to disappear.
+14. Append-only curation: reclassification, importance, hide and restore create immutable actions;
+    the original memory row never changes.
+15. Concurrent curation: an editor with a stale `expected_head_action_id` receives HTTP 409.
+16. Timeline ownership: players require an assigned, approved, player-owned investigator and can
+    never select another PC or include hidden items.
 
 ## Real Case Test
 
@@ -34,12 +41,16 @@ Expected:
 - A totally unrelated NPC should not appear.
 - Secret notes must not be shown to the player.
 - KP module chunks tagged `secret` must not enter normal context unless explicitly revealed.
+- The player timeline shows only that approved investigator's visible memories.
+- KP can reclassify one item as a clue, hide it, and restore it; the original memory and source
+  event remain byte-for-byte unchanged.
 
 Run the focused deterministic suite with:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
-  .venv/bin/python -m unittest tests.test_memory tests.test_context_builder
+  .venv/bin/pytest -q tests/test_memory.py tests/test_context_builder.py \
+  tests/test_session_permissions.py
 ```
 # Automated retrieval benchmark
 

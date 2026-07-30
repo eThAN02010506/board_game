@@ -13,6 +13,7 @@ from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepo
 from ai_kp.infrastructure.database.facts import FactRepository
 from ai_kp.infrastructure.database.investigators import InvestigatorRepository
 from ai_kp.infrastructure.database.maps import MapRepository
+from ai_kp.infrastructure.database.memory_timeline import MemoryTimelineRepository
 from ai_kp.infrastructure.database.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
 from ai_kp.infrastructure.database.model_configuration import ModelConfigurationRepository
 from ai_kp.infrastructure.database.module_graph import ModuleGraphRepository
@@ -380,6 +381,10 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
             ("ModuleGraphService", "create_relation"),
             ("ModuleGraphService", "check_reachability"),
         },
+        "memory.py": {
+            ("MemoryTimelineService", "list_timeline"),
+            ("MemoryTimelineService", "curate"),
+        },
     }
 
     for filename, required_calls in expected.items():
@@ -412,6 +417,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         NpcReappearanceRepository,
         TravelGraphRepository,
         PrivateRandomResolutionRepository,
+        MemoryTimelineRepository,
     )
     assert Repository.__mro__.count(SQLiteRepository) == 1
     assert Repository.create_campaign is WorldRepository.create_campaign
@@ -428,6 +434,10 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         Repository.create_npc_hidden_appearance_resolution
         is PrivateRandomResolutionRepository.create_npc_hidden_appearance_resolution
     )
+    assert (
+        Repository.list_memory_timeline
+        is MemoryTimelineRepository.list_memory_timeline
+    )
     assert Repository.create_rule_source is RulebookRepository.create_rule_source
     assert (
         Repository.save_model_configuration
@@ -440,7 +450,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 30
+    assert LATEST_SCHEMA_VERSION == 31
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -472,6 +482,7 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (28, "add_npc_appearance_gating"),
         (29, "add_campaign_travel_graph"),
         (30, "add_private_random_resolutions"),
+        (31, "add_memory_curation_actions"),
     ]
 
 

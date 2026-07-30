@@ -307,9 +307,17 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="partial",
         phase="F3",
         audience="all",
-        summary="已有后端记忆类型与检索；缺少可解释时间线、人工修正、证据链和团后摘要 UI。",
+        summary=(
+            "已有独立的团内调查员时间线：玩家按已批准角色隔离查看主要/支线、"
+            "NPC、线索记忆及可见来源；KP 可筛选、检查证据，并以追加动作改类、"
+            "调整重要性、隐藏或恢复，陈旧编辑会冲突且不改写原始历史。"
+            "尚缺自动团后摘要与跨 Campaign 的永久时间线合并/分支策略。"
+        ),
         dependencies=("memory_foundation", "world_fact_ledger", "character_timeline"),
-        acceptance=("玩家可查看自己的主要/支线事件及其原始事件来源。",),
+        acceptance=(
+            "玩家可查看自己的主要/支线事件及其允许公开的原始事件来源。",
+            "KP 校正有追加式审计和并发保护，隐藏记忆不会删除来源事实。",
+        ),
     ),
     Capability(
         id="semantic_memory_search",

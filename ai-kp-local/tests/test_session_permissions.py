@@ -174,6 +174,180 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(join_code_as_bearer.status_code, 401)
         self.assertEqual(token_as_join_code.status_code, 422)
 
+    async def test_memory_timeline_is_evidence_backed_curated_and_player_scoped(
+        self,
+    ) -> None:
+        event = await self.client.post(
+            f"/campaigns/{self.campaign_a['id']}/events",
+            headers=self.kp_a_headers,
+            json={
+                "actor_type": "pc",
+                "actor_id": self.pc_a["id"],
+                "event_type": "clue.discovered",
+                "summary": "在旧档案馆找到港口账簿",
+                "visibility": "table",
+                "happened_at": "1924-10-03T21:10:00",
+            },
+        )
+        self.assertEqual(event.status_code, 200)
+        memory = await self.client.post(
+            f"/campaigns/{self.campaign_a['id']}/memories",
+            headers=self.kp_a_headers,
+            json={
+                "text": "账簿记录了午夜运货",
+                "scope": "pc_side",
+                "pc_id": self.pc_a["id"],
+                "visibility": "player",
+                "importance": 2,
+                "happened_at": "1924-10-03T21:10:00",
+                "source_event_id": event.json()["id"],
+            },
+        )
+        self.assertEqual(memory.status_code, 200)
+        kp_event = await self.client.post(
+            f"/campaigns/{self.campaign_a['id']}/events",
+            headers=self.kp_a_headers,
+            json={
+                "actor_type": "kp",
+                "event_type": "foreshadowing.secret",
+                "summary": "幕后真相不得展示",
+                "visibility": "kp",
+            },
+        )
+        secret_sourced_memory = await self.client.post(
+            f"/campaigns/{self.campaign_a['id']}/memories",
+            headers=self.kp_a_headers,
+            json={
+                "text": "调查员记得门后传来钟声",
+                "scope": "pc_side",
+                "pc_id": self.pc_a["id"],
+                "visibility": "player",
+                "source_event_id": kp_event.json()["id"],
+            },
+        )
+        self.assertEqual(secret_sourced_memory.status_code, 200)
+
+        player_timeline = await self.client.get(
+            f"/campaigns/{self.campaign_a['id']}/memory/timeline",
+            headers=self.player_a_headers,
+        )
+        self.assertEqual(player_timeline.status_code, 200)
+        projected = next(
+            item for item in player_timeline.json() if item["id"] == memory.json()["id"]
+        )
+        self.assertEqual(projected["classification"], "side")
+        self.assertEqual(projected["source_event_summary"], "在旧档案馆找到港口账簿")
+        self.assertNotIn("curation_reason", projected)
+        redacted = next(
+            item
+            for item in player_timeline.json()
+            if item["id"] == secret_sourced_memory.json()["id"]
+        )
+        self.assertEqual(redacted["text"], "调查员记得门后传来钟声")
+        self.assertIsNone(redacted["source_event_summary"])
+        self.assertIsNone(redacted["source_event_type"])
+
+        curated = await self.client.post(
+            f"/campaigns/{self.campaign_a['id']}/memories/{memory.json()['id']}/curation",
+            headers=self.kp_a_headers,
+            json={
+                "classification": "clue",
+                "importance": 5,
+                "hidden": False,
+                "reason": "确认是主线证据",
+                "expected_head_action_id": None,
+            },
+        )
+        self.assertEqual(curated.status_code, 200)
+        stale = await self.client.post(
+            f"/campaigns/{self.campaign_a['id']}/memories/{memory.json()['id']}/curation",
+            headers=self.kp_a_headers,
+            json={
+                "classification": "side",
+                "importance": 1,
+                "hidden": False,
+                "reason": "陈旧窗口",
+                "expected_head_action_id": None,
+            },
+        )
+        self.assertEqual(stale.status_code, 409)
+
+        hidden = await self.client.post(
+            f"/campaigns/{self.campaign_a['id']}/memories/{memory.json()['id']}/curation",
+            headers=self.kp_a_headers,
+            json={
+                "classification": "clue",
+                "importance": 5,
+                "hidden": True,
+                "reason": "暂时隐藏误导线索",
+                "expected_head_action_id": curated.json()["id"],
+            },
+        )
+        self.assertEqual(hidden.status_code, 200)
+        hidden_from_player = await self.client.get(
+            f"/campaigns/{self.campaign_a['id']}/memory/timeline",
+            headers=self.player_a_headers,
+        )
+        self.assertNotIn(memory.json()["id"], {item["id"] for item in hidden_from_player.json()})
+        kp_projection = await self.client.get(
+            f"/campaigns/{self.campaign_a['id']}/memory/timeline",
+            params={"include_hidden": "true"},
+            headers=self.kp_a_headers,
+        )
+        kp_item = next(item for item in kp_projection.json() if item["id"] == memory.json()["id"])
+        self.assertTrue(kp_item["hidden"])
+        self.assertEqual(kp_item["curation_reason"], "暂时隐藏误导线索")
+
+        restored = await self.client.post(
+            f"/campaigns/{self.campaign_a['id']}/memories/{memory.json()['id']}/curation",
+            headers=self.kp_a_headers,
+            json={
+                "classification": "clue",
+                "importance": 5,
+                "hidden": False,
+                "reason": "KP 已确认可以公开",
+                "expected_head_action_id": hidden.json()["id"],
+            },
+        )
+        self.assertEqual(restored.status_code, 200)
+        restored_for_player = await self.client.get(
+            f"/campaigns/{self.campaign_a['id']}/memory/timeline",
+            headers=self.player_a_headers,
+        )
+        restored_item = next(
+            item
+            for item in restored_for_player.json()
+            if item["id"] == memory.json()["id"]
+        )
+        self.assertEqual(restored_item["classification"], "clue")
+        self.assertEqual(restored_item["importance"], 5)
+        self.assertNotIn("curation_head_id", restored_item)
+        self.assertNotIn("curated_at", restored_item)
+
+        connection = connect(self.db_path)
+        try:
+            unchanged = connection.execute(
+                """
+                SELECT scope, importance, text, source_event_id
+                FROM memories WHERE id = ?
+                """,
+                (memory.json()["id"],),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(dict(unchanged), {
+            "scope": "pc_side",
+            "importance": 2,
+            "text": "账簿记录了午夜运货",
+            "source_event_id": event.json()["id"],
+        })
+
+        cross_campaign = await self.client.get(
+            f"/campaigns/{self.campaign_a['id']}/memory/timeline",
+            headers=self.kp_b_headers,
+        )
+        self.assertEqual(cross_campaign.status_code, 404)
+
     async def test_local_admin_can_reissue_existing_kp_without_replacing_session(self) -> None:
         recovered = await self.client.post(
             f"/campaigns/{self.campaign_a['id']}/sessions/recover-kp",

@@ -531,6 +531,31 @@ class WorldStore(RealtimeOutbox, Protocol):
         source_event_id: str | None = None,
     ) -> dict: ...
 
+    def list_memory_timeline(
+        self,
+        campaign_id: str,
+        *,
+        pc_id: str | None = None,
+        view: str = "kp",
+        classification: str | None = None,
+        query: str | None = None,
+        include_hidden: bool = False,
+        limit: int = 100,
+    ) -> list[dict]: ...
+
+    def append_memory_curation(
+        self,
+        campaign_id: str,
+        memory_id: str,
+        *,
+        classification: str,
+        importance: int,
+        hidden: bool,
+        reason: str,
+        expected_head_action_id: str | None,
+        created_by_member_id: str,
+    ) -> dict: ...
+
     def list_modules(self, campaign_id: str) -> list[dict]: ...
 
     def create_module(

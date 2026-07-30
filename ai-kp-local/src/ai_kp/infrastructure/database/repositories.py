@@ -7,6 +7,7 @@ from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepo
 from ai_kp.infrastructure.database.facts import FactRepository
 from ai_kp.infrastructure.database.investigators import InvestigatorRepository
 from ai_kp.infrastructure.database.maps import MapRepository
+from ai_kp.infrastructure.database.memory_timeline import MemoryTimelineRepository
 from ai_kp.infrastructure.database.model_configuration import ModelConfigurationRepository
 from ai_kp.infrastructure.database.module_graph import ModuleGraphRepository
 from ai_kp.infrastructure.database.module_imports import ModuleImportRepository
@@ -52,6 +53,7 @@ class Repository(
     NpcReappearanceRepository,
     TravelGraphRepository,
     PrivateRandomResolutionRepository,
+    MemoryTimelineRepository,
 ):
     """Backward-compatible facade over the feature-specific SQLite repositories."""
 
