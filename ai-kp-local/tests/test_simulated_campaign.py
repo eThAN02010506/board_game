@@ -136,7 +136,7 @@ class SimulatedCampaignTests(unittest.TestCase):
                 result = SimulationReplayService(repo).run_case(case["id"])
 
                 self.assertEqual(result["status"], "passed", result["trajectory"])
-                self.assertEqual(result["runner_version"], "product-service-replay.v3")
+                self.assertEqual(result["runner_version"], "product-service-replay.v4")
                 self.assertEqual(result["metrics"]["service_calls"], 10)
                 self.assertEqual(result["metrics"]["passed_assertions"], 4)
                 self.assertEqual(

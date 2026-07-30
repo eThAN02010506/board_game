@@ -125,6 +125,25 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved["selected_roll"], 24)
         self.assertEqual(resolved["success_level"], "hard")
         self.assertTrue(resolved["passed"])
+        resolved_action = next(
+            action for action in resolved["actions"]
+            if action["action_type"] == "resolved"
+        )
+        audit = resolved_action["payload"]
+        self.assertEqual(audit["input_method"], "physical")
+        self.assertEqual(
+            audit["raw_dice"],
+            {"ones_digit": 4, "tens_digits": [4, 2], "candidates": [44, 24]},
+        )
+        self.assertEqual(audit["selected_roll"], 24)
+        self.assertEqual(audit["target"], 60)
+        self.assertEqual(audit["threshold"], 30)
+        self.assertEqual(audit["difficulty"], "hard")
+        self.assertEqual(audit["bonus_dice"], 1)
+        self.assertEqual(audit["success_level"], "hard")
+        self.assertTrue(audit["passed"])
+        self.assertFalse(audit["hidden"])
+        self.assertEqual(len(audit["result_fingerprint"]), 64)
 
         replay = await self.client.post(
             f"/checks/{check['id']}/replay", headers=self.player_headers
@@ -172,6 +191,128 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restarted_replay.status_code, 200)
         self.assertTrue(restarted_replay.json()["matches_recorded_result"])
         self.assertEqual(restarted_replay.json()["recorded_status"], "overridden")
+        persisted = await self.client.get(
+            f"/checks/{check['id']}", headers=self.kp_headers
+        )
+        persisted_audit = next(
+            action["payload"] for action in persisted.json()["actions"]
+            if action["action_type"] == "resolved"
+        )
+        self.assertEqual(persisted_audit["raw_dice"]["candidates"], [44, 24])
+        self.assertEqual(
+            persisted_audit["result_fingerprint"],
+            audit["result_fingerprint"],
+        )
+
+    async def test_every_player_sees_public_roll_but_only_assignee_can_roll(
+        self,
+    ) -> None:
+        observer = await create_approved_player(
+            self.client,
+            campaign=self.campaign,
+            session=self.session,
+            kp_headers=self.kp_headers,
+            display_name="Observer",
+            sheet=coc7_sheet("Observer Investigator", skills={"侦查": 45}),
+        )
+        public_check = await self.create_check(target=60)
+
+        observer_list = await self.client.get(
+            f"/campaigns/{self.campaign['id']}/checks",
+            headers=observer["headers"],
+        )
+        self.assertEqual(observer_list.status_code, 200, observer_list.text)
+        self.assertIn(
+            public_check["id"],
+            {item["id"] for item in observer_list.json()},
+        )
+
+        denied_roll = await self.client.post(
+            f"/checks/{public_check['id']}/resolve",
+            headers=observer["headers"],
+            json={"input_method": "digital"},
+        )
+        self.assertEqual(denied_roll.status_code, 403, denied_roll.text)
+
+        resolved = await self.client.post(
+            f"/checks/{public_check['id']}/resolve",
+            headers=self.player_headers,
+            json={"input_method": "physical", "ones_digit": 8, "tens_digits": [3, 6]},
+        )
+        self.assertEqual(resolved.status_code, 200, resolved.text)
+
+        observer_result = await self.client.get(
+            f"/checks/{public_check['id']}",
+            headers=observer["headers"],
+        )
+        self.assertEqual(observer_result.status_code, 200, observer_result.text)
+        self.assertEqual(observer_result.json()["selected_roll"], 38)
+        self.assertEqual(
+            observer_result.json()["raw_dice"]["candidates"],
+            [38, 68],
+        )
+
+    async def test_check_visibility_matrix_is_enforced_by_the_server(self) -> None:
+        observer = await create_approved_player(
+            self.client,
+            campaign=self.campaign,
+            session=self.session,
+            kp_headers=self.kp_headers,
+            display_name="Visibility Observer",
+            sheet=coc7_sheet("Visibility Observer", skills={"侦查": 45}),
+        )
+        private_check = await self.create_check(
+            target=60,
+            visibility="private",
+        )
+        blind_check = await self.create_check(
+            target=60,
+            visibility="blind",
+        )
+        async def visible_ids(headers: dict[str, str]) -> set[str]:
+            response = await self.client.get(
+                f"/campaigns/{self.campaign['id']}/checks",
+                headers=headers,
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            return {item["id"] for item in response.json()}
+
+        kp_ids = await visible_ids(self.kp_headers)
+        roller_ids = await visible_ids(self.player_headers)
+        observer_ids = await visible_ids(observer["headers"])
+
+        self.assertIn(private_check["id"], kp_ids)
+        self.assertIn(private_check["id"], roller_ids)
+        self.assertNotIn(private_check["id"], observer_ids)
+
+        self.assertIn(blind_check["id"], kp_ids)
+        self.assertNotIn(blind_check["id"], roller_ids)
+        self.assertNotIn(blind_check["id"], observer_ids)
+
+        roller_private_read = await self.client.get(
+            f"/checks/{private_check['id']}",
+            headers=self.player_headers,
+        )
+        self.assertEqual(roller_private_read.status_code, 200)
+        observer_private_read = await self.client.get(
+            f"/checks/{private_check['id']}",
+            headers=observer["headers"],
+        )
+        self.assertEqual(observer_private_read.status_code, 403)
+
+        unsupported_player_only = await self.client.post(
+            f"/campaigns/{self.campaign['id']}/checks",
+            headers=self.kp_headers,
+            json={
+                "skill_name": "侦查",
+                "difficulty": "regular",
+                "target": 60,
+                "roller_member_id": self.player["member"]["id"],
+                "pc_id": self.pc["id"],
+                "visibility": "self",
+            },
+        )
+        self.assertEqual(unsupported_player_only.status_code, 422)
 
     async def test_hidden_checks_and_state_transitions_are_server_authorized(self) -> None:
         hidden = await self.create_check(hidden=True, bonus_dice=0, target=40)

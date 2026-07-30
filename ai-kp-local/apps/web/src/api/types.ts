@@ -427,6 +427,7 @@ export type SkillCheck = {
   difficulty: "regular" | "hard" | "extreme";
   bonus_dice: number;
   hidden: boolean;
+  visibility: "public" | "private" | "blind";
   allow_push: boolean;
   pushed_from_check_id: string | null;
   status: "requested" | "resolved" | "overridden" | "cancelled";
@@ -468,7 +469,7 @@ export type CreateSkillCheckInput = {
   skill_name: string;
   difficulty: SkillCheck["difficulty"];
   bonus_dice: number;
-  hidden: boolean;
+  visibility: SkillCheck["visibility"];
   allow_push: boolean;
   roller_member_id: string | null;
   pc_id: string | null;
@@ -479,7 +480,7 @@ export type OpposedCheckSideInput = {
   skill_name: string;
   target: number | null;
   bonus_dice: number;
-  hidden: boolean;
+  visibility: SkillCheck["visibility"];
   roller_member_id: string | null;
   pc_id: string | null;
 };
@@ -1393,6 +1394,16 @@ export type TurnProposal = {
   player_action: string;
   public_narration: string;
   kp_notes: string;
+  action_ruling: {
+    goal: string;
+    method: string;
+    target: string;
+    feasibility: "possible" | "partial" | "impossible";
+    resolution: "automatic" | "check" | "opposed" | "no_roll";
+    reason: string;
+    maximum_effect: string;
+    alternative: string;
+  } | null;
   proposed_checks: Record<string, unknown>[];
   proposed_events: Record<string, unknown>[];
   proposed_memories: Record<string, unknown>[];

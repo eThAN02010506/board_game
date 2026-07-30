@@ -28,6 +28,16 @@ class FakeConsequenceLlm:
             {
                 "public_narration": "检定结果明确后，你在柜底找到一张撕碎的收据。",
                 "kp_notes": "严格依据已验证结果生成。",
+                "action_ruling": {
+                    "goal": "搜索档案柜",
+                    "method": "已经完成的侦查检定",
+                    "target": "档案柜",
+                    "feasibility": "possible",
+                    "resolution": "automatic",
+                    "reason": "已验证检定结果支持发现线索。",
+                    "maximum_effect": "发现柜底的撕碎收据。",
+                    "alternative": "",
+                },
                 "proposed_checks": [],
                 "proposed_events": [
                     {
@@ -72,6 +82,16 @@ class HiddenConsequenceLlm(FakeConsequenceLlm):
                     "暗骰 D100=04，是极难成功；你立刻发现了密门。"
                 ),
                 "kp_notes": "暗骰 04，极难成功；密门线索暂不公开。",
+                "action_ruling": {
+                    "goal": "寻找隐藏入口",
+                    "method": "已经完成的KP暗骰侦查检定",
+                    "target": "当前房间",
+                    "feasibility": "possible",
+                    "resolution": "automatic",
+                    "reason": "已验证暗骰结果支持发现密门，但结果仍仅KP可见。",
+                    "maximum_effect": "在KP侧确认密门存在，不向玩家泄露。",
+                    "alternative": "",
+                },
                 "proposed_checks": [],
                 "proposed_events": [
                     {

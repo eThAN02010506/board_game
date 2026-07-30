@@ -138,6 +138,7 @@ const worldExpansionProposal: TurnProposal = {
   status: "draft",
   proposal_kind: "world_expansion",
   check_consequence: null,
+  action_ruling: null,
   world_expansion: {
     proposal_kind: "world_expansion",
     module_run_id: run.id,

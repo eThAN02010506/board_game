@@ -14,6 +14,16 @@ def valid_output() -> dict:
     return {
         "public_narration": "门上的新鲜刮痕通向仓库内部。",
         "kp_notes": "刮痕来自被拖动的重物。",
+        "action_ruling": {
+            "goal": "检查仓库门",
+            "method": "近距离观察",
+            "target": "仓库门",
+            "feasibility": "possible",
+            "resolution": "automatic",
+            "reason": "角色就在门前，普通观察不需要检定。",
+            "maximum_effect": "看见门上无需专业能力即可发现的痕迹。",
+            "alternative": "",
+        },
         "proposed_checks": [],
         "proposed_events": [],
         "proposed_memories": [],
@@ -72,6 +82,7 @@ class StructuredTurnOutputTests(unittest.IsolatedAsyncioTestCase):
 
     def test_parser_rejects_world_effects_before_a_proposed_check_resolves(self) -> None:
         payload = valid_output()
+        payload["action_ruling"]["resolution"] = "check"
         payload["proposed_checks"] = [
             {
                 "skill": "侦查",
@@ -89,6 +100,31 @@ class StructuredTurnOutputTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         with self.assertRaisesRegex(StructuredOutputError, "unresolved checks"):
+            parse_kp_turn_output(json.dumps(payload, ensure_ascii=False))
+
+    def test_impossible_goal_cannot_roll_or_commit_effects(self) -> None:
+        payload = valid_output()
+        payload["action_ruling"] = {
+            "goal": "把巨大口器吓得逃走",
+            "method": "恐吓",
+            "target": "7号车厢外的巨大口器",
+            "feasibility": "impossible",
+            "resolution": "no_roll",
+            "reason": "目标没有可被社会技能胁迫的心智或退路。",
+            "maximum_effect": "确认普通威胁无法迫使它退却。",
+            "alternative": "重新声明为制造声音吸引注意，或立即撤回6号车厢。",
+        }
+        parse_kp_turn_output(json.dumps(payload, ensure_ascii=False))
+
+        payload["proposed_events"] = [
+            {
+                "event_type": "monster_fled",
+                "summary": "怪物被吓跑。",
+                "actor_type": "npc",
+                "visibility": "table",
+            }
+        ]
+        with self.assertRaisesRegex(StructuredOutputError, "impossible action"):
             parse_kp_turn_output(json.dumps(payload, ensure_ascii=False))
 
     async def test_orchestrator_repairs_invalid_model_json_once(self) -> None:

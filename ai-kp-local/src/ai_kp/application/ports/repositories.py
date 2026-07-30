@@ -378,6 +378,7 @@ class CheckStore(CampaignStore, SkillGrowthStore, Protocol):
         source_reference: dict[str, Any],
         bonus_dice: int = 0,
         hidden: bool = False,
+        visibility: str | None = None,
         allow_push: bool = True,
         roller_member_id: str | None = None,
         pc_id: str | None = None,

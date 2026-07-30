@@ -58,6 +58,7 @@ class SkillCheckRepository(SQLiteRepository):
         source_reference: dict[str, Any],
         bonus_dice: int = 0,
         hidden: bool = False,
+        visibility: str | None = None,
         allow_push: bool = True,
         roller_member_id: str | None = None,
         pc_id: str | None = None,
@@ -67,6 +68,9 @@ class SkillCheckRepository(SQLiteRepository):
         pushed_from_check_id: str | None = None,
     ) -> dict[str, Any]:
         self._validate_check_scope(campaign_id, session_id, requested_by_member_id)
+        effective_visibility = visibility or ("blind" if hidden else "public")
+        if effective_visibility not in {"public", "private", "blind"}:
+            raise ValueError("Unsupported check visibility")
         self._validate_check_origin(
             campaign_id=campaign_id,
             session_id=session_id,
@@ -79,6 +83,8 @@ class SkillCheckRepository(SQLiteRepository):
         roller_member_id, pc_id = self._resolve_check_roller(
             session_id, roller_member_id, pc_id
         )
+        if effective_visibility == "private" and not roller_member_id:
+            raise ValueError("Private rolls require an assigned roller")
         target_values = self._check_target_values(
             campaign_id, pc_id, normalized_skill, target
         )
@@ -89,17 +95,18 @@ class SkillCheckRepository(SQLiteRepository):
               (id, campaign_id, session_id, proposal_id, player_action_id,
                requested_by_member_id, roller_member_id, pc_id, investigator_id,
                skill_key, skill_name, target, target_source, difficulty, bonus_dice,
-               hidden, allow_push, pushed_from_check_id, ruleset_id, ruleset_version,
-               source_reference_json, investigator_state_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               hidden, visibility, allow_push, pushed_from_check_id, ruleset_id,
+               ruleset_version, source_reference_json, investigator_state_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 check_id, campaign_id, session_id, proposal_id, player_action_id,
                 requested_by_member_id, roller_member_id, pc_id,
                 target_values["investigator_id"], target_values["skill_key"],
                 normalized_skill, target_values["target"], target_values["target_source"],
-                difficulty, bonus_dice, int(hidden), int(allow_push),
-                pushed_from_check_id, ruleset_id, ruleset_version,
+                difficulty, bonus_dice, int(effective_visibility != "public"),
+                effective_visibility, int(allow_push), pushed_from_check_id,
+                ruleset_id, ruleset_version,
                 json.dumps(source_reference, ensure_ascii=False),
                 target_values["state_version"],
             ),
@@ -235,6 +242,9 @@ class SkillCheckRepository(SQLiteRepository):
             raise KeyError(f"Skill check not found: {check_id}")
         result = row_to_dict(row)
         result["hidden"] = bool(result["hidden"])
+        result["visibility"] = str(result.get("visibility") or (
+            "blind" if result["hidden"] else "public"
+        ))
         result["allow_push"] = bool(result["allow_push"])
         result["passed"] = bool(result["passed"]) if result["passed"] is not None else None
         raw_dice_json = result.pop("raw_dice_json")
@@ -494,15 +504,34 @@ class SkillCheckRepository(SQLiteRepository):
         )
         if updated.rowcount != 1:
             raise ValueError("Check was already resolved")
+        audit_result = {
+            "input_method": input_method,
+            "raw_dice": resolution["raw_dice"],
+            "selected_roll": resolution["selected_roll"],
+            "target": check["target"],
+            "threshold": resolution["threshold"],
+            "difficulty": check["difficulty"],
+            "bonus_dice": check["bonus_dice"],
+            "success_level": resolution["success_level"],
+            "passed": resolution["passed"],
+            "hidden": check["hidden"],
+            "visibility": check["visibility"],
+            "ruleset_id": check["ruleset_id"],
+            "ruleset_version": check["ruleset_version"],
+        }
+        canonical_audit = json.dumps(
+            audit_result,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         self._add_check_action(
             check_id,
             "resolved",
             actor_member_id,
             payload={
-                "input_method": input_method,
-                "selected_roll": resolution["selected_roll"],
-                "success_level": resolution["success_level"],
-                "passed": resolution["passed"],
+                **audit_result,
+                "result_fingerprint": sha256(canonical_audit.encode("utf-8")).hexdigest(),
             },
         )
         self._append_check_realtime(check_id, "check.resolved")
@@ -633,6 +662,7 @@ class SkillCheckRepository(SQLiteRepository):
             source_reference=dict(check["source_reference"]),
             bonus_dice=int(check["bonus_dice"]),
             hidden=bool(check["hidden"]),
+            visibility=str(check["visibility"]),
             allow_push=False,
             roller_member_id=check.get("roller_member_id"),
             pc_id=check.get("pc_id"),
@@ -806,15 +836,27 @@ class SkillCheckRepository(SQLiteRepository):
 
     def _append_check_realtime(self, check_id: str, event_type: str) -> None:
         check = self.get_skill_check(check_id)
-        self.append_realtime_event(
-            session_id=str(check["session_id"]),
-            campaign_id=str(check["campaign_id"]),
-            audience="kp" if check["hidden"] else "session",
-            event_type=event_type,
-            resource_type="skill_check",
-            resource_id=check_id,
-            payload={"status": check["status"]},
-        )
+        visibility = str(check["visibility"])
+        audiences: list[tuple[str, str | None]]
+        if visibility == "public":
+            audiences = [("session", None)]
+        elif visibility == "private":
+            audiences = [("kp", None), ("member", check["roller_member_id"])]
+        elif visibility == "blind":
+            audiences = [("kp", None)]
+        else:
+            audiences = [("kp", None)]
+        for audience, member_id in audiences:
+            self.append_realtime_event(
+                session_id=str(check["session_id"]),
+                campaign_id=str(check["campaign_id"]),
+                audience=audience,
+                member_id=member_id,
+                event_type=event_type,
+                resource_type="skill_check",
+                resource_id=check_id,
+                payload={"status": check["status"]},
+            )
 
 
 __all__ = ["SkillCheckRepository"]

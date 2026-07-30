@@ -86,6 +86,16 @@ class HandoffDuringCallLlm:
             {
                 "public_narration": "这段输出不得落库。",
                 "kp_notes": "",
+                "action_ruling": {
+                    "goal": "推进当前行动",
+                    "method": "观察",
+                    "target": "当前场景",
+                    "feasibility": "possible",
+                    "resolution": "automatic",
+                    "reason": "测试输出。",
+                    "maximum_effect": "仅限公开叙述。",
+                    "alternative": "",
+                },
                 "proposed_checks": [],
                 "proposed_events": [],
                 "proposed_memories": [],

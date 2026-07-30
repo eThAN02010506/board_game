@@ -3,6 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ai_kp.director.turn_output import (
+    ActionRuling,
     CheckCandidate,
     EventCandidate,
     FactCandidate,
@@ -165,6 +166,7 @@ class SkillCheckCreate(BaseModel):
     difficulty: Literal["regular", "hard", "extreme"] = "regular"
     bonus_dice: int = Field(default=0, ge=-2, le=2)
     hidden: bool = False
+    visibility: Literal["public", "private", "blind"] | None = None
     allow_push: bool = True
     roller_member_id: str | None = None
     pc_id: str | None = None
@@ -263,6 +265,7 @@ class OpposedCheckSideCreate(BaseModel):
     target: int | None = Field(default=None, ge=0, le=100)
     bonus_dice: int = Field(default=0, ge=-2, le=2)
     hidden: bool = False
+    visibility: Literal["public", "private", "blind"] | None = None
     roller_member_id: str | None = None
     pc_id: str | None = None
 
@@ -875,6 +878,7 @@ class TurnProposalCreate(BaseModel):
     public_narration: str = Field(min_length=1, max_length=12000)
     pc_id: str | None = None
     kp_notes: str = ""
+    action_ruling: ActionRuling | None = None
     proposed_checks: list[CheckCandidate] = Field(default_factory=list, max_length=8)
     proposed_events: list[EventCandidate] = Field(default_factory=list, max_length=12)
     proposed_memories: list[MemoryCandidate] = Field(default_factory=list, max_length=10)

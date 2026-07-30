@@ -49,6 +49,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0042_coc7_gameplay,
     v0043_dynamic_branches,
     v0044_map_overlays_and_routes,
+    v0045_check_visibility,
 )
 
 
@@ -269,6 +270,11 @@ MIGRATIONS = (
         v0044_map_overlays_and_routes.VERSION,
         v0044_map_overlays_and_routes.NAME,
         v0044_map_overlays_and_routes.migrate,
+    ),
+    Migration(
+        v0045_check_visibility.VERSION,
+        v0045_check_visibility.NAME,
+        v0045_check_visibility.migrate,
     ),
 )
 

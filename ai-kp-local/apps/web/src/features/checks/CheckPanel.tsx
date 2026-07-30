@@ -1,4 +1,4 @@
-import { Dice5, EyeOff, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react";
+import { Dice5, EyeOff, RefreshCw, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type {
@@ -10,6 +10,7 @@ import type {
   SkillCheck
 } from "../../api/types";
 import { statusLabel } from "../../ui/statusLabels";
+import { DiceRollResult } from "./DiceRollResult";
 
 type Props = {
   identity: AuthIdentity | null;
@@ -51,13 +52,19 @@ const difficultyLabels: Record<SkillCheck["difficulty"], string> = {
   extreme: "极难"
 };
 
+const visibilityLabels: Record<SkillCheck["visibility"], string> = {
+  public: "全桌公开",
+  private: "掷骰者与 KP",
+  blind: "仅 KP"
+};
+
 export function CheckPanel(props: Props) {
   const [skillName, setSkillName] = useState("侦查");
   const [difficulty, setDifficulty] = useState<SkillCheck["difficulty"]>("regular");
   const [bonusDice, setBonusDice] = useState(0);
   const [target, setTarget] = useState("50");
   const [rollerMemberId, setRollerMemberId] = useState("");
-  const [hidden, setHidden] = useState(false);
+  const [visibility, setVisibility] = useState<SkillCheck["visibility"]>("public");
   const [allowPush, setAllowPush] = useState(true);
   const [physicalDrafts, setPhysicalDrafts] = useState<Record<string, { ones: string; tens: string }>>({});
   const [decisionReason, setDecisionReason] = useState("KP 根据现场裁定");
@@ -75,6 +82,7 @@ export function CheckPanel(props: Props) {
     () => props.members.filter((member) => member.role === "player" && !member.revoked_at),
     [props.members]
   );
+  const visibilityNeedsRoller = visibility === "private";
 
   function submitCheck() {
     const roller = playerMembers.find((member) => member.id === rollerMemberId);
@@ -82,7 +90,7 @@ export function CheckPanel(props: Props) {
       skill_name: skillName,
       difficulty,
       bonus_dice: bonusDice,
-      hidden,
+      visibility,
       allow_push: allowPush,
       roller_member_id: roller?.id ?? null,
       pc_id: roller?.pc_id ?? null,
@@ -144,10 +152,22 @@ export function CheckPanel(props: Props) {
             </label>
           </div>
           <div className="check-options">
-            <label><input checked={hidden} onChange={(event) => setHidden(event.target.checked)} type="checkbox" />暗骰</label>
+            <label>
+              可见范围
+              <select
+                aria-label="可见范围"
+                value={visibility}
+                onChange={(event) => setVisibility(event.target.value as SkillCheck["visibility"])}
+              >
+                <option value="public">全桌公开</option>
+                <option disabled={!rollerMemberId} value="private">掷骰者与 KP</option>
+                <option value="blind">仅 KP（暗骰）</option>
+              </select>
+            </label>
             <label><input checked={allowPush} onChange={(event) => setAllowPush(event.target.checked)} type="checkbox" />允许孤注一掷</label>
           </div>
-          <button className="primary-button" disabled={props.loading || !skillName.trim()} onClick={submitCheck} type="button"><Dice5 size={15} />发布检定</button>
+          {visibilityNeedsRoller && !rollerMemberId && <p className="form-hint">这个可见范围必须先指定一名玩家。</p>}
+          <button className="primary-button" disabled={props.loading || !skillName.trim() || (visibilityNeedsRoller && !rollerMemberId)} onClick={submitCheck} type="button"><Dice5 size={15} />发布检定</button>
         </details>
       )}
 
@@ -173,7 +193,7 @@ export function CheckPanel(props: Props) {
                   skill_name: skill,
                   target: targetValue.trim() ? Number(targetValue) : null,
                   bonus_dice: 0,
-                  hidden: false,
+                  visibility: "public" as const,
                   roller_member_id: member?.id ?? null,
                   pc_id: member?.pc_id ?? null
                 };
@@ -203,6 +223,10 @@ export function CheckPanel(props: Props) {
             return <article className="check-card opposed-card" key={contest.id}>
               <div className="check-card-heading"><strong>{contest.left_check.skill_name} vs {contest.right_check.skill_name}</strong><span>{statusLabel(contest.status)}</span></div>
               <small>左 {contest.left_check.target} / {contest.left_check.selected_roll ?? "待掷"} · 右 {contest.right_check.target} / {contest.right_check.selected_roll ?? "待掷"}</small>
+              <div className="opposed-roll-results">
+                <DiceRollResult check={contest.left_check} compact />
+                <DiceRollResult check={contest.right_check} compact />
+              </div>
               {contest.result && <div className="check-result"><strong>{winner ? `${winner} 获胜` : "完全相同，双方重掷"}</strong><span>裁决依据：{contest.result.decided_by}</span></div>}
               {props.identity?.role === "kp" && contest.status === "pending" && <button className="primary-button" disabled={!ready || props.loading} onClick={() => props.onResolveOpposed(contest.id)} type="button">裁决对抗结果</button>}
               {props.identity?.role === "kp" && contest.status === "reroll_required" && <button className="primary-button" disabled={props.loading} onClick={() => props.onRerollOpposed(contest.id)} type="button">创建双方重掷</button>}
@@ -229,8 +253,8 @@ export function CheckPanel(props: Props) {
               <div className="check-card-heading">
                 <div><strong>{check.skill_name}</strong><small>{difficultyLabels[check.difficulty]} · 目标 {check.target} / 门槛 {check.status === "requested" ? "待掷骰" : check.threshold}</small></div>
                 <span>
-                  {check.hidden
-                    ? <><EyeOff size={13} /> 暗骰</>
+                  {check.visibility !== "public"
+                    ? <><EyeOff size={13} /> {visibilityLabels[check.visibility]}</>
                     : statusLabel(check.status)}
                 </span>
               </div>
@@ -254,12 +278,7 @@ export function CheckPanel(props: Props) {
               )}
 
               {check.status !== "requested" && check.status !== "cancelled" && (
-                <div className="check-result">
-                  <strong>{check.success_level ? levelLabels[check.success_level] : "未知"}</strong>
-                  <span>D100 = {check.selected_roll} · {check.passed ? "通过难度" : "未通过难度"}</span>
-                  {check.raw_dice && <small>个位 {check.raw_dice.ones_digit} · 十位 {check.raw_dice.tens_digits.join(" / ")} · 候选 {check.raw_dice.candidates.join(" / ")}</small>}
-                  {check.override_reason && <small><ShieldAlert size={12} /> KP 覆盖：{check.override_reason}</small>}
-                </div>
+                <DiceRollResult check={check} />
               )}
 
               {check.status !== "requested" && check.status !== "cancelled" && (

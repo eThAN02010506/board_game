@@ -70,6 +70,7 @@ function makeCheck(overrides: Partial<SkillCheck> = {}): SkillCheck {
     difficulty: "regular",
     bonus_dice: 0,
     hidden: false,
+    visibility: "public",
     allow_push: true,
     pushed_from_check_id: null,
     status: "requested",
@@ -159,7 +160,9 @@ describe("CheckPanel", () => {
     fireEvent.change(screen.getByLabelText("奖惩骰"), {
       target: { value: "1" }
     });
-    fireEvent.click(screen.getByLabelText("暗骰"));
+    fireEvent.change(screen.getByLabelText("可见范围"), {
+      target: { value: "blind" }
+    });
     fireEvent.click(screen.getByRole("button", { name: "发布检定" }));
 
     expect(onCreate).toHaveBeenCalledTimes(1);
@@ -167,7 +170,7 @@ describe("CheckPanel", () => {
       skill_name: "图书馆使用",
       difficulty: "hard",
       bonus_dice: 1,
-      hidden: true,
+      visibility: "blind",
       allow_push: true,
       roller_member_id: "member_player",
       pc_id: "pc_player",
@@ -261,7 +264,7 @@ describe("CheckPanel", () => {
     });
 
     expect(screen.getByText("失败", { selector: "strong" })).toBeVisible();
-    expect(screen.getByText("D100 = 87 · 未通过难度")).toBeVisible();
+    expect(screen.getByText("87", { selector: "b" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "重放校验" }));
     fireEvent.click(screen.getByText("KP 裁定与状态操作"));
     fireEvent.change(screen.getByLabelText("理由或后果"), {
@@ -281,6 +284,68 @@ describe("CheckPanel", () => {
       "线索仍然可见"
     );
     expect(onPush).toHaveBeenCalledWith("check_test", "线索仍然可见");
+  });
+
+  it("shows a public roll total and expandable percentile dice details", () => {
+    renderPanel({
+      identity: playerIdentity,
+      checks: [makeCheck({
+        status: "resolved",
+        input_method: "digital",
+        bonus_dice: 1,
+        raw_dice: {
+          ones_digit: 4,
+          tens_digits: [4, 2],
+          candidates: [44, 24]
+        },
+        selected_roll: 24,
+        threshold: 30,
+        success_level: "hard",
+        passed: true,
+        resolved_at: "2026-07-28T10:01:00Z"
+      })]
+    });
+
+    const result = screen.getByRole("region", { name: "侦查投骰结果" });
+    expect(result).toHaveTextContent("全桌公开");
+    expect(result).toHaveTextContent("D100（1 奖励骰）");
+    expect(result).toHaveTextContent("掷出24");
+    expect(result).toHaveTextContent("困难成功");
+    expect(result).toHaveTextContent("目标 60 · 门槛 30");
+
+    fireEvent.click(screen.getByText("查看每颗骰子与计算过程"));
+    expect(result).toHaveTextContent("40");
+    expect(result).toHaveTextContent("20");
+    expect(result).toHaveTextContent("候选值 44 / 24 · 奖励骰取较小值");
+    expect(result).toHaveTextContent("服务器数字骰");
+  });
+
+  it("labels a hidden KP result without changing its persisted dice", () => {
+    renderPanel({
+      identity: kpIdentity,
+      checks: [makeCheck({
+        hidden: true,
+        visibility: "blind",
+        status: "resolved",
+        input_method: "physical",
+        raw_dice: {
+          ones_digit: 7,
+          tens_digits: [8],
+          candidates: [87]
+        },
+        selected_roll: 87,
+        threshold: 60,
+        success_level: "failure",
+        passed: false,
+        resolved_at: "2026-07-28T10:01:00Z"
+      })]
+    });
+
+    const result = screen.getByRole("region", { name: "侦查投骰结果" });
+    expect(result).toHaveTextContent("仅 KP 可见");
+    expect(result).toHaveTextContent("87");
+    fireEvent.click(screen.getByText("查看每颗骰子与计算过程"));
+    expect(result).toHaveTextContent("实体骰录入");
   });
 
   it("uses the idempotent consequence endpoint for every terminal check", () => {

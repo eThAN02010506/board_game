@@ -12,6 +12,7 @@ from ai_kp.application.module_run_service import ModuleRunService
 from ai_kp.application.play.proposal_approval import plan_proposed_checks
 from ai_kp.application.ports.director import KpDirector, WorldExpansionDirector
 from ai_kp.application.ports.repositories import TurnStore
+from ai_kp.director.turn_output import ActionRuling, KpTurnOutput
 from ai_kp.director.world_expansion import (
     WorldExpansionCandidate,
     validate_world_expansion_plan,
@@ -28,6 +29,7 @@ class ManualProposalCommand:
     player_action_id: str | None = None
     pc_id: str | None = None
     kp_notes: str = ""
+    action_ruling: Any | None = None
     proposed_checks: Sequence[Any] = ()
     proposed_events: Sequence[Any] = ()
     proposed_memories: Sequence[Any] = ()
@@ -86,6 +88,7 @@ class TurnService:
         identity: AuthenticatedMember,
         command: ManualProposalCommand,
     ) -> dict:
+        ruling = self._validated_action_ruling(command)
         validate_unresolved_check_boundary(
             command.proposed_checks,
             command.proposed_events,
@@ -115,6 +118,8 @@ class TurnService:
             proposed_facts=list(command.proposed_facts),
             source_model=command.source_model,
         )
+        self._attach_action_ruling(str(proposal["id"]), ruling)
+        proposal = self.repo.get_turn_proposal(str(proposal["id"]))
         if queued_action:
             self.repo.link_player_action_to_proposal(
                 queued_action["id"],
@@ -178,6 +183,11 @@ class TurnService:
             proposed_facts=output.proposed_facts,
             source_model=source_model,
         )
+        self._attach_action_ruling(
+            str(proposal["id"]),
+            output.action_ruling.model_dump(mode="json"),
+        )
+        proposal = self.repo.get_turn_proposal(str(proposal["id"]))
         self.repo.create_context_assembly(
             proposal_id=proposal["id"],
             campaign_id=command.campaign_id,
@@ -195,6 +205,64 @@ class TurnService:
             )
         self._append_proposal_created(identity.session_id, command.campaign_id, proposal)
         return proposal
+
+    def _validated_action_ruling(
+        self,
+        command: ManualProposalCommand,
+    ) -> dict[str, Any]:
+        if command.action_ruling is None:
+            difficulties = {
+                str(
+                    item.get("difficulty", "regular")
+                    if isinstance(item, dict)
+                    else item.difficulty
+                )
+                for item in command.proposed_checks
+            }
+            resolution = (
+                "opposed"
+                if "opposed" in difficulties
+                else "check"
+                if command.proposed_checks
+                else "automatic"
+            )
+            raw_ruling: Any = {
+                "goal": command.player_action,
+                "method": "人类 KP 手工裁定",
+                "target": "当前场景",
+                "feasibility": "possible",
+                "resolution": resolution,
+                "reason": "该草稿由人类 KP 创建；仍受检定与世界效果边界约束。",
+                "maximum_effect": "仅限本草稿明确列出的公开叙述与候选效果。",
+                "alternative": "",
+            }
+        else:
+            raw_ruling = command.action_ruling
+        validated = KpTurnOutput(
+            public_narration=command.public_narration,
+            kp_notes=command.kp_notes,
+            action_ruling=ActionRuling.model_validate(raw_ruling),
+            proposed_checks=list(command.proposed_checks),
+            proposed_events=list(command.proposed_events),
+            proposed_memories=list(command.proposed_memories),
+            proposed_npc_updates=list(command.proposed_npc_updates),
+            proposed_map_moves=list(command.proposed_map_moves),
+            proposed_facts=list(command.proposed_facts),
+        )
+        return validated.action_ruling.model_dump(mode="json")
+
+    def _attach_action_ruling(
+        self,
+        proposal_id: str,
+        ruling: dict[str, Any],
+    ) -> None:
+        self.repo.add_proposal_action(
+            proposal_id,
+            "action_ruling",
+            actor="system",
+            note="goal feasibility and effect ceiling",
+            payload=ruling,
+        )
 
     async def create_world_expansion_proposal(
         self,

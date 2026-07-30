@@ -114,6 +114,7 @@ def create_manual_proposal(
             player_action_id=payload.player_action_id,
             pc_id=payload.pc_id,
             kp_notes=payload.kp_notes,
+            action_ruling=payload.action_ruling,
             proposed_events=payload.proposed_events,
             proposed_memories=payload.proposed_memories,
             proposed_checks=payload.proposed_checks,

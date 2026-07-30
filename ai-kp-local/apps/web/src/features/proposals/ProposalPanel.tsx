@@ -72,6 +72,38 @@ export function ProposalPanel(props: Props) {
             </span>
             <p>{props.activeProposal.public_narration}</p>
             <small>{props.activeProposal.kp_notes}</small>
+            {props.activeProposal.action_ruling && (
+              <section className={`action-ruling ruling-${props.activeProposal.action_ruling.feasibility}`}>
+                <header>
+                  <strong>行动裁定</strong>
+                  <span>
+                    {props.activeProposal.action_ruling.feasibility === "possible"
+                      ? "可行"
+                      : props.activeProposal.action_ruling.feasibility === "partial"
+                      ? "部分可行"
+                      : "目标不可行"}
+                    {" · "}
+                    {props.activeProposal.action_ruling.resolution === "automatic"
+                      ? "自动结算"
+                      : props.activeProposal.action_ruling.resolution === "check"
+                      ? "需要检定"
+                      : props.activeProposal.action_ruling.resolution === "opposed"
+                      ? "需要对抗"
+                      : "不掷骰"}
+                  </span>
+                </header>
+                <dl>
+                  <div><dt>目标</dt><dd>{props.activeProposal.action_ruling.goal}</dd></div>
+                  <div><dt>手段</dt><dd>{props.activeProposal.action_ruling.method}</dd></div>
+                  <div><dt>对象</dt><dd>{props.activeProposal.action_ruling.target}</dd></div>
+                  <div><dt>理由</dt><dd>{props.activeProposal.action_ruling.reason}</dd></div>
+                  <div><dt>成功上限</dt><dd>{props.activeProposal.action_ruling.maximum_effect}</dd></div>
+                </dl>
+                {props.activeProposal.action_ruling.alternative && (
+                  <p>可改为：{props.activeProposal.action_ruling.alternative}</p>
+                )}
+              </section>
+            )}
             {props.activeProposal.world_expansion && (
               <section className="proposal-world-expansion">
                 <header>

@@ -10,6 +10,16 @@ const draftProposal: TurnProposal = {
   status: "draft",
   proposal_kind: "standard",
   check_consequence: null,
+  action_ruling: {
+    goal: "确认黑泥来自哪里",
+    method: "检查泥土痕迹",
+    target: "窗框上的黑泥",
+    feasibility: "partial",
+    resolution: "check",
+    reason: "观察可以提供来源线索，但不能仅凭一次检定确认完整真相。",
+    maximum_effect: "识别泥土的显著性质并得到可能来源。",
+    alternative: "采样后与已知地点进行比对。"
+  },
   world_expansion: null,
   player_action: "检查窗框上的泥土",
   public_narration: "窗框边缘沾着尚未干透的黑泥。",
@@ -175,6 +185,8 @@ describe("ProposalPanel", () => {
     expect(screen.getByText("窗框边缘沾着尚未干透的黑泥。")).toBeVisible();
     expect(screen.getByText(/"skill_name": "侦查"/)).toBeVisible();
     expect(screen.getByText("待检定")).toHaveTextContent("1");
+    expect(screen.getByText("部分可行 · 需要检定")).toBeVisible();
+    expect(screen.getByText("识别泥土的显著性质并得到可能来源。")).toBeVisible();
 
     fireEvent.click(
       screen.getByRole("button", { name: /已批准 询问值班警员/ })

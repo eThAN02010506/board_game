@@ -13,6 +13,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0022_knowledge_extraction_attempts,
     v0023_session_assignment_uniqueness,
     v0024_rule_source_ruleset_hash,
+    v0045_check_visibility,
 )
 from ai_kp.storage.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
 
@@ -74,6 +75,29 @@ CREATE TABLE player_actions (
 
 def _column_names(connection: sqlite3.Connection, table_name: str) -> set[str]:
     return {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table_name})")}
+
+
+def test_check_visibility_migration_backfills_legacy_hidden_rows() -> None:
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute(
+            "CREATE TABLE skill_checks (id TEXT PRIMARY KEY, hidden INTEGER NOT NULL)"
+        )
+        connection.executemany(
+            "INSERT INTO skill_checks (id, hidden) VALUES (?, ?)",
+            (("public", 0), ("hidden", 1)),
+        )
+
+        v0045_check_visibility.migrate(connection)
+
+        rows = dict(
+            connection.execute(
+                "SELECT id, visibility FROM skill_checks ORDER BY id"
+            ).fetchall()
+        )
+        assert rows == {"hidden": "blind", "public": "public"}
+    finally:
+        connection.close()
 
 
 def _downgrade_rule_sources_to_v23(connection: sqlite3.Connection) -> None:
@@ -155,6 +179,7 @@ def test_init_db_migrates_legacy_schema_once_and_is_idempotent(tmp_path: Path) -
             "proposed_facts_json",
         }
         assert "client_action_id" in _column_names(connection, "player_actions")
+        assert "visibility" in _column_names(connection, "skill_checks")
         assert "status" in _column_names(connection, "maps")
         assert "current_revision_id" in _column_names(connection, "maps")
         assert "element_id" in _column_names(connection, "map_locations")

@@ -11,6 +11,7 @@ CHECK_CONSEQUENCE_OUTPUT_INSTRUCTIONS = """只返回一个 JSON 对象，不要 
 {
   "public_narration": "严格依据已验证检定结果给出的玩家可见后果",
   "kp_notes": "仅 KP 可见的简短备注",
+  "action_ruling": {"goal":"原玩家行动的目标","method":"已经完成的技能或对抗","target":"行动对象","feasibility":"possible|partial","resolution":"automatic","reason":"如何依据已验证结果生成后果","maximum_effect":"该结果最多支持的效果","alternative":""},
   "proposed_checks": [],
   "proposed_events": [{"event_type":"类型","summary":"已经由结果支持的事实摘要","actor_type":"system|pc|npc|kp|environment","actor_id":null,"visibility":"player|table|kp","happened_at":null,"payload":{}}],
   "proposed_memories": [{"text":"值得长期记得且已由结果支持的内容","scope":"campaign_fact|pc_major|pc_side|npc_interaction|npc_relationship|location_fact|clue","importance":1,"visibility":"player|table|kp","pc_id":null,"npc_id":null,"happened_at":null}],
@@ -18,7 +19,9 @@ CHECK_CONSEQUENCE_OUTPUT_INSTRUCTIONS = """只返回一个 JSON 对象，不要 
   "proposed_map_moves": [],
   "proposed_facts": [{"fact_type":"canonical_fact|kp_secret|character_belief|rumor|ai_hypothesis","subject":"主体","predicate":"关系或属性","object_text":"已经由检定结果支持的内容","pc_id":null,"evidence_event_ids":[],"happened_at":null}]
 }
-proposed_checks 和 proposed_map_moves 必须为空。不得改变骰值、成功等级、规则来源或 KP 覆盖；不得把失败写成无代价成功。没有依据的效果必须省略。
+检定已经完成，因此 action_ruling.resolution 必须为 automatic；proposed_checks 和
+proposed_map_moves 必须为空。不得改变骰值、成功等级、规则来源或 KP 覆盖；不得把失败
+写成无代价成功。没有依据的效果必须省略。
 """.strip()
 
 _HIDDEN_CHECK_OUTPUT_INSTRUCTIONS = f"""

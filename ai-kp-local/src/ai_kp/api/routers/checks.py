@@ -28,6 +28,7 @@ def _opposed_side(payload) -> OpposedSideCommand:
         target=payload.target,
         bonus_dice=payload.bonus_dice,
         hidden=payload.hidden,
+        visibility=payload.visibility,
         roller_member_id=payload.roller_member_id,
         pc_id=payload.pc_id,
     )
@@ -62,6 +63,7 @@ def create_skill_check(
             difficulty=payload.difficulty,
             bonus_dice=payload.bonus_dice,
             hidden=payload.hidden,
+            visibility=payload.visibility,
             allow_push=payload.allow_push,
             roller_member_id=payload.roller_member_id,
             pc_id=payload.pc_id,

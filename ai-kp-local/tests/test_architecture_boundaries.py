@@ -484,7 +484,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 44
+    assert LATEST_SCHEMA_VERSION == 45
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -530,6 +530,7 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (42, "add_coc7_gameplay_state_machines"),
         (43, "add_dynamic_branch_runs"),
         (44, "add_map_overlay_inheritance_and_route_plans"),
+        (45, "add_skill_check_visibility_modes"),
     ]
 
 

@@ -213,6 +213,16 @@ class AiTurnServiceTests(unittest.IsolatedAsyncioTestCase):
                             {
                                 "public_narration": "The door opens.",
                                 "kp_notes": "No proposal should persist.",
+                                "action_ruling": {
+                                    "goal": "Open the door",
+                                    "method": "Use the handle",
+                                    "target": "The door",
+                                    "feasibility": "possible",
+                                    "resolution": "automatic",
+                                    "reason": "The door is unlocked.",
+                                    "maximum_effect": "The door opens.",
+                                    "alternative": "",
+                                },
                                 "proposed_checks": [],
                                 "proposed_events": [],
                                 "proposed_memories": [],

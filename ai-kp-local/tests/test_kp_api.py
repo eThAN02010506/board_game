@@ -16,6 +16,16 @@ class FakeStructuredLlm:
             {
                 "public_narration": "仓库门上有一道新鲜刮痕。",
                 "kp_notes": "刮痕来自柜子。",
+                "action_ruling": {
+                    "goal": "检查仓库门",
+                    "method": "近距离观察",
+                    "target": "仓库门",
+                    "feasibility": "possible",
+                    "resolution": "automatic",
+                    "reason": "刮痕无需专业能力即可看见。",
+                    "maximum_effect": "看到门上的明显刮痕。",
+                    "alternative": "",
+                },
                 "proposed_checks": [],
                 "proposed_events": [
                     {

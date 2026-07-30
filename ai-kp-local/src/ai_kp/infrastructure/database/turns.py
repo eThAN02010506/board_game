@@ -32,6 +32,7 @@ CHECK_CONSEQUENCE_ACTION_TYPE = "check_consequence_basis"
 WORLD_EXPANSION_ACTION_TYPE = "world_expansion_basis"
 WORLD_EXPANSION_MATERIALIZED_ACTION_TYPE = "world_expansion_materialized"
 PROPOSED_FACTS_APPLIED_ACTION_TYPE = "proposed_facts_applied"
+ACTION_RULING_ACTION_TYPE = "action_ruling"
 
 
 class TurnRepository(SQLiteRepository):
@@ -226,6 +227,14 @@ class TurnRepository(SQLiteRepository):
         proposal["check_consequence"] = consequence
         proposal["world_expansion"] = world_expansion
         proposal["world_expansion_materialization"] = materialization
+        ruling_matches = [
+            action["payload"]
+            for action in resolved_actions
+            if action["action_type"] == ACTION_RULING_ACTION_TYPE
+        ]
+        if len(ruling_matches) > 1:
+            raise ValueError("A proposal has multiple action rulings")
+        proposal["action_ruling"] = ruling_matches[0] if ruling_matches else None
         applied_fact_matches = [
             action["payload"]
             for action in resolved_actions

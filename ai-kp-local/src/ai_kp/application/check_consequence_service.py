@@ -127,6 +127,13 @@ class CheckConsequenceService:
             proposed_facts=output.proposed_facts,
             source_model=source_model,
         )
+        self.repo.add_proposal_action(
+            str(proposal["id"]),
+            "action_ruling",
+            actor="system",
+            note="verified check consequence effect ceiling",
+            payload=output.action_ruling.model_dump(mode="json"),
+        )
         self.repo.attach_check_consequence_basis(
             proposal["id"],
             origin_proposal_id=str(origin["id"]),

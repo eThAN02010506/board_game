@@ -40,43 +40,58 @@ const sample = {
   mode: "service_replay",
   steps: [
     {
-      action: "generate_map", alias: "town", title: "镇中心",
-      locations: ["广场", "警局"], routes: [["广场", "警局"]]
+      action: "generate_map", alias: "train", title: "末班电车",
+      locations: ["7号车厢", "6号车厢", "5号车厢", "4号车厢", "3号车厢"],
+      routes: [
+        ["7号车厢", "6号车厢"], ["6号车厢", "5号车厢"],
+        ["5号车厢", "4号车厢"], ["4号车厢", "3号车厢"]
+      ]
     },
     {
-      action: "place_token", alias: "hero", map_ref: "town",
-      label: "调查员", location: "广场"
+      action: "place_token", alias: "hero", map_ref: "train",
+      label: "调查员", location: "6号车厢"
     },
     {
-      action: "plan_routes", alias: "route", map_ref: "town",
-      token_routes: [{ token_ref: "hero", waypoints: ["广场", "警局"] }]
+      action: "plan_routes", alias: "route", map_ref: "train",
+      title: "调查7号车厢后返回并向车头前进",
+      token_routes: [{
+        token_ref: "hero",
+        waypoints: ["6号车厢", "7号车厢", "6号车厢", "5号车厢", "4号车厢", "3号车厢"]
+      }]
     },
-    { action: "move_token", token_ref: "hero", to: "警局" },
+    { action: "move_token", token_ref: "hero", to: "7号车厢" },
+    {
+      action: "create_proposal",
+      alias: "intimidate_mouth",
+      player_action: "我对车厢外的巨大口器进行恐吓，想把它吓跑。",
+      public_narration: "你的威吓没有让那道巨大口器表现出恐惧。它不像能够被人类威胁迫使退却的对象。",
+      kp_notes: "不掷骰；大成功也不能赋予目标不存在的社会反应。",
+      action_ruling: {
+        goal: "让巨大口器因恐惧逃走",
+        method: "恐吓",
+        target: "7号车厢外的巨大口器",
+        feasibility: "impossible",
+        resolution: "no_roll",
+        reason: "目标没有可被社会技能胁迫的心智表现，且原模组没有其被人类威胁赶走的依据。",
+        maximum_effect: "确认普通威胁无法迫使它退却。",
+        alternative: "可以撤回6号车厢；若想制造声音吸引注意，需要重新声明不同目标。"
+      }
+    },
+    { action: "approve_proposal", proposal_ref: "intimidate_mouth" },
+    { action: "move_token", token_ref: "hero", to: "6号车厢" },
+    { action: "move_token", token_ref: "hero", to: "5号车厢" },
+    { action: "move_token", token_ref: "hero", to: "4号车厢" },
+    { action: "move_token", token_ref: "hero", to: "3号车厢" },
     {
       action: "assert_equals", ref: "hero",
-      path: "location_name", value: "警局"
-    },
-    {
-      action: "create_handout", alias: "clue",
-      title: "值班记录", body: "午夜有人进入警局。"
-    },
-    { action: "capture_player_handouts", alias: "hidden" },
-    {
-      action: "assert_not_contains", ref: "hidden",
-      path: "value", value: "午夜有人"
-    },
-    { action: "update_handout", handout_ref: "clue", status: "revealed" },
-    { action: "capture_player_handouts", alias: "revealed" },
-    {
-      action: "assert_contains", ref: "revealed",
-      path: "value", value: "午夜有人"
+      path: "location_name", value: "3号车厢"
     }
   ]
 };
 
 export function SimulationWorkbench({ campaign, identity }: Props) {
   const [cases, setCases] = useState<SimulationCase[]>([]);
-  const [name, setName] = useState("产品服务：地图移动与线索揭示");
+  const [name, setName] = useState("常暗之厢：自由行动与车厢邻接");
   const [definition, setDefinition] = useState(JSON.stringify(sample, null, 2));
   const [message, setMessage] = useState("保存固定案例后可反复执行并比较结果指纹。");
   async function load() {

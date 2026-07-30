@@ -14,6 +14,7 @@ class CreateCheckCommand:
     difficulty: str = "regular"
     bonus_dice: int = 0
     hidden: bool = False
+    visibility: str | None = None
     allow_push: bool = True
     roller_member_id: str | None = None
     pc_id: str | None = None
@@ -35,6 +36,7 @@ class OpposedSideCommand:
     target: int | None = None
     bonus_dice: int = 0
     hidden: bool = False
+    visibility: str | None = None
     roller_member_id: str | None = None
     pc_id: str | None = None
 
@@ -79,6 +81,7 @@ class CheckService:
             source_reference=dict(manifest.source_reference),
             bonus_dice=command.bonus_dice,
             hidden=command.hidden,
+            visibility=command.visibility,
             allow_push=command.allow_push,
             roller_member_id=command.roller_member_id,
             pc_id=command.pc_id,
@@ -90,13 +93,7 @@ class CheckService:
     def list(self, campaign_id: str, identity: AuthenticatedMember) -> list[dict]:
         self._require_campaign(identity, campaign_id)
         checks = self.repo.list_skill_checks(campaign_id, identity.session_id)
-        if identity.role == "kp":
-            return checks
-        return [
-            check
-            for check in checks
-            if not check["hidden"] and check["roller_member_id"] == identity.member_id
-        ]
+        return [check for check in checks if self._can_view(check, identity)]
 
     def get(self, check_id: str, identity: AuthenticatedMember) -> dict:
         check = self.repo.get_skill_check(check_id)
@@ -122,6 +119,7 @@ class CheckService:
                         difficulty="regular",
                         bonus_dice=side.bonus_dice,
                         hidden=side.hidden,
+                        visibility=side.visibility,
                         allow_push=False,
                         roller_member_id=side.roller_member_id,
                         pc_id=side.pc_id,
@@ -144,18 +142,11 @@ class CheckService:
     ) -> list[dict]:
         self._require_campaign(identity, campaign_id)
         contests = self.repo.list_opposed_checks(campaign_id, identity.session_id)
-        if identity.role == "kp":
-            return contests
         return [
             contest
             for contest in contests
-            if not contest["left_check"]["hidden"]
-            and not contest["right_check"]["hidden"]
-            and identity.member_id
-            in {
-                contest["left_check"]["roller_member_id"],
-                contest["right_check"]["roller_member_id"],
-            }
+            if self._can_view(contest["left_check"], identity)
+            and self._can_view(contest["right_check"], identity)
         ]
 
     def resolve_opposed(
@@ -250,6 +241,7 @@ class CheckService:
                         difficulty="regular",
                         bonus_dice=int(check["bonus_dice"]),
                         hidden=bool(check["hidden"]),
+                        visibility=str(check["visibility"]),
                         allow_push=False,
                         roller_member_id=check["roller_member_id"],
                         pc_id=check["pc_id"],
@@ -388,6 +380,8 @@ class CheckService:
         cls._require_kp(identity, str(check["campaign_id"]))
         if identity.session_id != check["session_id"]:
             raise PermissionError("Check belongs to another session")
+        if not cls._can_view(check, identity):
+            raise PermissionError("Check is not visible to this member")
 
     @classmethod
     def _require_visible(
@@ -400,14 +394,27 @@ class CheckService:
         cls._require_campaign(identity, str(check["campaign_id"]))
         if identity.session_id != check["session_id"]:
             raise PermissionError("Check belongs to another session")
-        if identity.role == "kp":
-            return
-        if check["hidden"]:
-            raise PermissionError("Hidden checks are visible only to KP")
-        if check["roller_member_id"] != identity.member_id:
-            raise PermissionError("Players can only access their own checks")
-        if resolving and check["status"] != "requested":
-            raise ValueError("Only a requested check can be resolved")
+        if not cls._can_view(check, identity):
+            raise PermissionError("Check is not visible to this member")
+        if resolving:
+            if identity.role != "kp" and check["roller_member_id"] != identity.member_id:
+                raise PermissionError("Only the assigned player can resolve this check")
+            if check["status"] != "requested":
+                raise ValueError("Only a requested check can be resolved")
+
+    @staticmethod
+    def _can_view(check: dict, identity: AuthenticatedMember) -> bool:
+        visibility = str(check.get("visibility") or (
+            "blind" if check.get("hidden") else "public"
+        ))
+        is_roller = check.get("roller_member_id") == identity.member_id
+        if visibility == "public":
+            return True
+        if visibility == "private":
+            return identity.role == "kp" or is_roller
+        if visibility == "blind":
+            return identity.role == "kp"
+        return False
 
 
 __all__ = [

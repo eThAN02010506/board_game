@@ -405,12 +405,22 @@ class ContextBuilderTests(unittest.TestCase):
                     "visibility": "kp",
                     "required": True,
                 }
+                baseline = ContextBuilder(
+                    connection,
+                    max_context_tokens=10_000,
+                ).build(
+                    campaign_id=campaign["id"],
+                    player_action="我检查门锁。",
+                )
 
                 with self.assertRaisesRegex(
                     ValueError,
                     "Required context source exceeds token budget",
                 ):
-                    ContextBuilder(connection, max_context_tokens=1300).build(
+                    ContextBuilder(
+                        connection,
+                        max_context_tokens=baseline.token_estimate + 250,
+                    ).build(
                         campaign_id=campaign["id"],
                         player_action="我检查门锁。",
                         additional_sources=(required_source,),
@@ -427,7 +437,7 @@ class ContextBuilderTests(unittest.TestCase):
 
                 context = ContextBuilder(
                     connection,
-                    max_context_tokens=2000,
+                    max_context_tokens=baseline.token_estimate + 1_000,
                 ).build(
                     campaign_id=campaign["id"],
                     player_action="我检查门锁。",
@@ -444,7 +454,7 @@ class ContextBuilderTests(unittest.TestCase):
 
                 maximum_action_context = ContextBuilder(
                     connection,
-                    max_context_tokens=8000,
+                    max_context_tokens=12_000,
                 ).build(
                     campaign_id=campaign["id"],
                     player_action="查" * 4000,

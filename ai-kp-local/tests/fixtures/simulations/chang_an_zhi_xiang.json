@@ -60,8 +60,9 @@
       "alias": "train",
       "title": "末班电车",
       "prompt": "2013 年末班电车内部结构图",
-      "locations": ["6号车厢", "5号车厢", "4号车厢", "3号车厢", "2号车厢", "先头车厢"],
+      "locations": ["7号车厢", "6号车厢", "5号车厢", "4号车厢", "3号车厢", "2号车厢", "先头车厢"],
       "routes": [
+        ["7号车厢", "6号车厢"],
         ["6号车厢", "5号车厢"],
         ["5号车厢", "4号车厢"],
         ["4号车厢", "3号车厢"],
@@ -88,12 +89,60 @@
         }
       ]
     },
+    {"action": "move_token", "token_ref": "hero", "to": "7号车厢"},
+    {
+      "action": "character_command",
+      "alias": "san_after_mouth",
+      "investigator_ref": "investigator",
+      "command_id": "chang-an-san-mouth",
+      "command_type": "sanity",
+      "payload": {
+        "sanity_roll": 24,
+        "success_loss": 1,
+        "failure_loss": 4
+      }
+    },
+    {
+      "action": "create_proposal",
+      "alias": "intimidate_mouth",
+      "player_action": "我指着车厢外的巨大口器厉声恐吓，想把它吓走；就算掷出01也要看结果。",
+      "public_narration": "你的声音在残破车厢里回荡，但那道巨大口器没有表现出能理解威胁或产生恐惧的迹象。这个目标不成立，因此不进行恐吓检定。",
+      "kp_notes": "先判定目标可行性再掷骰。01不能赋予神话实体不存在的社会反应，也不能改写模组威胁。",
+      "action_ruling": {
+        "goal": "让巨大口器因恐惧逃走",
+        "method": "恐吓",
+        "target": "7号车厢外正在吞噬列车的巨大口器",
+        "feasibility": "impossible",
+        "resolution": "no_roll",
+        "reason": "目标没有可被人类威胁胁迫的心智表现，原模组也没有它因恐吓退却的依据。",
+        "maximum_effect": "确认普通威胁无法迫使它停止或逃走。",
+        "alternative": "退回6号车厢；或重新声明为制造声音、观察反应等不同目标。"
+      }
+    },
+    {"action": "approve_proposal", "proposal_ref": "intimidate_mouth"},
+    {
+      "action": "assert_equals",
+      "ref": "intimidate_mouth",
+      "path": "action_ruling.resolution",
+      "value": "no_roll"
+    },
+    {"action": "move_token", "token_ref": "hero", "to": "6号车厢"},
     {
       "action": "create_proposal",
       "alias": "note_scene",
       "player_action": "我撕下门上的便签，检查背面。",
       "public_narration": "便签背面留下了关于第三节车厢与钥匙的提示。",
       "kp_notes": "只公开提示，不解释钥匙用途。",
+      "action_ruling": {
+        "goal": "读取便签正反面的内容",
+        "method": "拿下并翻看便签",
+        "target": "6号车厢门上的便签",
+        "feasibility": "possible",
+        "resolution": "automatic",
+        "reason": "便签就在角色面前，正常阅读没有失败风险。",
+        "maximum_effect": "获得便签明确写出的文字，不推断钥匙用途。",
+        "alternative": ""
+      },
       "proposed_facts": [
         {
           "fact_type": "canonical_fact",
@@ -116,11 +165,30 @@
       "status": "revealed",
       "pinned": true
     },
+    {"action": "move_token", "token_ref": "hero", "to": "5号车厢"},
+    {
+      "action": "create_proposal",
+      "alias": "newspaper_scene",
+      "player_action": "我检查报纸的日期和报道。",
+      "public_narration": "报纸日期来自明天，报道的正是这趟末班车。",
+      "kp_notes": "保留梦境真相，不向玩家解释幕后原因。",
+      "action_ruling": {
+        "goal": "确认报纸日期与报道内容",
+        "method": "仔细检查报纸",
+        "target": "5号车厢内的报纸",
+        "feasibility": "possible",
+        "resolution": "automatic",
+        "reason": "本回放代表已经通过图书馆使用或侦查发现异常后的结果阶段。",
+        "maximum_effect": "确认报纸来自明日且报道本次事故，不解释梦境幕后真相。",
+        "alternative": ""
+      }
+    },
+    {"action": "approve_proposal", "proposal_ref": "newspaper_scene"},
     {
       "action": "character_command",
-      "alias": "san_after_omen",
+      "alias": "san_after_newspaper",
       "investigator_ref": "investigator",
-      "command_id": "chang-an-san-omen",
+      "command_id": "chang-an-san-newspaper",
       "command_type": "sanity",
       "payload": {
         "sanity_roll": 88,
@@ -128,15 +196,6 @@
         "failure_loss": 1
       }
     },
-    {"action": "move_token", "token_ref": "hero", "to": "5号车厢"},
-    {
-      "action": "create_proposal",
-      "alias": "newspaper_scene",
-      "player_action": "我检查报纸的日期和报道。",
-      "public_narration": "报纸日期来自明天，报道的正是这趟末班车。",
-      "kp_notes": "保留梦境真相，不向玩家解释幕后原因。"
-    },
-    {"action": "approve_proposal", "proposal_ref": "newspaper_scene"},
     {
       "action": "create_handout",
       "alias": "newspaper_clue",
@@ -154,7 +213,17 @@
       "alias": "conductor_scene",
       "player_action": "我为受伤乘务员急救，并询问袭击者和钥匙。",
       "public_narration": "乘务员恢复意识：怪物依声音追猎；驾驶室与面板钥匙遗失在3号车厢前门附近。",
-      "kp_notes": "急救成功；乘务员仍倾向让列车减速。"
+      "kp_notes": "本条是急救成功后的结果阶段；乘务员仍倾向让列车减速。",
+      "action_ruling": {
+        "goal": "唤醒乘务员并询问袭击者与钥匙",
+        "method": "急救后交谈",
+        "target": "4号车厢内受伤的乘务员",
+        "feasibility": "possible",
+        "resolution": "automatic",
+        "reason": "本回放记录已经完成急救检定后的确定结果；苏醒者能够正常交流。",
+        "maximum_effect": "乘务员苏醒并提供自己知道的信息，不改变其希望列车减速的动机。",
+        "alternative": ""
+      }
     },
     {"action": "approve_proposal", "proposal_ref": "conductor_scene"},
     {
@@ -176,6 +245,16 @@
       "player_action": "我按乘务员指示清理行李并寻找黑包。",
       "public_narration": "你在前门附近找到断带黑包，取得驾驶室与控制面板钥匙。",
       "kp_notes": "钥匙已进入严格事实；之后不允许无理由遗失。",
+      "action_ruling": {
+        "goal": "找到装有两把钥匙的黑包",
+        "method": "按乘务员给出的准确位置清理行李",
+        "target": "3号车厢前门附近的断带黑包",
+        "feasibility": "possible",
+        "resolution": "automatic",
+        "reason": "乘务员已经苏醒并同行提供准确指引，符合模组的自动成功条件。",
+        "maximum_effect": "找到黑包并取得驾驶室与控制面板钥匙。",
+        "alternative": "若乘务员未同行，则改为按位置信息进行带修正的侦查检定。"
+      },
       "proposed_facts": [
         {
           "fact_type": "canonical_fact",
@@ -208,7 +287,7 @@
       "payload": {
         "sanity_roll": 90,
         "success_loss": 1,
-        "failure_loss": 1
+        "failure_loss": 4
       }
     },
     {
@@ -262,7 +341,17 @@
       "alias": "clicker_scene",
       "player_action": "我把手机闹铃丢向车厢后方，趁怪物追声时穿过车厢并关门。",
       "public_narration": "持续铃声引开了循声者，你抵达先头车门并将怪物隔在身后。",
-      "kp_notes": "依据已揭示的声音弱点，合理方案自动成功。"
+      "kp_notes": "依据已揭示的声音弱点，合理方案自动成功。",
+      "action_ruling": {
+        "goal": "引开循声者并安全穿过2号车厢",
+        "method": "把持续鸣响的手机闹铃丢向后方",
+        "target": "依声音追猎的循声者",
+        "feasibility": "possible",
+        "resolution": "automatic",
+        "reason": "方法直接利用已经确认的声音弱点，并提供持续且位置明确的声源。",
+        "maximum_effect": "循声者被引向声源，调查员获得穿过车厢并关门的窗口。",
+        "alternative": ""
+      }
     },
     {"action": "approve_proposal", "proposal_ref": "clicker_scene"},
     {"action": "move_token", "token_ref": "hero", "to": "先头车厢"},
@@ -272,6 +361,16 @@
       "player_action": "我用两把钥匙启动面板，把右侧控制杆推到最大加速。",
       "public_narration": "列车冲入白光；你在现实的终点站醒来，成功生还。",
       "kp_notes": "结局 A；结算生还奖励时另开角色成长事务。",
+      "action_ruling": {
+        "goal": "让列车加速并触发A结局",
+        "method": "使用两把钥匙开启驾驶室和面板，再把右侧控制杆向下推至最大",
+        "target": "先头车厢控制面板",
+        "feasibility": "possible",
+        "resolution": "automatic",
+        "reason": "角色持有两把钥匙并已到达先头车厢，操作符合模组给出的控制逻辑。",
+        "maximum_effect": "列车加速并进入A结局；结局奖励另行结算。",
+        "alternative": ""
+      },
       "proposed_facts": [
         {
           "fact_type": "canonical_fact",
@@ -292,7 +391,7 @@
       "action": "assert_equals",
       "ref": "investigator",
       "path": "state.current_san",
-      "value": 58
+      "value": 54
     },
     {"action": "capture_player_handouts", "alias": "player_clues"},
     {

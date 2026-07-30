@@ -13,6 +13,16 @@ def payload() -> dict:
     return {
         "public_narration": "你在档案柜后发现了一张撕碎的收据。",
         "kp_notes": "检定结果已验证。",
+        "action_ruling": {
+            "goal": "找到档案柜附近的隐藏线索",
+            "method": "已经完成的侦查检定",
+            "target": "档案柜",
+            "feasibility": "possible",
+            "resolution": "automatic",
+            "reason": "已验证检定结果支持发现线索。",
+            "maximum_effect": "发现一张撕碎的收据。",
+            "alternative": "",
+        },
         "proposed_checks": [],
         "proposed_events": [
             {

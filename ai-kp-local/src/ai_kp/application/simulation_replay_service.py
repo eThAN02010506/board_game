@@ -31,7 +31,7 @@ from ai_kp.application.turn_service import ManualProposalCommand, TurnService
 from ai_kp.evaluation.simulated_campaign import run_simulation
 from ai_kp.observability import operational_telemetry
 
-SERVICE_RUNNER_VERSION = "product-service-replay.v3"
+SERVICE_RUNNER_VERSION = "product-service-replay.v4"
 
 
 def _hash(value: Any) -> str:
@@ -345,6 +345,7 @@ class SimulationReplayService:
                 player_action=str(raw.get("player_action") or "模拟行动"),
                 public_narration=str(raw.get("public_narration") or "模拟反馈"),
                 kp_notes=str(raw.get("kp_notes") or ""),
+                action_ruling=raw.get("action_ruling"),
                 proposed_facts=tuple(raw.get("proposed_facts") or ()),
                 source_model="simulation-service-replay",
             ),
@@ -462,6 +463,7 @@ class SimulationReplayService:
         result: dict[str, Any],
     ) -> list[dict[str, str]]:
         if action == "create_proposal":
+            ruling = result.get("action_ruling")
             entries = [
                 {
                     "actor": "player",
@@ -474,6 +476,29 @@ class SimulationReplayService:
                     "content": str(result["public_narration"]),
                 },
             ]
+            if isinstance(ruling, dict):
+                feasibility = {
+                    "possible": "可行",
+                    "partial": "部分可行",
+                    "impossible": "目标不可行",
+                }.get(str(ruling.get("feasibility")), str(ruling.get("feasibility")))
+                resolution = {
+                    "automatic": "自动结算",
+                    "check": "需要检定",
+                    "opposed": "需要对抗",
+                    "no_roll": "不掷骰",
+                }.get(str(ruling.get("resolution")), str(ruling.get("resolution")))
+                entries.append(
+                    {
+                        "actor": "rules_engine",
+                        "audience": "table",
+                        "content": (
+                            f"行动裁定：{feasibility} · "
+                            f"{resolution}；上限："
+                            f"{ruling['maximum_effect']}"
+                        ),
+                    }
+                )
             notes = str(result.get("kp_notes") or "").strip()
             if notes:
                 entries.append(
