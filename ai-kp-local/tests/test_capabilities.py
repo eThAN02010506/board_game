@@ -30,6 +30,7 @@ class CapabilityPlaceholderTests(unittest.TestCase):
         expected = {
             "module_library",
             "module_document_import",
+            "scene_director",
             "world_expansion",
             "party_route_planning",
             "check_resolution",

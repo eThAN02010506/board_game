@@ -16,7 +16,7 @@
 - 在游玩页同时查看本人角色卡、队友公开摘要、中央地图与右侧行动/聊天区域。
 - 生成并持久保存 MapSpec、时代化 SVG/图片候选、路线、棋子和移动历史；重启后可恢复。
 - 导入 PDF、DOC 或 DOCX 格式的 KP 本，保留正文、表格、图片、页码/段落来源与剧透边界。
-- 显式选择当前活动模组，并把场景、已解锁剧透和有限运行态送入 AI KP 上下文。
+- 显式选择当前活动模组，用场景导演记录节奏、地点、线索/锚点状态和审计；玩家意图先做当前剧透范围内的只读预检，再决定引用原文、暂停或提出世界补全。
 - 记录事件、主要/支线记忆、NPC 关系和世界时间，并筛选跨本 NPC 再出现候选。
 - 用 SQLite 原文页块 + MiniRAG 隔离索引保存规则书知识；JSON 规则对象仍需来源校验、
   KP golden case 审核和确定性引擎验证。
@@ -246,6 +246,7 @@ real-case；脚本不会打印凭据：
 - [模型配置与本机 MLX](docs/MODEL_CONFIGURATION.md)
 - [地图生成、缓存与发布](docs/MAP_GENERATION.md)
 - [PDF/Word 模组导入](docs/MODULE_DOCUMENT_IMPORT.md)
+- [场景导演与只读意图分析](docs/SCENE_DIRECTOR.md)
 - [规则书双存储与三层校验](docs/RULEBOOK_KNOWLEDGE.md)
 - [规则系统边界](docs/RULESET_BOUNDARY.md)
 - [本地规则来源](docs/RULES_REFERENCE.md)

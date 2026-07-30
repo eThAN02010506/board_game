@@ -52,6 +52,8 @@ export type ModuleRecord = {
 };
 
 export type ModuleRunStatus = "active" | "paused" | "completed";
+export type ModulePlayPace = "freeform" | "structured" | "downtime";
+export type ModuleRuntimeEntityStatus = "hidden" | "available" | "discovered" | "resolved";
 
 export type ModuleRun = {
   id: string;
@@ -61,6 +63,10 @@ export type ModuleRun = {
   module_source_hash: string | null;
   status: ModuleRunStatus;
   current_scene_key: string | null;
+  current_scene_title: string | null;
+  play_pace: ModulePlayPace;
+  current_location_entity_id: string | null;
+  scene_started_world_time: string | null;
   active_spoiler_tags: string[];
   state: Record<string, unknown>;
   version: number;
@@ -68,6 +74,97 @@ export type ModuleRun = {
   started_at: string;
   updated_at: string;
   completed_at: string | null;
+};
+
+export type ModuleRunEntityState = {
+  run_id: string;
+  entity_id: string;
+  entity_type: ModuleEntity["entity_type"];
+  name: string;
+  description: string;
+  visibility: string;
+  spoiler_tag: string | null;
+  status: ModuleRuntimeEntityStatus;
+  version: number;
+  updated_by_member_id: string | null;
+  updated_at: string | null;
+};
+
+export type ModuleRunSceneEvent = {
+  id: string;
+  run_id: string;
+  from_scene_key: string | null;
+  to_scene_key: string;
+  from_scene_title: string | null;
+  to_scene_title: string;
+  from_play_pace: ModulePlayPace | null;
+  to_play_pace: ModulePlayPace;
+  from_location_entity_id: string | null;
+  to_location_entity_id: string | null;
+  world_time: string | null;
+  note: string;
+  created_at: string;
+};
+
+export type ModuleRunEntityStateEvent = {
+  id: string;
+  run_id: string;
+  entity_id: string;
+  entity_name: string;
+  entity_type: ModuleEntity["entity_type"];
+  from_status: ModuleRuntimeEntityStatus;
+  to_status: ModuleRuntimeEntityStatus;
+  note: string;
+  created_at: string;
+};
+
+export type ModuleRunDirectorState = {
+  run: ModuleRun;
+  entity_states: ModuleRunEntityState[];
+  scene_events: ModuleRunSceneEvent[];
+  entity_state_events: ModuleRunEntityStateEvent[];
+};
+
+export type SceneTransitionInput = {
+  expected_version: number;
+  scene_key: string;
+  scene_title: string;
+  play_pace: ModulePlayPace;
+  location_entity_id?: string | null;
+  world_time?: string | null;
+  note?: string;
+};
+
+export type DirectorAnalysis = {
+  run_id: string;
+  module_id: string;
+  module_title: string;
+  player_intent: string;
+  scene: {
+    key: string | null;
+    title: string | null;
+    play_pace: ModulePlayPace;
+    location_entity_id: string | null;
+    started_world_time: string | null;
+  };
+  decision: "needs_scene" | "answer_from_canon" | "blocked_by_spoiler" | "world_gap";
+  recommended_action:
+    | "pause_for_human_kp"
+    | "narrate_existing_world"
+    | "propose_world_expansion";
+  reasons: string[];
+  sources: Array<{
+    source_type: string;
+    source_id: string;
+    title: string;
+    text: string;
+    source_locator: string | null;
+  }>;
+  deferred_source_count: number;
+  entity_states: ModuleRunEntityState[];
+  reachability: ModuleReachabilityReport & { evaluated: boolean };
+  unreachable_anchor_count: number;
+  writes_performed: false;
 };
 
 export type ModuleRunStart = {

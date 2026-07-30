@@ -192,6 +192,8 @@ class ModuleGraphStore(Protocol):
 
 
 class ModuleRunStore(Protocol):
+    def get_campaign_module_run(self, run_id: str) -> dict: ...
+
     def start_campaign_module_run(
         self,
         *,
@@ -207,6 +209,53 @@ class ModuleRunStore(Protocol):
         self,
         run_id: str,
         changes: dict[str, Any],
+    ) -> dict: ...
+
+    def transition_module_run_scene(
+        self,
+        run_id: str,
+        *,
+        expected_version: int,
+        scene_key: str,
+        scene_title: str,
+        play_pace: str,
+        location_entity_id: str | None,
+        world_time: str | None,
+        note: str,
+        member_id: str | None,
+    ) -> dict: ...
+
+    def list_module_run_scene_events(self, run_id: str) -> list[dict]: ...
+
+    def set_module_run_entity_state(
+        self,
+        run_id: str,
+        entity_id: str,
+        *,
+        expected_version: int,
+        status: str,
+        note: str,
+        member_id: str | None,
+    ) -> dict: ...
+
+    def list_module_run_entity_states(self, run_id: str) -> list[dict]: ...
+
+    def list_module_run_entity_state_events(self, run_id: str) -> list[dict]: ...
+
+    def search_module(
+        self,
+        module_id: str,
+        query: str,
+        *,
+        allowed_visibility: tuple[str, ...],
+        spoiler_tags: tuple[str, ...] | None,
+        limit: int = 12,
+    ) -> list[dict]: ...
+
+    def module_graph_reachability(
+        self,
+        module_id: str,
+        entry_entity_ids: tuple[str, ...],
     ) -> dict: ...
 
 

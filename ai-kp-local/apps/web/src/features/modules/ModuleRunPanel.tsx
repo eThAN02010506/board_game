@@ -15,6 +15,7 @@ import {
   updateModuleRun
 } from "../../api/client";
 import type { ModuleRecord, ModuleRun, ModuleRunUpdate } from "../../api/types";
+import { SceneDirectorPanel } from "./SceneDirectorPanel";
 
 type Props = {
   campaignId: string;
@@ -337,6 +338,17 @@ export function ModuleRunPanel({
     );
   }
 
+  function acceptDirectorRun(updated: ModuleRun) {
+    setCurrent(updated);
+    setRuns((existing) => existing.map(
+      (item) => item.id === updated.id ? updated : item
+    ));
+    const currentDraft = draftRef.current;
+    if (!currentDraft.dirty && currentDraft.runId === updated.id) {
+      replaceDraft(draftFromRun(updated));
+    }
+  }
+
   const form = (
     <form
       className="module-run-form"
@@ -413,7 +425,18 @@ export function ModuleRunPanel({
               {current.module_source_hash?.slice(0, 12) ?? "内部文本"}
             </strong></div>
           </div>
-          {form}
+          <SceneDirectorPanel
+            key={current.id}
+            onRunChanged={acceptDirectorRun}
+            run={current}
+          />
+          <details className="module-run-advanced">
+            <summary>高级运行范围与兼容状态</summary>
+            <p>
+              剧透标签决定导演可以检索的模组范围；JSON 仅用于尚未结构化的临时 KP 状态。
+            </p>
+            {form}
+          </details>
           <div className="button-row module-run-status-actions">
             <button
               disabled={busy}

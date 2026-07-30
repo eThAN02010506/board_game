@@ -29,6 +29,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0022_knowledge_extraction_attempts,
     v0023_session_assignment_uniqueness,
     v0024_rule_source_ruleset_hash,
+    v0025_scene_director_runtime,
 )
 
 
@@ -157,6 +158,11 @@ MIGRATIONS = (
         v0024_rule_source_ruleset_hash.NAME,
         v0024_rule_source_ruleset_hash.migrate,
         requires_foreign_keys_off=True,
+    ),
+    Migration(
+        v0025_scene_director_runtime.VERSION,
+        v0025_scene_director_runtime.NAME,
+        v0025_scene_director_runtime.migrate,
     ),
 )
 

@@ -234,6 +234,11 @@ CREATE TABLE IF NOT EXISTS campaign_module_runs (
   status TEXT NOT NULL DEFAULT 'active'
     CHECK (status IN ('active', 'paused', 'completed')),
   current_scene_key TEXT,
+  current_scene_title TEXT,
+  play_pace TEXT NOT NULL DEFAULT 'freeform'
+    CHECK (play_pace IN ('freeform', 'structured', 'downtime')),
+  current_location_entity_id TEXT REFERENCES module_entities(id) ON DELETE SET NULL,
+  scene_started_world_time TEXT,
   active_spoiler_tags_json TEXT NOT NULL DEFAULT '[]',
   state_json TEXT NOT NULL DEFAULT '{}',
   version INTEGER NOT NULL DEFAULT 0,
@@ -353,6 +358,48 @@ CREATE TABLE IF NOT EXISTS module_entity_relations (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CHECK (source_entity_id <> target_entity_id),
   UNIQUE(module_id, source_entity_id, predicate, target_entity_id)
+);
+
+CREATE TABLE IF NOT EXISTS module_run_scene_events (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES campaign_module_runs(id) ON DELETE CASCADE,
+  from_scene_key TEXT,
+  to_scene_key TEXT NOT NULL,
+  from_scene_title TEXT,
+  to_scene_title TEXT NOT NULL,
+  from_play_pace TEXT,
+  to_play_pace TEXT NOT NULL
+    CHECK (to_play_pace IN ('freeform', 'structured', 'downtime')),
+  from_location_entity_id TEXT REFERENCES module_entities(id) ON DELETE SET NULL,
+  to_location_entity_id TEXT REFERENCES module_entities(id) ON DELETE SET NULL,
+  world_time TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  changed_by_member_id TEXT REFERENCES session_members(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS module_run_entity_states (
+  run_id TEXT NOT NULL REFERENCES campaign_module_runs(id) ON DELETE CASCADE,
+  entity_id TEXT NOT NULL REFERENCES module_entities(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'hidden'
+    CHECK (status IN ('hidden', 'available', 'discovered', 'resolved')),
+  version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+  updated_by_member_id TEXT REFERENCES session_members(id) ON DELETE SET NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (run_id, entity_id)
+);
+
+CREATE TABLE IF NOT EXISTS module_run_entity_state_events (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES campaign_module_runs(id) ON DELETE CASCADE,
+  entity_id TEXT NOT NULL REFERENCES module_entities(id) ON DELETE CASCADE,
+  from_status TEXT NOT NULL
+    CHECK (from_status IN ('hidden', 'available', 'discovered', 'resolved')),
+  to_status TEXT NOT NULL
+    CHECK (to_status IN ('hidden', 'available', 'discovered', 'resolved')),
+  note TEXT NOT NULL DEFAULT '',
+  changed_by_member_id TEXT REFERENCES session_members(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS maps (
@@ -717,6 +764,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_module_runs_one_active
   WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_campaign_module_runs_campaign_started
   ON campaign_module_runs(campaign_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_module_run_scene_events_run_created
+  ON module_run_scene_events(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_module_run_entity_states_run_status
+  ON module_run_entity_states(run_id, status, entity_id);
+CREATE INDEX IF NOT EXISTS idx_module_run_entity_events_run_created
+  ON module_run_entity_state_events(run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_module_assets_module
   ON module_assets(module_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_module_assets_hash

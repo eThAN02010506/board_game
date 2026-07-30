@@ -1,6 +1,10 @@
 import type {
   Capability,
   ModuleRun,
+  ModuleRunDirectorState,
+  ModuleRuntimeEntityStatus,
+  SceneTransitionInput,
+  DirectorAnalysis,
   ModuleRunStart,
   ModuleRunUpdate,
   RuleReviewCandidate,
@@ -202,6 +206,58 @@ export function updateModuleRun(
   return requestJson<ModuleRun>(
     `/module-runs/${encodeURIComponent(runId)}`,
     { method: "PATCH", body: JSON.stringify(payload) }
+  );
+}
+
+export function getModuleRunDirectorState(
+  runId: string
+): Promise<ModuleRunDirectorState> {
+  return requestJson<ModuleRunDirectorState>(
+    `/module-runs/${encodeURIComponent(runId)}/director-state`
+  );
+}
+
+export function transitionModuleRunScene(
+  runId: string,
+  payload: SceneTransitionInput
+): Promise<{ run: ModuleRun; event: ModuleRunDirectorState["scene_events"][number] }> {
+  return requestJson(
+    `/module-runs/${encodeURIComponent(runId)}/scene-transitions`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function updateModuleRunEntityState(
+  runId: string,
+  entityId: string,
+  payload: {
+    expected_version: number;
+    status: ModuleRuntimeEntityStatus;
+    note?: string;
+  }
+): Promise<{
+  run: ModuleRun;
+  entity_state: ModuleRunDirectorState["entity_states"][number];
+  event: ModuleRunDirectorState["entity_state_events"][number] | null;
+}> {
+  return requestJson(
+    `/module-runs/${encodeURIComponent(runId)}/entities/${
+      encodeURIComponent(entityId)
+    }/state`,
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
+}
+
+export function analyzeModuleRunIntent(
+  runId: string,
+  playerIntent: string
+): Promise<DirectorAnalysis> {
+  return requestJson<DirectorAnalysis>(
+    `/module-runs/${encodeURIComponent(runId)}/director/analyze`,
+    {
+      method: "POST",
+      body: JSON.stringify({ player_intent: playerIntent })
+    }
   );
 }
 

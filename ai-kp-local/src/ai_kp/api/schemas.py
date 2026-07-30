@@ -320,6 +320,26 @@ class ModuleRunUpdate(BaseModel):
         return self
 
 
+class ModuleSceneTransition(BaseModel):
+    expected_version: int = Field(ge=0)
+    scene_key: str = Field(min_length=1, max_length=160)
+    scene_title: str = Field(min_length=1, max_length=300)
+    play_pace: Literal["freeform", "structured", "downtime"] = "freeform"
+    location_entity_id: str | None = Field(default=None, max_length=160)
+    world_time: str | None = Field(default=None, max_length=160)
+    note: str = Field(default="", max_length=2000)
+
+
+class ModuleRunEntityStateUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    status: Literal["hidden", "available", "discovered", "resolved"]
+    note: str = Field(default="", max_length=2000)
+
+
+class DirectorAnalysisRequest(BaseModel):
+    player_intent: str = Field(min_length=1, max_length=1000)
+
+
 class ModuleReachabilityCheck(BaseModel):
     entry_entity_ids: list[str] = Field(min_length=1, max_length=100)
 

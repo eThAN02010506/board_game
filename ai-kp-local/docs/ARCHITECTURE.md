@@ -122,9 +122,13 @@ This catalogue is the single source of truth for delivery status, phase, depende
   deterministic diagnostic and never mutates module source or world facts.
   content-addressed storage deduplicates identical bytes outside SQLite.
 - `campaign_module_runs` is the campaign's explicit playthrough cursor. A partial unique index
-  permits at most one active run per campaign. Scene, unlocked spoiler tags and a bounded 4 KiB
-  state snapshot use optimistic `version` checks so two KP clients cannot silently overwrite
-  one another.
+  permits at most one active run per campaign. Scene, play pace, source-linked location, unlocked
+  spoiler tags and a bounded 4 KiB state snapshot use optimistic `version` checks so two KP
+  clients cannot silently overwrite one another. `module_run_scene_events` keeps the immutable
+  scene-transition audit; `module_run_entity_states` projects per-playthrough clue/anchor state,
+  while `module_run_entity_state_events` preserves every correction. Director intent analysis is
+  read-only and may only return current-spoiler source text; all mutations remain KP-only. See
+  [`SCENE_DIRECTOR.md`](SCENE_DIRECTOR.md).
 - Module Canon/Anchor remains source-linked knowledge; generated world completion enters the
   existing proposal boundary and only becomes an append-only runtime fact after confirmation.
   See [`WORLD_EXPANSION.md`](WORLD_EXPANSION.md).

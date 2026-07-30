@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  analyzeModuleRunIntent,
   getCurrentModuleRun,
+  getModuleRunDirectorState,
   listModuleRuns,
   listRuleReviewCandidates,
   requestJson,
   reviewRuleCandidate,
   startModuleRun,
+  transitionModuleRunScene,
+  updateModuleRunEntityState,
   updateModuleRun
 } from "./client";
 
@@ -79,6 +83,18 @@ describe("API client", () => {
       expected_version: 7,
       status: "paused"
     });
+    await getModuleRunDirectorState("run/1");
+    await transitionModuleRunScene("run/1", {
+      expected_version: 7,
+      scene_key: "warehouse",
+      scene_title: "旧仓库",
+      play_pace: "freeform"
+    });
+    await updateModuleRunEntityState("run/1", "clue/1", {
+      expected_version: 8,
+      status: "discovered"
+    });
+    await analyzeModuleRunIntent("run/1", "检查照片");
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/campaigns/camp%2F1/module-runs?limit=10&offset=2"
@@ -94,6 +110,25 @@ describe("API client", () => {
     expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({
       method: "PATCH",
       body: JSON.stringify({ expected_version: 7, status: "paused" })
+    });
+    expect(fetchMock.mock.calls[4]?.[0]).toBe(
+      "/api/module-runs/run%2F1/director-state"
+    );
+    expect(fetchMock.mock.calls[5]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        expected_version: 7,
+        scene_key: "warehouse",
+        scene_title: "旧仓库",
+        play_pace: "freeform"
+      })
+    });
+    expect(fetchMock.mock.calls[6]?.[0]).toBe(
+      "/api/module-runs/run%2F1/entities/clue%2F1/state"
+    );
+    expect(fetchMock.mock.calls[7]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ player_intent: "检查照片" })
     });
   });
 

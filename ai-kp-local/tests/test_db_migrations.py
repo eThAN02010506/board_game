@@ -620,7 +620,7 @@ def test_rule_source_ruleset_hash_upgrade_preserves_all_dependent_rows() -> None
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert connection.execute(
             "SELECT MAX(version) FROM schema_migrations"
-        ).fetchone()[0] == 24
+        ).fetchone()[0] == LATEST_SCHEMA_VERSION
         source = connection.execute(
             "SELECT * FROM rule_sources WHERE id = 'rulesource_legacy'"
         ).fetchone()

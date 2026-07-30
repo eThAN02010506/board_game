@@ -6,9 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ai_kp.api.main import create_app
+from ai_kp.application.module_graph_service import ModuleGraphService
+from ai_kp.application.module_knowledge_service import ModuleKnowledgeService
+from ai_kp.application.module_run_service import ModuleRunService
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.schema import connect, init_db
+from ai_kp.platform.modules.graph import ModuleEntityCreate, ModuleRelationCreate
 from ai_kp.platform.modules.ingestion import ModuleChunk
 
 
@@ -131,6 +135,177 @@ def test_module_run_rejects_cross_campaign_module(tmp_path: Path) -> None:
         connection.close()
 
 
+def test_scene_director_tracks_scene_clues_and_read_only_gap_analysis(
+    tmp_path: Path,
+) -> None:
+    connection = connect(tmp_path / "scene-director.sqlite3")
+    try:
+        init_db(connection)
+        repo = Repository(connection)
+        campaign = repo.create_campaign("导演测试")
+        module = repo.create_module(
+            campaign["id"],
+            "雾港疑云",
+            [
+                ModuleChunk(
+                    title="仓库",
+                    text="仓库照片指向灯塔航海日志。",
+                    visibility="kp",
+                    spoiler_tag="act-1",
+                    scene_key="warehouse",
+                    order_index=0,
+                ),
+                ModuleChunk(
+                    title="终幕",
+                    text="地下祭坛藏在灯塔之下。",
+                    visibility="secret",
+                    spoiler_tag="ending",
+                    scene_key="ending",
+                    order_index=1,
+                ),
+            ],
+        )
+        chunks = repo.list_module_chunks(
+            module["id"],
+            allowed_visibility=("kp", "secret"),
+            spoiler_tags=None,
+        )
+        warehouse_chunk = next(item for item in chunks if item["scene_key"] == "warehouse")
+        candidate = ModuleKnowledgeService(repo).create_manual_candidate(
+            module["id"],
+            {
+                "kind": "module_anchor",
+                "title": "仓库调查",
+                "statement": "仓库、仓库照片与航海日志形成调查路径。",
+                "visibility": "kp",
+                "spoiler_tag": "act-1",
+                "citations": [
+                    {
+                        "chunk_id": warehouse_chunk["id"],
+                        "evidence_text": "仓库照片指向灯塔航海日志。",
+                    }
+                ],
+            },
+        )
+        repo.review_module_knowledge_candidate(
+            candidate["id"],
+            decision="approved",
+            member_id=None,
+            note=None,
+        )
+        graph = ModuleGraphService(repo)
+
+        def entity(entity_type: str, name: str) -> dict:
+            return graph.create_entity(
+                module["id"],
+                ModuleEntityCreate(
+                    entity_type=entity_type,
+                    name=name,
+                    visibility="kp",
+                    spoiler_tag="act-1",
+                    source_candidate_id=candidate["id"],
+                ),
+                member_id=None,
+            )
+
+        warehouse = entity("location", "仓库")
+        photo = entity("clue", "仓库照片")
+        log = entity("anchor", "航海日志")
+        for source, predicate, target in (
+            (warehouse, "leads_to", photo),
+            (photo, "reveals", log),
+        ):
+            graph.create_relation(
+                module["id"],
+                ModuleRelationCreate(
+                    source_entity_id=source["id"],
+                    predicate=predicate,
+                    target_entity_id=target["id"],
+                    visibility="kp",
+                    spoiler_tag="act-1",
+                    source_candidate_id=candidate["id"],
+                ),
+                member_id=None,
+            )
+        run = repo.start_campaign_module_run(
+            campaign_id=campaign["id"],
+            module_id=module["id"],
+            current_scene_key=None,
+            active_spoiler_tags=["act-1"],
+            state={},
+            started_by_member_id=None,
+        )
+        transitioned = repo.transition_module_run_scene(
+            run["id"],
+            expected_version=run["version"],
+            scene_key="warehouse",
+            scene_title="旧仓库",
+            play_pace="freeform",
+            location_entity_id=warehouse["id"],
+            world_time="1928-10-03 21:00",
+            note="调查员抵达仓库。",
+            member_id=None,
+        )
+        assert transitioned["run"]["current_scene_title"] == "旧仓库"
+        assert transitioned["run"]["current_location_entity_id"] == warehouse["id"]
+        assert transitioned["event"]["from_scene_key"] is None
+        with pytest.raises(ValueError, match="Module run changed"):
+            repo.transition_module_run_scene(
+                run["id"],
+                expected_version=run["version"],
+                scene_key="stale-scene",
+                scene_title="过期场景",
+                play_pace="freeform",
+                location_entity_id=None,
+                world_time=None,
+                note="",
+                member_id=None,
+            )
+        assert len(repo.list_module_run_scene_events(run["id"])) == 1
+        available = repo.set_module_run_entity_state(
+            run["id"],
+            photo["id"],
+            expected_version=transitioned["run"]["version"],
+            status="available",
+            note="进入仓库后可以调查照片。",
+            member_id=None,
+        )
+        discovered = repo.set_module_run_entity_state(
+            run["id"],
+            photo["id"],
+            expected_version=available["run"]["version"],
+            status="discovered",
+            note="调查员检查了照片。",
+            member_id=None,
+        )
+        assert discovered["entity_state"]["status"] == "discovered"
+        assert [
+            item["to_status"]
+            for item in repo.list_module_run_entity_state_events(run["id"])
+        ] == ["available", "discovered"]
+
+        service = ModuleRunService(repo)
+        before_version = discovered["run"]["version"]
+        canon = service.analyze(run["id"], "我检查仓库照片")
+        spoiler = service.analyze(run["id"], "我寻找地下祭坛")
+        gap = service.analyze(run["id"], "我去找镇上的警察局")
+        assert canon["decision"] == "answer_from_canon"
+        assert canon["sources"]
+        assert spoiler["decision"] == "blocked_by_spoiler"
+        assert spoiler["sources"] == []
+        assert spoiler["deferred_source_count"] > 0
+        assert gap["decision"] == "world_gap"
+        assert gap["recommended_action"] == "propose_world_expansion"
+        assert all(
+            result["writes_performed"] is False
+            for result in (canon, spoiler, gap)
+        )
+        assert repo.get_campaign_module_run(run["id"])["version"] == before_version
+        assert canon["reachability"]["evaluated"] is True
+    finally:
+        connection.close()
+
+
 def test_module_run_api_is_kp_only_and_rejects_empty_or_null_updates(
     tmp_path: Path,
 ) -> None:
@@ -192,6 +367,62 @@ def test_module_run_api_is_kp_only_and_rejects_empty_or_null_updates(
             f"/campaigns/{campaign['id']}/module-runs/current",
             headers=kp_headers,
         ).json()["id"] == run["id"]
+        assert client.get(
+            f"/module-runs/{run['id']}/director-state",
+            headers=player_headers,
+        ).status_code == 403
+        assert client.post(
+            f"/module-runs/{run['id']}/scene-transitions",
+            headers=player_headers,
+            json={
+                "expected_version": run["version"],
+                "scene_key": "warehouse",
+                "scene_title": "旧仓库",
+                "play_pace": "freeform",
+            },
+        ).status_code == 403
+        assert client.post(
+            f"/module-runs/{run['id']}/director/analyze",
+            headers=player_headers,
+            json={"player_intent": "检查仓库"},
+        ).status_code == 403
+        assert client.patch(
+            f"/module-runs/{run['id']}/entities/not-an-entity/state",
+            headers=player_headers,
+            json={
+                "expected_version": run["version"],
+                "status": "discovered",
+            },
+        ).status_code == 403
+        scene_transition = client.post(
+            f"/module-runs/{run['id']}/scene-transitions",
+            headers=kp_headers,
+            json={
+                "expected_version": run["version"],
+                "scene_key": "warehouse",
+                "scene_title": "旧仓库",
+                "play_pace": "freeform",
+                "world_time": "1928-10-03 21:00",
+                "note": "调查开始",
+            },
+        )
+        assert scene_transition.status_code == 200
+        run = scene_transition.json()["run"]
+        assert run["current_scene_title"] == "旧仓库"
+        director_state = client.get(
+            f"/module-runs/{run['id']}/director-state",
+            headers=kp_headers,
+        )
+        assert director_state.status_code == 200
+        assert director_state.json()["scene_events"][0]["to_scene_key"] == "warehouse"
+        analysis = client.post(
+            f"/module-runs/{run['id']}/director/analyze",
+            headers=kp_headers,
+            json={"player_intent": "我检查仓库里的照片"},
+        )
+        assert analysis.status_code == 200
+        assert analysis.json()["writes_performed"] is False
+        assert analysis.json()["decision"] == "answer_from_canon"
         assert client.patch(
             f"/module-runs/{run['id']}",
             headers=player_headers,

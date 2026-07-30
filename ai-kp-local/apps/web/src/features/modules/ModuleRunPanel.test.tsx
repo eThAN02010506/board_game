@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   getCurrentModuleRun,
+  getModuleRunDirectorState,
   listModuleRuns,
   startModuleRun,
   updateModuleRun
@@ -17,6 +18,7 @@ vi.mock("../../api/client", async (importOriginal) => {
   return {
     ...actual,
     getCurrentModuleRun: vi.fn(),
+    getModuleRunDirectorState: vi.fn(),
     listModuleRuns: vi.fn(),
     startModuleRun: vi.fn(),
     updateModuleRun: vi.fn()
@@ -56,6 +58,10 @@ const run: ModuleRun = {
   module_source_hash: "a".repeat(64),
   status: "active",
   current_scene_key: "仓库",
+  current_scene_title: "仓库",
+  play_pace: "freeform",
+  current_location_entity_id: null,
+  scene_started_world_time: null,
   active_spoiler_tags: ["act-1"],
   state: { clock: 1 },
   version: 4,
@@ -71,7 +77,21 @@ describe("ModuleRunPanel", () => {
     vi.mocked(getCurrentModuleRun).mockResolvedValue(run);
     vi.mocked(startModuleRun).mockResolvedValue(run);
     vi.mocked(updateModuleRun).mockResolvedValue({ ...run, version: 5 });
+    vi.mocked(getModuleRunDirectorState).mockResolvedValue({
+      run,
+      entity_states: [],
+      scene_events: [],
+      entity_state_events: []
+    });
   });
+
+  async function editLegacyScene(
+    user: ReturnType<typeof userEvent.setup>
+  ) {
+    await screen.findByText("高级运行范围与兼容状态");
+    await user.click(screen.getByText("高级运行范围与兼容状态"));
+    return screen.getByLabelText("当前场景");
+  }
 
   it("saves the current KP run with its expected version", async () => {
     const user = userEvent.setup();
@@ -83,7 +103,7 @@ describe("ModuleRunPanel", () => {
       />
     );
 
-    const scene = await screen.findByDisplayValue("仓库");
+    const scene = await editLegacyScene(user);
     await user.clear(scene);
     await user.type(scene, "地下室");
     await user.click(screen.getByRole("button", { name: "保存运行进度" }));
@@ -120,11 +140,12 @@ describe("ModuleRunPanel", () => {
       />
     );
 
-    await screen.findByDisplayValue("仓库");
+    await screen.findByRole("heading", { name: "场景导演" });
     await user.click(screen.getByRole("button", { name: "暂停运行" }));
 
     expect(await screen.findByText(/已重新载入当前状态/)).toBeVisible();
-    expect(screen.getByDisplayValue("钟楼")).toBeVisible();
+    await editLegacyScene(user);
+    expect(screen.getByLabelText("当前场景")).toHaveValue("钟楼");
     expect(getCurrentModuleRun).toHaveBeenCalledTimes(2);
   });
 
@@ -149,13 +170,13 @@ describe("ModuleRunPanel", () => {
       />
     );
 
-    const scene = await screen.findByDisplayValue("仓库");
+    const scene = await editLegacyScene(user);
     await user.clear(scene);
     await user.type(scene, "地下室");
     await user.click(screen.getByRole("button", { name: "保存运行进度" }));
 
     expect(await screen.findByText(/保留本地草稿/)).toBeVisible();
-    expect(screen.getByDisplayValue("地下室")).toBeVisible();
+    expect(screen.getByLabelText("当前场景")).toHaveValue("地下室");
     expect(screen.getByText("版本").closest("div")).toHaveTextContent("5");
 
     await user.click(screen.getByRole("button", { name: "保存运行进度" }));
@@ -187,13 +208,13 @@ describe("ModuleRunPanel", () => {
       />
     );
 
-    const scene = await screen.findByDisplayValue("仓库");
+    const scene = await editLegacyScene(user);
     await user.clear(scene);
     await user.type(scene, "地下室");
     await user.click(screen.getByRole("button", { name: "刷新模组运行" }));
 
     expect(await screen.findByText(/本地未保存草稿已保留/)).toBeVisible();
-    expect(screen.getByDisplayValue("地下室")).toBeVisible();
+    expect(screen.getByLabelText("当前场景")).toHaveValue("地下室");
     expect(screen.getByText("版本").closest("div")).toHaveTextContent("5");
   });
 
@@ -218,7 +239,7 @@ describe("ModuleRunPanel", () => {
       />
     );
 
-    const scene = await screen.findByDisplayValue("仓库");
+    const scene = await editLegacyScene(user);
     await user.clear(scene);
     await user.type(scene, "地下室");
     await user.click(screen.getByRole("button", { name: "保存运行进度" }));
@@ -243,7 +264,7 @@ describe("ModuleRunPanel", () => {
       />
     );
 
-    await screen.findByDisplayValue("仓库");
+    await screen.findByRole("heading", { name: "场景导演" });
     await user.click(screen.getByRole("button", { name: "暂停运行" }));
 
     expect(await screen.findByText("数据库约束冲突")).toBeVisible();
@@ -269,7 +290,7 @@ describe("ModuleRunPanel", () => {
       />
     );
 
-    const scene = await screen.findByDisplayValue("仓库");
+    const scene = await editLegacyScene(user);
     await user.clear(scene);
     await user.type(scene, "地下室");
     await user.click(screen.getByRole("button", { name: "暂停运行" }));

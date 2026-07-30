@@ -174,6 +174,29 @@ CAPABILITIES: tuple[Capability, ...] = (
         ),
     ),
     Capability(
+        id="scene_director",
+        label="场景导演与调查推进",
+        status="partial",
+        phase="F2",
+        audience="kp",
+        summary=(
+            "已实现活动模组的显式场景转换、自由/结构化/休整节奏、来源图实体的"
+            "逐团发现状态、追加式审计和不写状态的玩家意图分析；尚缺安全暂停、"
+            "玩家资料揭示、检定后自动回接及团后记忆整理。"
+        ),
+        dependencies=(
+            "module_library",
+            "proposal_approval",
+            "check_resolution",
+        ),
+        acceptance=(
+            "场景与线索状态通过版本号防止两个 KP 客户端静默覆盖。",
+            "只读分析只能使用当前活动模组与已解锁剧透，并明确报告零写入。",
+            "玩家偏离模组路线时先返回已有答案、剧透阻断或世界缺口，不直接创造事实。",
+            "重启后当前场景、节奏、线索状态和完整变更审计保持一致。",
+        ),
+    ),
+    Capability(
         id="world_expansion",
         label="受约束世界补全与动态支线",
         status="partial",
@@ -186,7 +209,7 @@ CAPABILITIES: tuple[Capability, ...] = (
             "三种自动化模式。"
         ),
         dependencies=(
-            "module_library",
+            "scene_director",
             "world_fact_ledger",
             "proposal_approval",
         ),
