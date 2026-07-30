@@ -130,7 +130,74 @@ AI KP 应能补全符合时代与地点的公共设施、普通 NPC、反应性�
 批准并实际接触后，以追加事件写入 World Fact，并更新锚点可达性投影。重启后从模组
 版本和事件流重建，不依赖模型“记忆”。
 
-此阶段仍未实现；不能把“世界补全草稿已批准”误解为“严格世界事实已经建立”。
+当前已实现第一条事实落地纵向切片：
+
+- `POST /kp/proposals/{proposal_id}/world-expansion-encounters` 只接受当前团的活动 KP，
+  且候选必须已经批准；
+- 请求必须携带稳定幂等键、一至八条严格事实和实际接触摘要；可同时创建 NPC，或引用
+  已经与当前团关联的全局 NPC；
+- NPC 是跨团可复用的 Actor；地图棋子只是该 NPC 在某张地图上的 Token，不会复制
+  NPC 身份；
+- 地图放置只能引用同团、当前已审核 `MapSpec` 中存在的地点，不能借“实际接触”接口
+  暗中创建新地点或绕过地图 revision；
+- 接触事件、事实账本、NPC 团关系、地图棋子、落地收据和审批 action 在
+  `BEGIN IMMEDIATE + SAVEPOINT` 内原子写入；任一步失败全部回滚；
+- `(campaign_id, idempotency_key)` 与 `proposal_id` 都有唯一约束。同一命令重试返回同一
+  收据；相同键对应不同内容或同一候选换键重放会冲突；
+- 每条事实直接引用 `world_expansion.encountered` 事件，并保存候选、模组版本、来源
+  哈希和运行 ID，能够回答“这条事实为什么存在”；
+- 前端对已批准候选显示第二次确认表单；只有此时才填写桌面实际发生内容、NPC 和已有
+  地图地点。完成后显示不可覆盖的落地收据。
+
+跨团 NPC 安全复现纵向切片现已实现：
+
+- 接触确认可附带当前团已批准的稳定调查员 ID 和“他们一起做了什么”的简短摘要；
+- `investigator_npc_encounters` 追加保存调查员、NPC、来源事件、团内时间和落地收据，
+  不把经历塞进可覆盖 JSON 或模型记忆；
+- KP 候选接口只返回当前团已批准调查员亲自接触过、且尚未加入本团的 NPC；只暴露人物
+  公共身份和该调查员自己的接触摘要；
+- 旧 NPC 的最终选择会在写事务内重新核对关系证据。猜到另一团 NPC ID、同一玩家换了
+  另一个调查员，或前端伪造参与者，都不能越过该检查；
+- 复现成功后，当前团 NPC 关系、新接触经历、事实、收据和可选地图棋子一起提交；重试
+  不会重复经历，地图失败会全部回滚。
+
+确定性 NPC 出场门控纵向切片现已实现：
+
+- KP 可为已关联 NPC 配置生命周期、出生/死亡年份、活动年代、地点别名和职业标签；
+- 候选会用团时间先排除年代上不可能出现的人物。资料缺失不会由 AI 编造，而会标为
+  `needs_review` 并向 KP 解释缺少什么；
+- 每团默认只有一个回归 NPC 名额，可在 `0..50` 范围内明确调整；地点和职业匹配可分别
+  设置为严格模式；
+- 候选接口返回可读理由、警告和剩余名额，但最终接触仍会在 `BEGIN IMMEDIATE` 后重新
+  校验关系、年代、实际地图地点、职业上下文和预算；
+- 成功后 `npc_reappearance_appearances` 与事实、NPC 团关系、地图棋子和接触经历在同一
+  事务提交。失败或并发超额不会消耗名额。
+
+当前地点使用 KP 明确填写的规范化别名，不从自由文本伪造经纬度或“精确距离”。未来若
+加入地理坐标，应采用 RFC 7946 GeoJSON。团级地点图谱现已用明确的正整数分钟、交通
+方式、方向和开放状态表达路线；Dijkstra 计算会给出完整最短路径。没有路线时不会用
+地图像素或语言模型猜测距离。
+
+NPC 独立工作台现可编辑人物可用性、复现策略、地点节点、路线和最短路径预检。锚点
+可达性自动重算和事实修订 UI 仍属于后续切片。
+
+地点图谱不持续模拟或向玩家公开 NPC 的每一步移动。现有“NPC 暗骰”先用这里的确定性
+门控生成可达地点集合，再在 KP 可见范围内决定是否出现及最终地点：
+
+- `POST /campaigns/{campaign_id}/npc-hidden-appearances` 只允许当前团 KP 调用；
+- 最多二十个候选地点只执行一次多源 Dijkstra，而不是每个地点重复算路；
+- 出现骰使用服务端 `secrets.randbelow` 生成一次 d100；只有出现且有多个合法地点时才
+  额外生成一次权重选择；
+- `(campaign_id, idempotency_key)` 与命令哈希保证网络重试不会重骰，同键改参数会拒绝；
+- 私密收据保存原始骰、阈值、合法地点和触发者，玩家端没有读取接口；可公开投影只有
+  `appears` 和最终地点；
+- 暗骰不得绕过年代、生命周期、关系、职业和旅行上限，也不消耗回归 NPC 预算；
+- 暗骰结果不是正式遭遇，不移动棋子、不生成 NPC、不写 World Fact。只有玩家实际接触
+  后，才使用既有接触落地接口原子写入事实。
+
+这套机制适用于偶遇 NPC；环境遭遇表、可选支线时机和纯气氛变体以后可以复用同一
+私密解析边界。权限、CoC 检定数学、线索可用性、地图移动合法性、模组锚点与正式事实
+禁止被这种随机层替代。
 
 ## Real-case 验收
 
@@ -167,6 +234,25 @@ AI KP 应能补全符合时代与地点的公共设施、普通 NPC、反应性�
   将实体、关系和主张抽取与向量索引作为可配置的派生管线。
 - [AWS Event Sourcing pattern](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/event-sourcing-pattern.html)
   使用不可变追加事件作为单一事实来源，并通过投影或重放恢复当前状态。
+- [Azure Event Sourcing pattern](https://learn.microsoft.com/azure/architecture/patterns/event-sourcing)
+  要求派生投影可幂等重放；本项目因此将落地收据与命令哈希分开保存。
+- [W3C PROV-O](https://www.w3.org/TR/prov-o/)
+  用 Entity、Activity、Agent 及派生关系表达来源；接触事件在这里是事实产生的
+  Activity，候选和模组来源是派生依据。
+- [Foundry VTT Actor](https://foundryvtt.com/api/v11/classes/client.Actor.html)
+  将长期 Actor 与 Scene 内嵌 Token 区分；本项目同样让 NPC 身份独立于地图棋子。
+- [SQLite Transactions](https://www.sqlite.org/lang_transaction.html)
+  `BEGIN IMMEDIATE` 在写入前取得写事务，配合唯一约束和 savepoint 实现串行化确认。
+- [OpenFGA Concepts](https://openfga.dev/docs/concepts)
+  将授权表达为主体、关系与对象的显式元组；这里对应“稳定调查员曾接触全局 NPC”。
+- [OWASP Authorization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html)
+  要求默认拒绝、逐请求对象级校验，且不能把难猜 ID 当成权限控制。
+- [Foundry VTT Basic Dice](https://foundryvtt.com/article/dice/)
+  将 Blind Roll 定义为仅 GM 可见的可见性模式；暗骰不应另造一套游戏规则。
+- [Python `secrets`](https://docs.python.org/3/library/secrets.html)
+  提供操作系统随机源和无偏的 `randbelow`；服务端暗骰不接受客户端种子。
+- [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)
+  要求高敏感级别数据不得进入权限不足的日志；原始暗骰因此留在 KP 私密收据中。
 - [SQLite recursive CTE](https://www.sqlite.org/lang_with.html)
   使用递归公共表表达式遍历树或图；当前锚点检查因此不需要额外图数据库。
 - [W3C PROV Model Primer](https://www.w3.org/TR/prov-primer/)

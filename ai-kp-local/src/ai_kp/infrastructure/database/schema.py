@@ -545,6 +545,152 @@ CREATE TABLE IF NOT EXISTS proposal_actions (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS world_expansion_materializations (
+  id TEXT PRIMARY KEY,
+  proposal_id TEXT NOT NULL UNIQUE
+    REFERENCES turn_proposals(id) ON DELETE CASCADE,
+  campaign_id TEXT NOT NULL
+    REFERENCES campaigns(id) ON DELETE CASCADE,
+  idempotency_key TEXT NOT NULL,
+  command_hash TEXT NOT NULL CHECK (length(command_hash) = 64),
+  encounter_event_id TEXT NOT NULL UNIQUE
+    REFERENCES events(id) ON DELETE CASCADE,
+  npc_id TEXT REFERENCES npcs(id) ON DELETE SET NULL,
+  map_token_id TEXT REFERENCES map_tokens(id) ON DELETE SET NULL,
+  created_by_member_id TEXT
+    REFERENCES session_members(id) ON DELETE SET NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(campaign_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS world_expansion_materialization_facts (
+  materialization_id TEXT NOT NULL
+    REFERENCES world_expansion_materializations(id) ON DELETE CASCADE,
+  fact_event_id TEXT NOT NULL UNIQUE
+    REFERENCES events(id) ON DELETE CASCADE,
+  order_index INTEGER NOT NULL,
+  PRIMARY KEY (materialization_id, fact_event_id),
+  UNIQUE(materialization_id, order_index)
+);
+
+CREATE TABLE IF NOT EXISTS investigator_npc_encounters (
+  id TEXT PRIMARY KEY,
+  investigator_id TEXT NOT NULL
+    REFERENCES investigators(id) ON DELETE CASCADE,
+  npc_id TEXT NOT NULL
+    REFERENCES npcs(id) ON DELETE CASCADE,
+  campaign_id TEXT NOT NULL
+    REFERENCES campaigns(id) ON DELETE CASCADE,
+  source_event_id TEXT NOT NULL
+    REFERENCES events(id) ON DELETE CASCADE,
+  materialization_id TEXT
+    REFERENCES world_expansion_materializations(id) ON DELETE SET NULL,
+  interaction_summary TEXT NOT NULL
+    CHECK (length(trim(interaction_summary)) BETWEEN 1 AND 1000),
+  happened_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(investigator_id, npc_id, source_event_id)
+);
+
+CREATE TABLE IF NOT EXISTS npc_availability_profiles (
+  npc_id TEXT PRIMARY KEY REFERENCES npcs(id) ON DELETE CASCADE,
+  lifecycle_state TEXT NOT NULL DEFAULT 'unknown'
+    CHECK (lifecycle_state IN ('unknown', 'active', 'missing', 'unavailable')),
+  born_year INTEGER CHECK (born_year IS NULL OR born_year BETWEEN 1 AND 9999),
+  died_year INTEGER CHECK (died_year IS NULL OR died_year BETWEEN 1 AND 9999),
+  active_from_year INTEGER
+    CHECK (active_from_year IS NULL OR active_from_year BETWEEN 1 AND 9999),
+  active_until_year INTEGER
+    CHECK (active_until_year IS NULL OR active_until_year BETWEEN 1 AND 9999),
+  location_tags_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(location_tags_json)),
+  profession_tags_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(profession_tags_json)),
+  kp_notes TEXT NOT NULL DEFAULT '' CHECK (length(kp_notes) <= 2000),
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (died_year IS NULL OR born_year IS NULL OR died_year >= born_year),
+  CHECK (
+    active_until_year IS NULL OR active_from_year IS NULL
+    OR active_until_year >= active_from_year
+  )
+);
+
+CREATE TABLE IF NOT EXISTS campaign_npc_reappearance_policies (
+  campaign_id TEXT PRIMARY KEY REFERENCES campaigns(id) ON DELETE CASCADE,
+  max_returning_npcs INTEGER NOT NULL DEFAULT 1
+    CHECK (max_returning_npcs BETWEEN 0 AND 50),
+  require_location_match INTEGER NOT NULL DEFAULT 0
+    CHECK (require_location_match IN (0, 1)),
+  require_profession_match INTEGER NOT NULL DEFAULT 0
+    CHECK (require_profession_match IN (0, 1)),
+  max_travel_minutes INTEGER NOT NULL DEFAULT 1440
+    CHECK (max_travel_minutes BETWEEN 0 AND 525600),
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS npc_reappearance_appearances (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  npc_id TEXT NOT NULL REFERENCES npcs(id) ON DELETE CASCADE,
+  materialization_id TEXT NOT NULL UNIQUE
+    REFERENCES world_expansion_materializations(id) ON DELETE CASCADE,
+  appeared_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(campaign_id, npc_id)
+);
+
+CREATE TABLE IF NOT EXISTS campaign_travel_locations (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 200),
+  normalized_name TEXT NOT NULL CHECK (length(normalized_name) BETWEEN 1 AND 200),
+  aliases_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(aliases_json)),
+  source_kind TEXT NOT NULL DEFAULT 'manual'
+    CHECK (source_kind IN ('manual', 'map', 'module')),
+  source_ref TEXT,
+  kp_notes TEXT NOT NULL DEFAULT '' CHECK (length(kp_notes) <= 2000),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(campaign_id, normalized_name)
+);
+
+CREATE TABLE IF NOT EXISTS campaign_travel_routes (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  from_location_id TEXT NOT NULL
+    REFERENCES campaign_travel_locations(id) ON DELETE CASCADE,
+  to_location_id TEXT NOT NULL
+    REFERENCES campaign_travel_locations(id) ON DELETE CASCADE,
+  travel_minutes INTEGER NOT NULL CHECK (travel_minutes BETWEEN 1 AND 525600),
+  travel_mode TEXT NOT NULL DEFAULT 'other'
+    CHECK (travel_mode IN ('walk', 'drive', 'rail', 'boat', 'flight', 'other')),
+  bidirectional INTEGER NOT NULL DEFAULT 1 CHECK (bidirectional IN (0, 1)),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'blocked')),
+  kp_notes TEXT NOT NULL DEFAULT '' CHECK (length(kp_notes) <= 2000),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (from_location_id != to_location_id),
+  UNIQUE(campaign_id, from_location_id, to_location_id, travel_mode)
+);
+
+CREATE TABLE IF NOT EXISTS npc_hidden_appearance_resolutions (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  npc_id TEXT NOT NULL REFERENCES npcs(id) ON DELETE CASCADE,
+  idempotency_key TEXT NOT NULL CHECK (length(idempotency_key) BETWEEN 8 AND 200),
+  command_hash TEXT NOT NULL CHECK (length(command_hash) = 64),
+  trigger_text TEXT NOT NULL CHECK (length(trim(trigger_text)) BETWEEN 1 AND 500),
+  appearance_chance INTEGER NOT NULL CHECK (appearance_chance BETWEEN 0 AND 100),
+  appearance_roll INTEGER NOT NULL CHECK (appearance_roll BETWEEN 1 AND 100),
+  appears INTEGER NOT NULL CHECK (appears IN (0, 1)),
+  eligible_locations_json TEXT NOT NULL CHECK (json_valid(eligible_locations_json)),
+  selected_location_id TEXT
+    REFERENCES campaign_travel_locations(id) ON DELETE SET NULL,
+  selected_location_name TEXT,
+  location_roll INTEGER CHECK (location_roll IS NULL OR location_roll >= 1),
+  created_by_member_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(campaign_id, idempotency_key)
+);
+
 CREATE TABLE IF NOT EXISTS context_assemblies (
   id TEXT PRIMARY KEY,
   proposal_id TEXT NOT NULL UNIQUE REFERENCES turn_proposals(id) ON DELETE CASCADE,
@@ -745,6 +891,20 @@ CREATE INDEX IF NOT EXISTS idx_realtime_tickets_expiry
   ON realtime_tickets(expires_at, consumed_at);
 CREATE INDEX IF NOT EXISTS idx_turn_proposals_campaign ON turn_proposals(campaign_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_proposal_actions_proposal ON proposal_actions(proposal_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_world_expansion_materializations_campaign
+  ON world_expansion_materializations(campaign_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_investigator_npc_encounters_investigator
+  ON investigator_npc_encounters(investigator_id, npc_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_investigator_npc_encounters_npc
+  ON investigator_npc_encounters(npc_id, campaign_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_npc_reappearance_appearances_campaign
+  ON npc_reappearance_appearances(campaign_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_npc_hidden_appearance_campaign_created
+  ON npc_hidden_appearance_resolutions(campaign_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_campaign_travel_locations_campaign
+  ON campaign_travel_locations(campaign_id, normalized_name);
+CREATE INDEX IF NOT EXISTS idx_campaign_travel_routes_campaign
+  ON campaign_travel_routes(campaign_id, status, from_location_id, to_location_id);
 CREATE INDEX IF NOT EXISTS idx_context_assemblies_campaign ON context_assemblies(campaign_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_maps_campaign ON maps(campaign_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_map_locations_map ON map_locations(map_id, order_index);

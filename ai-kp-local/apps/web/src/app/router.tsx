@@ -17,7 +17,7 @@ export const workspaceRoutes = [
   { id: "investigators", label: "调查员", icon: UserRound, path: "/investigators", planned: false },
   { id: "maps", label: "地图棋子", icon: Map, path: "/maps", planned: false },
   { id: "memory", label: "角色记忆", icon: Brain, path: "/memory", planned: false },
-  { id: "npcs", label: "NPC", icon: Users, path: "/npcs", planned: true },
+  { id: "npcs", label: "NPC", icon: Users, path: "/npcs", planned: false },
   { id: "rules", label: "规则知识", icon: Dice5, path: "/rules", planned: false },
   { id: "modules", label: "KP 本", icon: Library, path: "/modules", planned: false },
   { id: "models", label: "模型设置", icon: Cpu, path: "/models", planned: false },

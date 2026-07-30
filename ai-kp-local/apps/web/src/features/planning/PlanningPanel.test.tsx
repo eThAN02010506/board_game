@@ -57,8 +57,8 @@ describe("PlanningPanel", () => {
     expect(screen.getByText("规划中")).toBeVisible();
   });
 
-  it("narrows the NPC view to the reappearance capability", () => {
-    render(
+  it("leaves the implemented NPC route to its dedicated workspace", () => {
+    const { container } = render(
       <PlanningPanel
         activeNav="npcs"
         capabilities={capabilities}
@@ -68,9 +68,7 @@ describe("PlanningPanel", () => {
       />
     );
 
-    expect(screen.getByRole("heading", { name: "NPC 档案与跨本关系" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "NPC 再登场判断" })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "语义记忆检索" })).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("renders loading and retry states without stale capability cards", () => {

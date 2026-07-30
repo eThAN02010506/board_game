@@ -50,7 +50,7 @@ export function PlanningPanel({
   loading,
   onRetry
 }: Props) {
-  if (activeNav !== "planning" && activeNav !== "npcs") return null;
+  if (activeNav !== "planning") return null;
 
   const copy = navCopy[activeNav];
   const visibleCapabilities = selectCapabilities(activeNav, capabilities);

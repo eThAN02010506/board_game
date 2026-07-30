@@ -485,6 +485,21 @@ class SessionStore(Protocol):
     def reissue_seat_invitation(self, session_id: str, seat_id: str) -> dict: ...
 
 class WorldStore(RealtimeOutbox, Protocol):
+    def require_approved_contact_investigators(
+        self,
+        campaign_id: str,
+        investigator_ids: tuple[str, ...],
+    ) -> list[dict]: ...
+
+    def npc_is_linked_to_campaign(self, campaign_id: str, npc_id: str) -> bool: ...
+
+    def npc_is_authorized_reappearance(
+        self,
+        campaign_id: str,
+        npc_id: str,
+        investigator_ids: tuple[str, ...],
+    ) -> bool: ...
+
     def create_pc(self, campaign_id: str, name: str, sheet: dict | None = None) -> dict: ...
 
     def list_pcs(self, campaign_id: str) -> list[dict]: ...

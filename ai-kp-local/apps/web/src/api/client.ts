@@ -7,10 +7,21 @@ import type {
   DirectorAnalysis,
   ModuleRunStart,
   ModuleRunUpdate,
+  NpcReappearanceCandidate,
+  CampaignNpcRecord,
+  NpcAvailabilityProfile,
+  NpcReappearancePolicy,
+  HiddenAppearanceDestination,
+  NpcHiddenAppearanceResolution,
+  TravelGraph,
+  TravelLocation,
+  TravelRoute,
+  TravelRoutePreview,
   RuleReviewCandidate,
   RuleReviewSubmission,
   Role,
-  TurnProposal
+  TurnProposal,
+  WorldExpansionEncounterInput
 } from "./types";
 
 export const apiBase = "/api";
@@ -276,6 +287,168 @@ export function generateWorldExpansionProposal(
       method: "POST",
       body: JSON.stringify(payload)
     }
+  );
+}
+
+export function materializeWorldExpansionEncounter(
+  proposalId: string,
+  payload: WorldExpansionEncounterInput
+): Promise<TurnProposal> {
+  return requestJson<TurnProposal>(
+    `/kp/proposals/${encodeURIComponent(proposalId)}/world-expansion-encounters`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function listNpcReappearanceCandidates(
+  campaignId: string,
+  query = "",
+  context: { location?: string; professionHint?: string } = {}
+): Promise<NpcReappearanceCandidate[]> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("query", query.trim());
+  if (context.location?.trim()) {
+    params.set("context_location", context.location.trim());
+  }
+  if (context.professionHint?.trim()) {
+    params.set("profession_hint", context.professionHint.trim());
+  }
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return requestJson<NpcReappearanceCandidate[]>(
+    `/campaigns/${encodeURIComponent(campaignId)}/npc-reappearance-candidates${suffix}`
+  );
+}
+
+export function listCampaignNpcs(campaignId: string): Promise<CampaignNpcRecord[]> {
+  return requestJson<CampaignNpcRecord[]>(
+    `/campaigns/${encodeURIComponent(campaignId)}/npcs`
+  );
+}
+
+export function saveNpcAvailability(
+  campaignId: string,
+  npcId: string,
+  payload: Omit<NpcAvailabilityProfile, "npc_id" | "updated_at">
+): Promise<NpcAvailabilityProfile> {
+  return requestJson<NpcAvailabilityProfile>(
+    `/campaigns/${encodeURIComponent(campaignId)}/npcs/${encodeURIComponent(npcId)}/availability`,
+    { method: "PUT", body: JSON.stringify(payload) }
+  );
+}
+
+export function getNpcReappearancePolicy(
+  campaignId: string
+): Promise<NpcReappearancePolicy> {
+  return requestJson<NpcReappearancePolicy>(
+    `/campaigns/${encodeURIComponent(campaignId)}/npc-reappearance-policy`
+  );
+}
+
+export function saveNpcReappearancePolicy(
+  campaignId: string,
+  payload: Omit<NpcReappearancePolicy, "campaign_id" | "updated_at">
+): Promise<NpcReappearancePolicy> {
+  return requestJson<NpcReappearancePolicy>(
+    `/campaigns/${encodeURIComponent(campaignId)}/npc-reappearance-policy`,
+    { method: "PUT", body: JSON.stringify(payload) }
+  );
+}
+
+export function getTravelGraph(campaignId: string): Promise<TravelGraph> {
+  return requestJson<TravelGraph>(
+    `/campaigns/${encodeURIComponent(campaignId)}/travel-graph`
+  );
+}
+
+export function createTravelLocation(
+  campaignId: string,
+  payload: {
+    name: string;
+    aliases: string[];
+    source_kind: "manual";
+    source_ref: null;
+    kp_notes: string;
+  }
+): Promise<TravelLocation> {
+  return requestJson<TravelLocation>(
+    `/campaigns/${encodeURIComponent(campaignId)}/travel-locations`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function deleteTravelLocation(
+  campaignId: string,
+  locationId: string
+): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>(
+    `/campaigns/${encodeURIComponent(campaignId)}/travel-locations/${encodeURIComponent(locationId)}`,
+    { method: "DELETE" }
+  );
+}
+
+export function createTravelRoute(
+  campaignId: string,
+  payload: {
+    from_location_id: string;
+    to_location_id: string;
+    travel_minutes: number;
+    travel_mode: TravelRoute["travel_mode"];
+    bidirectional: boolean;
+    status: TravelRoute["status"];
+    kp_notes: string;
+  }
+): Promise<TravelRoute> {
+  return requestJson<TravelRoute>(
+    `/campaigns/${encodeURIComponent(campaignId)}/travel-routes`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function deleteTravelRoute(
+  campaignId: string,
+  routeId: string
+): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>(
+    `/campaigns/${encodeURIComponent(campaignId)}/travel-routes/${encodeURIComponent(routeId)}`,
+    { method: "DELETE" }
+  );
+}
+
+export function previewTravelRoute(
+  campaignId: string,
+  payload: { origins: string[]; destination: string; max_minutes: number }
+): Promise<TravelRoutePreview> {
+  return requestJson<TravelRoutePreview>(
+    `/campaigns/${encodeURIComponent(campaignId)}/travel-route-preview`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function listNpcHiddenAppearances(
+  campaignId: string
+): Promise<NpcHiddenAppearanceResolution[]> {
+  return requestJson<NpcHiddenAppearanceResolution[]>(
+    `/campaigns/${encodeURIComponent(campaignId)}/npc-hidden-appearances`
+  );
+}
+
+export function resolveNpcHiddenAppearance(
+  campaignId: string,
+  payload: {
+    idempotency_key: string;
+    npc_id: string;
+    trigger_text: string;
+    appearance_chance: number;
+    destinations: HiddenAppearanceDestination[];
+    profession_hint: string | null;
+  }
+): Promise<NpcHiddenAppearanceResolution> {
+  return requestJson<NpcHiddenAppearanceResolution>(
+    `/campaigns/${encodeURIComponent(campaignId)}/npc-hidden-appearances`,
+    { method: "POST", body: JSON.stringify(payload) }
   );
 }
 

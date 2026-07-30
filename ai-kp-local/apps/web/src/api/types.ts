@@ -923,6 +923,17 @@ export type TurnProposal = {
       }>;
     };
   } | null;
+  world_expansion_materialization?: {
+    schema_version: "world-expansion-materialization.v1";
+    materialization_id: string;
+    encounter_event_id: string;
+    fact_event_ids: string[];
+    npc_id: string | null;
+    map_token_id: string | null;
+    investigator_encounter_ids?: string[];
+    npc_reappearance_id?: string | null;
+    created_at: string;
+  } | null;
   player_action: string;
   public_narration: string;
   kp_notes: string;
@@ -931,6 +942,188 @@ export type TurnProposal = {
   proposed_memories: Record<string, unknown>[];
   proposed_npc_updates: Record<string, unknown>[];
   proposed_map_moves: Record<string, unknown>[];
+};
+
+export type WorldExpansionEncounterInput = {
+  idempotency_key: string;
+  summary: string;
+  happened_at?: string | null;
+  facts: Array<{
+    fact_type: "canonical_fact" | "kp_secret" | "rumor";
+    subject: string;
+    predicate: string;
+    object_text: string;
+  }>;
+  npc?: {
+    npc_id?: string | null;
+    name?: string | null;
+    home_location?: string | null;
+    profession?: string | null;
+    public_notes?: string;
+    secret_notes?: string;
+    role?: string;
+    relationship_score?: number;
+    notes?: string;
+  } | null;
+  map_placement?: {
+    map_id: string;
+    location_name: string;
+    visibility: "table" | "kp";
+    color: string;
+  } | null;
+  participant_investigator_ids?: string[];
+  interaction_summary?: string | null;
+  profession_context?: string | null;
+};
+
+export type NpcReappearanceCandidate = {
+  npc_id: string;
+  name: string;
+  profession: string | null;
+  home_location: string | null;
+  qualifying_investigators: Array<{
+    investigator_id: string;
+    investigator_name: string;
+    interaction_summary: string;
+    happened_at: string | null;
+  }>;
+  appearance_gate: {
+    decision: "eligible" | "needs_review";
+    reasons: string[];
+    warnings: string[];
+    remaining_campaign_budget: number;
+    max_returning_npcs: number;
+  };
+  availability_profile: {
+    lifecycle_state: "unknown" | "active" | "missing" | "unavailable";
+    born_year: number | null;
+    died_year: number | null;
+    active_from_year: number | null;
+    active_until_year: number | null;
+    location_tags: string[];
+    profession_tags: string[];
+  } | null;
+};
+
+export type NpcAvailabilityProfile = {
+  npc_id?: string;
+  lifecycle_state: "unknown" | "active" | "missing" | "unavailable";
+  born_year: number | null;
+  died_year: number | null;
+  active_from_year: number | null;
+  active_until_year: number | null;
+  location_tags: string[];
+  profession_tags: string[];
+  kp_notes?: string;
+  updated_at?: string;
+};
+
+export type CampaignNpcRecord = {
+  id: string;
+  name: string;
+  home_location: string | null;
+  profession: string | null;
+  public_notes: string;
+  role: string;
+  first_seen_time: string | null;
+  last_seen_time: string | null;
+  relationship_score: number;
+  campaign_notes: string;
+  availability_profile: NpcAvailabilityProfile | null;
+};
+
+export type NpcReappearancePolicy = {
+  campaign_id: string;
+  max_returning_npcs: number;
+  require_location_match: boolean;
+  require_profession_match: boolean;
+  max_travel_minutes: number;
+  updated_at: string | null;
+};
+
+export type TravelLocation = {
+  id: string;
+  campaign_id: string;
+  name: string;
+  normalized_name: string;
+  aliases: string[];
+  source_kind: "manual" | "map" | "module";
+  source_ref: string | null;
+  kp_notes: string;
+};
+
+export type TravelRoute = {
+  id: string;
+  campaign_id: string;
+  from_location_id: string;
+  to_location_id: string;
+  from_name: string;
+  to_name: string;
+  travel_minutes: number;
+  travel_mode: "walk" | "drive" | "rail" | "boat" | "flight" | "other";
+  bidirectional: boolean;
+  status: "open" | "blocked";
+  kp_notes: string;
+};
+
+export type TravelGraph = {
+  locations: TravelLocation[];
+  routes: TravelRoute[];
+};
+
+export type TravelRoutePreview = {
+  status:
+    | "graph_empty"
+    | "unresolved_origin"
+    | "unresolved_destination"
+    | "same_location"
+    | "reachable"
+    | "over_limit"
+    | "unreachable";
+  total_minutes: number | null;
+  max_minutes: number;
+  within_limit: boolean;
+  locations: Array<{ id: string; name: string }>;
+  legs: Array<{
+    route_id: string;
+    from_location_id: string;
+    to_location_id: string;
+    travel_minutes: number;
+    travel_mode: string;
+  }>;
+};
+
+export type HiddenAppearanceDestination = {
+  location_name: string;
+  weight: number;
+};
+
+export type NpcHiddenAppearanceResolution = {
+  id: string;
+  campaign_id: string;
+  npc_id: string;
+  npc_name: string;
+  idempotency_key: string;
+  trigger_text: string;
+  appearance_chance: number;
+  appearance_roll: number;
+  appears: boolean;
+  eligible_locations: Array<{
+    location_id: string;
+    location_name: string;
+    requested_name: string;
+    weight: number;
+    travel_minutes: number;
+  }>;
+  selected_location_id: string | null;
+  selected_location_name: string | null;
+  location_roll: number | null;
+  created_by_member_id: string;
+  created_at: string;
+  public_result: {
+    appears: boolean;
+    location_name: string | null;
+  };
 };
 
 export type ContextAssembly = {

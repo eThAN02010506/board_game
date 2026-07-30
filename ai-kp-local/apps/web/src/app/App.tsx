@@ -6,16 +6,20 @@ import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from 
 import {
   credentialBridge,
   isApiError,
+  listNpcReappearanceCandidates,
+  materializeWorldExpansionEncounter,
   requestJson,
   requestJsonWithAccessToken
 } from "../api/client";
 import type {
   AuthIdentity,
   Campaign,
+  CampaignInvestigator,
   CreateSkillCheckInput,
   ContextAssembly,
   MapGenerationInput,
   MapToken,
+  NpcReappearanceCandidate,
   PlayerActionRecord,
   PlayerCharacter,
   SavedMap,
@@ -24,7 +28,8 @@ import type {
   SessionMember,
   SessionSeat,
   SkillCheck,
-  TurnProposal
+  TurnProposal,
+  WorldExpansionEncounterInput
 } from "../api/types";
 import { useCredentials } from "../auth/credentials";
 import { ActionPanel } from "../features/actions/ActionPanel";
@@ -68,6 +73,11 @@ const RulebookPage = lazy(() =>
 const ModuleLibraryPage = lazy(() =>
   import("../features/modules/ModuleLibraryPage").then((module) => ({
     default: module.ModuleLibraryPage
+  }))
+);
+const NpcWorkspace = lazy(() =>
+  import("../features/npcs/NpcWorkspace").then((module) => ({
+    default: module.NpcWorkspace
   }))
 );
 
@@ -147,6 +157,12 @@ export default function App() {
   const [recoverableSeats, setRecoverableSeats] = useState<SessionSeat[]>([]);
   const [visibleSeatInvites, setVisibleSeatInvites] = useState<Record<string, string>>({});
   const [pcs, setPcs] = useState<PlayerCharacter[]>([]);
+  const [contactInvestigators, setContactInvestigators] = useState<
+    CampaignInvestigator[]
+  >([]);
+  const [npcReappearanceCandidates, setNpcReappearanceCandidates] = useState<
+    NpcReappearanceCandidate[]
+  >([]);
   const [playerActions, setPlayerActions] = useState<PlayerActionRecord[]>([]);
   const [selectedPlayerActionId, setSelectedPlayerActionId] = useState("");
   const [visibleJoinCode, setVisibleJoinCode] = useState("");
@@ -312,6 +328,8 @@ export default function App() {
     setSkillChecks([]);
     setVisibleSeatInvites({});
     setPcs([]);
+    setContactInvestigators([]);
+    setNpcReappearanceCandidates([]);
     setTokenActorId("");
     setPlayerActions([]);
     setSelectedPlayerActionId("");
@@ -358,6 +376,7 @@ export default function App() {
     void loadSkillChecks(bundle.campaign);
     if (bundle.member.role === "kp") {
       void loadProposals(bundle.campaign);
+      void loadNpcContactOptions(bundle.campaign, true);
       void loadSessionMembers(bundle.session.id);
       void loadSessionSeats(bundle.session.id);
       void loadPlayerActions(bundle.campaign);
@@ -430,6 +449,7 @@ export default function App() {
     void loadSkillChecks(campaign);
     if (identity.role === "kp") {
       void loadProposals(campaign);
+      void loadNpcContactOptions(campaign, true);
       void loadSessionMembers(session.id);
       void loadSessionSeats(session.id);
       void loadPlayerActions(campaign);
@@ -648,6 +668,40 @@ export default function App() {
       setPcs(result);
       setTokenActorId((current) => current || result[0]?.id || "");
     }
+  }
+
+  async function loadNpcContactOptions(
+    campaign = activeCampaign,
+    silent = false
+  ) {
+    if (!campaign || credentialBridge.snapshot().role !== "kp") return;
+    const campaignId = campaign.id;
+    const version = campaignSelectionVersion.current;
+    const [investigators, candidates] = await Promise.all([
+      perform(
+        "读取 NPC 接触调查员",
+        () =>
+          requestJson<CampaignInvestigator[]>(
+            `/campaigns/${campaignId}/investigator-submissions`
+          ),
+        silent
+      ),
+      perform(
+        "读取可复现 NPC",
+        () => listNpcReappearanceCandidates(campaignId),
+        silent
+      )
+    ]);
+    if (
+      activeCampaignIdRef.current !== campaignId ||
+      campaignSelectionVersion.current !== version
+    ) return;
+    if (investigators) {
+      setContactInvestigators(
+        investigators.filter((item) => item.status === "approved")
+      );
+    }
+    if (candidates) setNpcReappearanceCandidates(candidates);
   }
 
   async function loadPlayerActions(campaign = activeCampaign, silent = false) {
@@ -1151,6 +1205,7 @@ export default function App() {
       setActiveProposalId(result.id);
       setSelectedPlayerActionId("");
       void loadPlayerActions(activeCampaign);
+      void loadNpcContactOptions(activeCampaign, true);
     }
   }
 
@@ -1207,6 +1262,37 @@ export default function App() {
       setProposals((items) => items.map((item) => (item.id === result.id ? result : item)));
       setOverrideText("");
       void loadPlayerActions(activeCampaign);
+    }
+  }
+
+  async function confirmWorldExpansionContact(
+    input: WorldExpansionEncounterInput
+  ) {
+    if (
+      credentialBridge.snapshot().role !== "kp" ||
+      !activeProposal ||
+      activeProposal.proposal_kind !== "world_expansion" ||
+      activeProposal.status !== "approved"
+    ) {
+      showLog("只有已批准的世界补全候选可以确认实际接触。");
+      return;
+    }
+    const proposalId = activeProposal.id;
+    const campaignId = activeProposal.campaign_id;
+    const result = await run("确认实际接触并写入世界", () =>
+      materializeWorldExpansionEncounter(proposalId, input)
+    );
+    if (
+      !result ||
+      activeCampaignIdRef.current !== campaignId ||
+      result.id !== proposalId
+    ) return;
+    setProposals((items) =>
+      items.map((item) => (item.id === result.id ? result : item))
+    );
+    if (activeCampaign) {
+      void loadMaps(activeCampaign);
+      void loadNpcContactOptions(activeCampaign, true);
     }
   }
 
@@ -1336,6 +1422,12 @@ export default function App() {
         {activeNav === "models" && (
           <Suspense fallback={<section className="page-card">正在载入模型设置……</section>}>
             <ModelSettingsPage />
+          </Suspense>
+        )}
+
+        {activeNav === "npcs" && (
+          <Suspense fallback={<section className="page-card">正在载入 NPC 工作台……</section>}>
+            <NpcWorkspace campaign={activeCampaign} identity={authIdentity} />
           </Suspense>
         )}
 
@@ -1562,10 +1654,17 @@ export default function App() {
 
           {authIdentity?.role === "kp" && (
             <ProposalPanel
+              activeMap={activeMap}
               activeProposal={activeProposal}
+              campaignTime={campaignTime}
+              contactInvestigators={contactInvestigators}
               loading={loading}
               onApprove={() => void approveProposal()}
+              onConfirmWorldExpansion={(input) =>
+                void confirmWorldExpansionContact(input)
+              }
               onInspectContext={() => void inspectProposalContext()}
+              npcReappearanceCandidates={npcReappearanceCandidates}
               onOverrideTextChange={setOverrideText}
               onRefresh={() => void loadProposals()}
               onReject={() => void rejectProposal()}

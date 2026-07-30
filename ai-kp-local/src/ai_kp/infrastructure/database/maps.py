@@ -666,6 +666,25 @@ class MapRepository:
             raise KeyError(f"Map token not found: {token_id}")
         return row_to_dict(row)
 
+    def find_map_token_for_actor(
+        self,
+        map_id: str,
+        actor_type: str,
+        actor_id: str,
+    ) -> dict | None:
+        row = self.connection.execute(
+            """
+            SELECT t.*, l.name AS location_name, l.x, l.y
+            FROM map_tokens t
+            JOIN map_locations l ON l.id = t.location_id
+            WHERE t.map_id = ? AND t.actor_type = ? AND t.actor_id = ?
+            ORDER BY t.created_at, t.id
+            LIMIT 1
+            """,
+            (map_id, actor_type, actor_id),
+        ).fetchone()
+        return row_to_dict(row) if row is not None else None
+
     def list_map_tokens(
         self,
         map_id: str,

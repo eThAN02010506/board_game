@@ -15,12 +15,20 @@ from ai_kp.api.schemas import (
     ProposalDecision,
     TurnProposalCreate,
 )
+from ai_kp.api.world_expansion_schemas import WorldExpansionEncounterRequest
 from ai_kp.application.check_consequence_service import (
     CheckConsequenceService,
     GenerateCheckConsequenceCommand,
 )
 from ai_kp.application.errors import KpSessionEndedError
 from ai_kp.application.turn_service import KpTurnCommand, ManualProposalCommand, TurnService
+from ai_kp.application.world_expansion_materialization_service import (
+    EncounterFact,
+    EncounterMapPlacement,
+    EncounterNpc,
+    MaterializeWorldExpansionCommand,
+    WorldExpansionMaterializationService,
+)
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.director.orchestrator import KpOrchestrator
 from ai_kp.director.turn_output import StructuredOutputError
@@ -169,6 +177,44 @@ def reject_proposal(
         campaign_id,
         identity,
         note=payload.note,
+    )
+
+
+@router.post("/kp/proposals/{proposal_id}/world-expansion-encounters")
+def materialize_world_expansion_encounter(
+    proposal_id: str,
+    payload: WorldExpansionEncounterRequest,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    campaign_id = campaign_for_proposal(repo, proposal_id)
+    require_campaign_role(identity, campaign_id, ("kp",))
+    npc = (
+        EncounterNpc(**payload.npc.model_dump())
+        if payload.npc is not None
+        else None
+    )
+    map_placement = (
+        EncounterMapPlacement(**payload.map_placement.model_dump())
+        if payload.map_placement is not None
+        else None
+    )
+    return WorldExpansionMaterializationService(repo).materialize(
+        proposal_id,
+        identity,
+        MaterializeWorldExpansionCommand(
+            idempotency_key=payload.idempotency_key,
+            summary=payload.summary,
+            happened_at=payload.happened_at,
+            facts=tuple(EncounterFact(**item.model_dump()) for item in payload.facts),
+            npc=npc,
+            map_placement=map_placement,
+            participant_investigator_ids=tuple(
+                payload.participant_investigator_ids
+            ),
+            interaction_summary=payload.interaction_summary,
+            profession_context=payload.profession_context,
+        ),
     )
 
 

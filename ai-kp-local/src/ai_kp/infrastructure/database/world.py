@@ -118,6 +118,28 @@ class WorldRepository(SQLiteRepository):
             self.connection.execute("SELECT * FROM npcs WHERE id = ?", (npc_id,)).fetchone()
         )
 
+    def get_npc(self, npc_id: str) -> dict:
+        row = self.connection.execute(
+            "SELECT * FROM npcs WHERE id = ?",
+            (npc_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"NPC not found: {npc_id}")
+        return row_to_dict(row)
+
+    def get_campaign_npc(self, campaign_id: str, npc_id: str) -> dict:
+        row = self.connection.execute(
+            """
+            SELECT n.* FROM npcs n
+            JOIN campaign_npcs cn ON cn.npc_id = n.id
+            WHERE cn.campaign_id = ? AND n.id = ?
+            """,
+            (campaign_id, npc_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"NPC not found in campaign: {npc_id}")
+        return row_to_dict(row)
+
     def link_npc_to_campaign(
         self,
         campaign_id: str,
@@ -149,6 +171,21 @@ class WorldRepository(SQLiteRepository):
                 relationship_score,
                 notes,
             ),
+        )
+
+    def update_campaign_npc_last_seen(
+        self,
+        campaign_id: str,
+        npc_id: str,
+        happened_at: str | None,
+    ) -> None:
+        self.connection.execute(
+            """
+            UPDATE campaign_npcs
+            SET last_seen_time = COALESCE(?, last_seen_time)
+            WHERE campaign_id = ? AND npc_id = ?
+            """,
+            (happened_at, campaign_id, npc_id),
         )
 
     def create_module(

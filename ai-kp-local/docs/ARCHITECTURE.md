@@ -114,6 +114,21 @@ This catalogue is the single source of truth for delivery status, phase, depende
 - `memories` is the curated recall layer.
 - `campaign_npcs` records how an NPC relates to one campaign.
 - Global NPC identity is stored once in `npcs`; this allows cross-module reuse.
+- `investigator_npc_encounters` is the append-oriented relationship proof between one stable
+  investigator and one global NPC. It cites the source campaign event, in-world time and a concise
+  interaction summary. A current campaign may list a foreign NPC only through an investigator
+  approved in that campaign who owns such prior evidence; a raw NPC ID is never authority.
+- `npc_availability_profiles` stores KP-authored lifecycle, year and normalized tag constraints.
+  `campaign_npc_reappearance_policies` owns strict matching and the bounded campaign budget, while
+  `npc_reappearance_appearances` is the append-only proof that a returning-NPC slot was consumed.
+- `campaign_travel_locations` and `campaign_travel_routes` are explicit KP-authored travel facts.
+  A multi-source Dijkstra traversal resolves all requested destinations in one pass.
+- `npc_hidden_appearance_resolutions` stores immutable, idempotent KP-private receipts after
+  deterministic NPC and travel gates. It is not a canonical encounter or position projection;
+  player-facing delivery exposes neither raw rolls nor rejected locations.
+  Routes use positive integer minutes, direction and open/blocked state. Application-layer
+  Dijkstra search returns the ordered path and duration; map pixel coordinates are never treated
+  as physical distance.
 - `modules` and `module_chunks` store imported KP material with visibility, spoiler metadata and
   PDF page or DOCX paragraph provenance. `module_import_jobs` is the durable queued/processing/
   completed/failed lifecycle; `module_assets` records every private image occurrence while
@@ -133,8 +148,14 @@ This catalogue is the single source of truth for delivery status, phase, depende
   existing proposal boundary and only becomes an append-only runtime fact after confirmation.
   A world-expansion proposal stores its immutable module-run/version/source hash, deterministic
   gap analysis, current World Fact head hash and model candidate in `proposal_actions`; approval
-  fails closed when any bound runtime source changed. The first slice deliberately carries no
-  event, memory, NPC or map effects, so proposal approval is not yet strict fact materialization.
+  fails closed when any bound runtime source changed. Approval itself still carries no event,
+  memory, NPC or map effects. A separate contact-confirmation command writes an encounter event,
+  source-linked World Fact entries, global NPC/campaign projection, optional token at an existing
+  reviewed MapSpec location, immutable receipt and proposal action in one immediate transaction.
+  Its campaign-scoped idempotency key and command hash make network retries safe without treating
+  a changed command as the same contact. Participant investigator/NPC encounter rows are written
+  after the materialization receipt inside the same savepoint, and reappearance authorization is
+  recomputed inside that locked transaction.
   See [`WORLD_EXPANSION.md`](WORLD_EXPANSION.md).
 - `maps` stores stable identity, publication status, the current revision pointer and the selected public background; `map_revisions` stores canonical MapSpec JSON, validation output and content/layout hashes.
 - `map_locations` and `map_routes` are the current compatible projection used by movement and older API fields. Deterministic SVG is rendered from the role-filtered current MapSpec instead of being trusted as an independent structure source.

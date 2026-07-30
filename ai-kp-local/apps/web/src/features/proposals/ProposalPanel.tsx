@@ -1,7 +1,15 @@
 import { Brain, Check, RefreshCw } from "lucide-react";
-import type { ContextAssembly, TurnProposal } from "../../api/types";
+import type {
+  CampaignInvestigator,
+  ContextAssembly,
+  NpcReappearanceCandidate,
+  SavedMap,
+  TurnProposal,
+  WorldExpansionEncounterInput
+} from "../../api/types";
 import { ProposalEffectList } from "../../shared/ProposalEffectList";
 import { statusLabel } from "../../ui/statusLabels";
+import { WorldExpansionContactForm } from "./WorldExpansionContactForm";
 
 type Props = {
   proposals: TurnProposal[];
@@ -9,12 +17,17 @@ type Props = {
   proposalContext: ContextAssembly | null;
   overrideText: string;
   loading: boolean;
+  activeMap: SavedMap | null;
+  campaignTime: string;
+  contactInvestigators?: CampaignInvestigator[];
+  npcReappearanceCandidates?: NpcReappearanceCandidate[];
   onOverrideTextChange: (value: string) => void;
   onSelectProposal: (proposalId: string) => void;
   onRefresh: () => void;
   onInspectContext: () => void;
   onApprove: () => void;
   onReject: () => void;
+  onConfirmWorldExpansion: (input: WorldExpansionEncounterInput) => void;
 };
 
 export function ProposalPanel(props: Props) {
@@ -152,6 +165,17 @@ export function ProposalPanel(props: Props) {
           拒绝
         </button>
       </div>
+      {props.activeProposal?.proposal_kind === "world_expansion" && (
+        <WorldExpansionContactForm
+          activeMap={props.activeMap}
+          campaignTime={props.campaignTime}
+          contactInvestigators={props.contactInvestigators ?? []}
+          loading={props.loading}
+          npcReappearanceCandidates={props.npcReappearanceCandidates ?? []}
+          proposal={props.activeProposal}
+          onConfirm={props.onConfirmWorldExpansion}
+        />
+      )}
       {props.proposalContext &&
         props.proposalContext.proposal_id === props.activeProposal?.id && (
           <div className="context-summary">

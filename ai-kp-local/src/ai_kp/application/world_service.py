@@ -60,6 +60,7 @@ class LinkNpcCommand:
     last_seen_time: str | None = None
     relationship_score: int = 0
     notes: str = ""
+    participant_investigator_ids: tuple[str, ...] = ()
 
 
 class WorldService:
@@ -209,6 +210,20 @@ class WorldService:
         npc_id: str,
         command: LinkNpcCommand,
     ) -> dict:
+        participant_ids = tuple(dict.fromkeys(command.participant_investigator_ids))
+        self.repo.require_approved_contact_investigators(
+            campaign_id,
+            participant_ids,
+        )
+        already_linked = self.repo.npc_is_linked_to_campaign(campaign_id, npc_id)
+        if not already_linked and not self.repo.npc_is_authorized_reappearance(
+            campaign_id,
+            npc_id,
+            participant_ids,
+        ):
+            raise PermissionError(
+                "NPC linking requires qualifying prior contact by an approved investigator"
+            )
         self.repo.link_npc_to_campaign(
             campaign_id=campaign_id,
             npc_id=npc_id,

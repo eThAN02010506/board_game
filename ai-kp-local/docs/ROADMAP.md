@@ -4,6 +4,8 @@ This file explains how the roadmap is maintained; it is not a second roadmap sna
 
 ## Authoritative Sources
 
+- [`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md) is the source for stable product intent,
+  user needs, scope and real-case expectations. It deliberately does not claim delivery status.
 - `src/ai_kp/planning/capabilities.py` is the only source of capability IDs, labels, delivery status, phase, audience, dependencies, summaries, and acceptance criteria.
 - `GET /capabilities` is the machine-readable view used by clients. Use `GET /capabilities?include_available=false` to inspect only work that is not fully delivered.
 - The browser's "功能规划" view reads that endpoint at runtime. It must not keep its own status constants or pretend a planned endpoint exists.

@@ -19,14 +19,22 @@ from ai_kp.infrastructure.database.module_graph import ModuleGraphRepository
 from ai_kp.infrastructure.database.module_imports import ModuleImportRepository
 from ai_kp.infrastructure.database.module_knowledge import ModuleKnowledgeRepository
 from ai_kp.infrastructure.database.module_runs import ModuleRunRepository
+from ai_kp.infrastructure.database.npc_reappearances import NpcReappearanceRepository
+from ai_kp.infrastructure.database.private_random_resolutions import (
+    PrivateRandomResolutionRepository,
+)
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.rulebooks import RulebookRepository
 from ai_kp.infrastructure.database.schema import connect
 from ai_kp.infrastructure.database.security import SecurityRepository
 from ai_kp.infrastructure.database.session_seats import SessionSeatRepository
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
+from ai_kp.infrastructure.database.travel_graph import TravelGraphRepository
 from ai_kp.infrastructure.database.turns import TurnRepository
 from ai_kp.infrastructure.database.world import WorldRepository
+from ai_kp.infrastructure.database.world_expansion_materializations import (
+    WorldExpansionMaterializationRepository,
+)
 from ai_kp.infrastructure.realtime.outbox import RealtimeRepository
 
 PROJECT_ROOT = Path(__file__).parents[1]
@@ -400,6 +408,10 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         ModuleGraphRepository,
         ModuleRunRepository,
         ModelConfigurationRepository,
+        WorldExpansionMaterializationRepository,
+        NpcReappearanceRepository,
+        TravelGraphRepository,
+        PrivateRandomResolutionRepository,
     )
     assert Repository.__mro__.count(SQLiteRepository) == 1
     assert Repository.create_campaign is WorldRepository.create_campaign
@@ -412,6 +424,10 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     assert Repository.create_investigator is InvestigatorRepository.create_investigator
     assert Repository.create_session_seat is SessionSeatRepository.create_session_seat
     assert Repository.create_skill_check is SkillCheckRepository.create_skill_check
+    assert (
+        Repository.create_npc_hidden_appearance_resolution
+        is PrivateRandomResolutionRepository.create_npc_hidden_appearance_resolution
+    )
     assert Repository.create_rule_source is RulebookRepository.create_rule_source
     assert (
         Repository.save_model_configuration
@@ -424,7 +440,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 25
+    assert LATEST_SCHEMA_VERSION == 30
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -451,6 +467,11 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (23, "enforce_session_assignment_uniqueness"),
         (24, "scope_rule_source_hash_by_ruleset"),
         (25, "add_scene_director_runtime"),
+        (26, "add_world_expansion_materializations"),
+        (27, "add_investigator_npc_encounters"),
+        (28, "add_npc_appearance_gating"),
+        (29, "add_campaign_travel_graph"),
+        (30, "add_private_random_resolutions"),
     ]
 
 

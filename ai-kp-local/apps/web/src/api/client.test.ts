@@ -5,6 +5,8 @@ import {
   getCurrentModuleRun,
   getModuleRunDirectorState,
   generateWorldExpansionProposal,
+  listNpcReappearanceCandidates,
+  materializeWorldExpansionEncounter,
   listModuleRuns,
   listRuleReviewCandidates,
   requestJson,
@@ -99,6 +101,19 @@ describe("API client", () => {
     await generateWorldExpansionProposal("run/1", {
       player_intent: "寻找警察局"
     });
+    await materializeWorldExpansionEncounter("proposal/1", {
+      idempotency_key: "contact:proposal-1",
+      summary: "调查员进入警察局并与治安官交谈。",
+      happened_at: "1928-10-03 22:15",
+      facts: [
+        {
+          fact_type: "canonical_fact",
+          subject: "警察局",
+          predicate: "实际存在",
+          object_text: "镇中心有一间警察局。"
+        }
+      ]
+    });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/campaigns/camp%2F1/module-runs?limit=10&offset=2"
@@ -141,6 +156,12 @@ describe("API client", () => {
       method: "POST",
       body: JSON.stringify({ player_intent: "寻找警察局" })
     });
+    expect(fetchMock.mock.calls[9]?.[0]).toBe(
+      "/api/kp/proposals/proposal%2F1/world-expansion-encounters"
+    );
+    expect(fetchMock.mock.calls[9]?.[1]).toMatchObject({
+      method: "POST"
+    });
   });
 
   it("uses the KP-only rule review endpoints", async () => {
@@ -180,5 +201,21 @@ describe("API client", () => {
         }]
       })
     });
+  });
+
+  it("encodes the server-authorized NPC reappearance query", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await listNpcReappearanceCandidates("camp/1", "报社 线人");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/campaigns/camp%2F1/npc-reappearance-candidates?query=%E6%8A%A5%E7%A4%BE+%E7%BA%BF%E4%BA%BA",
+      expect.any(Object)
+    );
   });
 });

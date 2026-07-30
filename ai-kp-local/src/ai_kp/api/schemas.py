@@ -395,11 +395,108 @@ class NpcCreate(BaseModel):
 
 
 class CampaignNpcLink(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     role: str = "encountered"
     first_seen_time: str | None = None
     last_seen_time: str | None = None
     relationship_score: int = 0
     notes: str = ""
+    participant_investigator_ids: list[str] = Field(
+        default_factory=list,
+        max_length=12,
+    )
+
+
+class NpcAvailabilityProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lifecycle_state: Literal["unknown", "active", "missing", "unavailable"] = "unknown"
+    born_year: int | None = Field(default=None, ge=1, le=9999)
+    died_year: int | None = Field(default=None, ge=1, le=9999)
+    active_from_year: int | None = Field(default=None, ge=1, le=9999)
+    active_until_year: int | None = Field(default=None, ge=1, le=9999)
+    location_tags: list[str] = Field(default_factory=list, max_length=30)
+    profession_tags: list[str] = Field(default_factory=list, max_length=30)
+    kp_notes: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "NpcAvailabilityProfileUpdate":
+        if self.born_year and self.died_year and self.died_year < self.born_year:
+            raise ValueError("died_year cannot be before born_year")
+        if (
+            self.active_from_year
+            and self.active_until_year
+            and self.active_until_year < self.active_from_year
+        ):
+            raise ValueError("active_until_year cannot be before active_from_year")
+        for values in (self.location_tags, self.profession_tags):
+            normalized = [" ".join(item.split()) for item in values]
+            if any(not item or len(item) > 120 for item in normalized):
+                raise ValueError("availability tags must contain 1-120 characters")
+            if len({item.casefold() for item in normalized}) != len(normalized):
+                raise ValueError("availability tags must be unique")
+        return self
+
+
+class CampaignNpcReappearancePolicyUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_returning_npcs: int = Field(default=1, ge=0, le=50)
+    require_location_match: bool = False
+    require_profession_match: bool = False
+    max_travel_minutes: int = Field(default=1440, ge=0, le=525_600)
+
+
+class TravelLocationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    aliases: list[str] = Field(default_factory=list, max_length=30)
+    source_kind: Literal["manual", "map", "module"] = "manual"
+    source_ref: str | None = Field(default=None, max_length=300)
+    kp_notes: str = Field(default="", max_length=2000)
+
+
+class TravelRouteCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    from_location_id: str = Field(min_length=1, max_length=100)
+    to_location_id: str = Field(min_length=1, max_length=100)
+    travel_minutes: int = Field(ge=1, le=525_600)
+    travel_mode: Literal["walk", "drive", "rail", "boat", "flight", "other"] = "other"
+    bidirectional: bool = True
+    status: Literal["open", "blocked"] = "open"
+    kp_notes: str = Field(default="", max_length=2000)
+
+
+class TravelRoutePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    origins: list[str] = Field(min_length=1, max_length=30)
+    destination: str = Field(min_length=1, max_length=200)
+    max_minutes: int = Field(ge=0, le=525_600)
+
+
+class HiddenAppearanceDestinationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    location_name: str = Field(min_length=1, max_length=200)
+    weight: int = Field(default=1, ge=1, le=1000)
+
+
+class HiddenAppearanceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    npc_id: str = Field(min_length=1, max_length=100)
+    trigger_text: str = Field(min_length=1, max_length=500)
+    appearance_chance: int = Field(ge=0, le=100)
+    destinations: list[HiddenAppearanceDestinationInput] = Field(
+        min_length=1,
+        max_length=20,
+    )
+    profession_hint: str | None = Field(default=None, max_length=200)
 
 
 class ModuleImport(BaseModel):

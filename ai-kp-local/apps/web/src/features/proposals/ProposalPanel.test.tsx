@@ -141,12 +141,15 @@ function renderPanel({
     onRefresh: vi.fn(),
     onInspectContext: vi.fn(),
     onApprove: vi.fn(),
-    onReject: vi.fn()
+    onReject: vi.fn(),
+    onConfirmWorldExpansion: vi.fn()
   };
 
   const view = render(
     <ProposalPanel
+      activeMap={null}
       activeProposal={activeProposal}
+      campaignTime="1928-10-03 22:15"
       loading={loading}
       overrideText=""
       proposalContext={proposalContext}
@@ -192,9 +195,12 @@ describe("ProposalPanel", () => {
 
     rerender(
       <ProposalPanel
+        activeMap={null}
         activeProposal={draftProposal}
+        campaignTime="1928-10-03 22:15"
         loading
         onApprove={onApprove}
+        onConfirmWorldExpansion={vi.fn()}
         onInspectContext={vi.fn()}
         onOverrideTextChange={vi.fn()}
         onRefresh={vi.fn()}
@@ -212,9 +218,12 @@ describe("ProposalPanel", () => {
 
     rerender(
       <ProposalPanel
+        activeMap={null}
         activeProposal={approvedProposal}
+        campaignTime="1928-10-03 22:15"
         loading={false}
         onApprove={onApprove}
+        onConfirmWorldExpansion={vi.fn()}
         onInspectContext={vi.fn()}
         onOverrideTextChange={vi.fn()}
         onRefresh={vi.fn()}
@@ -278,6 +287,193 @@ describe("ProposalPanel", () => {
     expect(screen.getByText("临时驻点")).toBeVisible();
   });
 
+  it("materializes an approved world expansion as fact, NPC and existing map token", () => {
+    const approvedExpansion = {
+      ...worldExpansionProposal,
+      status: "approved" as const
+    };
+    const onConfirmWorldExpansion = vi.fn();
+    const savedMap = {
+      id: "map_town",
+      campaign_id: "camp_1",
+      title: "阿卡姆郊外",
+      prompt: "1920 年代小镇",
+      style: "paper",
+      width: 1000,
+      height: 700,
+      map_kind: "settlement",
+      era_year: 1928,
+      locale: "新英格兰",
+      season: null,
+      time_of_day: null,
+      weather: null,
+      visual_style: null,
+      locations: [
+        {
+          id: "loc_center",
+          name: "镇中心",
+          x: 0.5,
+          y: 0.5,
+          kind: "poi",
+          visibility: "table" as const
+        }
+      ],
+      routes: [],
+      tokens: [],
+      status: "draft" as const,
+      revision_id: "maprev_1",
+      selected_asset: null,
+      created_at: "2026-07-30T00:00:00Z"
+    };
+
+    render(
+      <ProposalPanel
+        activeMap={savedMap}
+        activeProposal={approvedExpansion}
+        campaignTime="1928-10-03 22:15"
+        loading={false}
+        onApprove={vi.fn()}
+        onConfirmWorldExpansion={onConfirmWorldExpansion}
+        onInspectContext={vi.fn()}
+        onOverrideTextChange={vi.fn()}
+        onRefresh={vi.fn()}
+        onReject={vi.fn()}
+        onSelectProposal={vi.fn()}
+        overrideText=""
+        proposalContext={null}
+        proposals={[approvedExpansion]}
+      />
+    );
+
+    expect(screen.getByText("玩家是否已经实际接触？")).toBeVisible();
+    fireEvent.click(
+      screen.getByLabelText("这次接触中出现了需要长期记录的 NPC")
+    );
+    fireEvent.change(screen.getByLabelText("姓名"), {
+      target: { value: "艾萨克·霍尔" }
+    });
+    fireEvent.change(screen.getByLabelText("职业"), {
+      target: { value: "治安官" }
+    });
+    fireEvent.click(screen.getByLabelText("同步到当前地图"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "确认实际接触并原子落地" })
+    );
+
+    expect(onConfirmWorldExpansion).toHaveBeenCalledTimes(1);
+    expect(onConfirmWorldExpansion.mock.calls[0][0]).toMatchObject({
+      happened_at: "1928-10-03 22:15",
+      facts: [
+        {
+          fact_type: "canonical_fact",
+          subject: "小镇警务设施",
+          predicate: "实际存在"
+        }
+      ],
+      npc: {
+        name: "艾萨克·霍尔",
+        profession: "治安官"
+      },
+      map_placement: {
+        map_id: "map_town",
+        location_name: "镇中心"
+      }
+    });
+  });
+
+  it("only offers server-authorized prior NPCs and submits stable investigator evidence", () => {
+    const approvedExpansion = {
+      ...worldExpansionProposal,
+      status: "approved" as const
+    };
+    const onConfirmWorldExpansion = vi.fn();
+    const approvedInvestigator = {
+      campaign_id: "camp_1",
+      investigator_id: "investigator_lin",
+      owner_profile_id: "player_1",
+      name: "林若川",
+      status: "approved" as const,
+      submitted_revision_id: "rev_1",
+      approved_revision_id: "rev_1",
+      legacy_pc_id: "pc_1",
+      review_comment: null,
+      submitted_revision: null,
+      approved_revision: null,
+      campaign_state: null,
+      reviews: [],
+      diff: []
+    };
+    const knownNpc = {
+      npc_id: "npc_zhou",
+      name: "周怀民",
+      profession: "报社线人",
+      home_location: "雾港旧码头",
+      qualifying_investigators: [
+        {
+          investigator_id: "investigator_lin",
+          investigator_name: "林若川",
+          interaction_summary: "一起查阅报社旧档案并交换联系方式。",
+          happened_at: "1927-06-11 16:00"
+        }
+      ],
+      appearance_gate: {
+        decision: "eligible" as const,
+        reasons: ["存在当前已批准调查员的跨团接触记录"],
+        warnings: [],
+        remaining_campaign_budget: 1,
+        max_returning_npcs: 1
+      },
+      availability_profile: null
+    };
+
+    render(
+      <ProposalPanel
+        activeMap={null}
+        activeProposal={approvedExpansion}
+        campaignTime="1928-10-03 22:15"
+        contactInvestigators={[approvedInvestigator]}
+        loading={false}
+        npcReappearanceCandidates={[knownNpc]}
+        onApprove={vi.fn()}
+        onConfirmWorldExpansion={onConfirmWorldExpansion}
+        onInspectContext={vi.fn()}
+        onOverrideTextChange={vi.fn()}
+        onRefresh={vi.fn()}
+        onReject={vi.fn()}
+        onSelectProposal={vi.fn()}
+        overrideText=""
+        proposalContext={null}
+        proposals={[approvedExpansion]}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByLabelText("这次接触中出现了需要长期记录的 NPC")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "旧识复现" }));
+    expect(screen.getByText("林若川记得此人")).toBeVisible();
+    expect(
+      screen.getByText("一起查阅报社旧档案并交换联系方式。")
+    ).toBeVisible();
+    fireEvent.change(screen.getByLabelText("他们一起做了什么"), {
+      target: { value: "重逢后一起讨论了镇上的失踪案。" }
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "确认实际接触并原子落地" })
+    );
+
+    expect(onConfirmWorldExpansion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        npc: {
+          npc_id: "npc_zhou",
+          role: "reappeared"
+        },
+        participant_investigator_ids: ["investigator_lin"],
+        interaction_summary: "重逢后一起讨论了镇上的失踪案。"
+      })
+    );
+  });
+
   it("shows a context snapshot only when it belongs to the active proposal", () => {
     const { rerender } = renderPanel({ proposalContext: context });
 
@@ -288,9 +484,12 @@ describe("ProposalPanel", () => {
 
     rerender(
       <ProposalPanel
+        activeMap={null}
         activeProposal={approvedProposal}
+        campaignTime="1928-10-03 22:15"
         loading={false}
         onApprove={vi.fn()}
+        onConfirmWorldExpansion={vi.fn()}
         onInspectContext={vi.fn()}
         onOverrideTextChange={vi.fn()}
         onRefresh={vi.fn()}

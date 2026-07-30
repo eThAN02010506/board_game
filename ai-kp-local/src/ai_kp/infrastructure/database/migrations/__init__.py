@@ -30,6 +30,11 @@ from ai_kp.infrastructure.database.migrations import (
     v0023_session_assignment_uniqueness,
     v0024_rule_source_ruleset_hash,
     v0025_scene_director_runtime,
+    v0026_world_expansion_materialization,
+    v0027_investigator_npc_encounters,
+    v0028_npc_appearance_gating,
+    v0029_campaign_travel_graph,
+    v0030_private_random_resolutions,
 )
 
 
@@ -163,6 +168,31 @@ MIGRATIONS = (
         v0025_scene_director_runtime.VERSION,
         v0025_scene_director_runtime.NAME,
         v0025_scene_director_runtime.migrate,
+    ),
+    Migration(
+        v0026_world_expansion_materialization.VERSION,
+        v0026_world_expansion_materialization.NAME,
+        v0026_world_expansion_materialization.migrate,
+    ),
+    Migration(
+        v0027_investigator_npc_encounters.VERSION,
+        v0027_investigator_npc_encounters.NAME,
+        v0027_investigator_npc_encounters.migrate,
+    ),
+    Migration(
+        v0028_npc_appearance_gating.VERSION,
+        v0028_npc_appearance_gating.NAME,
+        v0028_npc_appearance_gating.migrate,
+    ),
+    Migration(
+        v0029_campaign_travel_graph.VERSION,
+        v0029_campaign_travel_graph.NAME,
+        v0029_campaign_travel_graph.migrate,
+    ),
+    Migration(
+        v0030_private_random_resolutions.VERSION,
+        v0030_private_random_resolutions.NAME,
+        v0030_private_random_resolutions.migrate,
     ),
 )
 

@@ -28,6 +28,7 @@ PROPOSAL_JSON_FIELDS = (
 )
 CHECK_CONSEQUENCE_ACTION_TYPE = "check_consequence_basis"
 WORLD_EXPANSION_ACTION_TYPE = "world_expansion_basis"
+WORLD_EXPANSION_MATERIALIZED_ACTION_TYPE = "world_expansion_materialized"
 
 
 class TurnRepository(SQLiteRepository):
@@ -198,6 +199,16 @@ class TurnRepository(SQLiteRepository):
         if len(expansion_matches) > 1:
             raise ValueError("A proposal has multiple world expansion bases")
         world_expansion = expansion_matches[0] if expansion_matches else None
+        materialization_matches = [
+            action["payload"]
+            for action in resolved_actions
+            if action["action_type"] == WORLD_EXPANSION_MATERIALIZED_ACTION_TYPE
+        ]
+        if len(materialization_matches) > 1:
+            raise ValueError("A proposal has multiple world expansion materializations")
+        materialization = (
+            materialization_matches[0] if materialization_matches else None
+        )
         proposal["proposal_kind"] = (
             "check_consequence"
             if consequence is not None
@@ -207,6 +218,7 @@ class TurnRepository(SQLiteRepository):
         )
         proposal["check_consequence"] = consequence
         proposal["world_expansion"] = world_expansion
+        proposal["world_expansion_materialization"] = materialization
         return proposal
 
     def attach_world_expansion_basis(
