@@ -15,6 +15,9 @@ import type {
   MemoryClassification,
   MemoryCurationInput,
   MemoryTimelineItem,
+  SessionRecapCandidate,
+  SessionRecapReviewInput,
+  SessionRecapRun,
   NpcHiddenAppearanceResolution,
   TravelGraph,
   TravelLocation,
@@ -193,6 +196,31 @@ export function curateMemory(
 ): Promise<Record<string, unknown>> {
   return requestJson(
     `/campaigns/${encodeURIComponent(campaignId)}/memories/${encodeURIComponent(memoryId)}/curation`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function generateSessionRecap(sessionId: string): Promise<SessionRecapRun> {
+  return requestJson<SessionRecapRun>(
+    `/sessions/${encodeURIComponent(sessionId)}/recaps/generate`,
+    { method: "POST" }
+  );
+}
+
+export function getLatestSessionRecap(
+  sessionId: string
+): Promise<SessionRecapRun | null> {
+  return requestJson<SessionRecapRun | null>(
+    `/sessions/${encodeURIComponent(sessionId)}/recaps/latest`
+  );
+}
+
+export function reviewSessionRecapCandidate(
+  candidateId: string,
+  payload: SessionRecapReviewInput
+): Promise<SessionRecapCandidate> {
+  return requestJson<SessionRecapCandidate>(
+    `/session-recap-candidates/${encodeURIComponent(candidateId)}/review`,
     { method: "POST", body: JSON.stringify(payload) }
   );
 }

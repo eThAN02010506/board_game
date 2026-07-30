@@ -28,6 +28,7 @@ from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.rulebooks import RulebookRepository
 from ai_kp.infrastructure.database.schema import connect
 from ai_kp.infrastructure.database.security import SecurityRepository
+from ai_kp.infrastructure.database.session_recaps import SessionRecapRepository
 from ai_kp.infrastructure.database.session_seats import SessionSeatRepository
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
 from ai_kp.infrastructure.database.travel_graph import TravelGraphRepository
@@ -384,6 +385,9 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
         "memory.py": {
             ("MemoryTimelineService", "list_timeline"),
             ("MemoryTimelineService", "curate"),
+            ("SessionRecapService", "generate"),
+            ("SessionRecapService", "latest"),
+            ("SessionRecapService", "review"),
         },
     }
 
@@ -418,6 +422,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         TravelGraphRepository,
         PrivateRandomResolutionRepository,
         MemoryTimelineRepository,
+        SessionRecapRepository,
     )
     assert Repository.__mro__.count(SQLiteRepository) == 1
     assert Repository.create_campaign is WorldRepository.create_campaign
@@ -438,6 +443,10 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         Repository.list_memory_timeline
         is MemoryTimelineRepository.list_memory_timeline
     )
+    assert (
+        Repository.create_session_recap_run
+        is SessionRecapRepository.create_session_recap_run
+    )
     assert Repository.create_rule_source is RulebookRepository.create_rule_source
     assert (
         Repository.save_model_configuration
@@ -450,7 +459,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 31
+    assert LATEST_SCHEMA_VERSION == 32
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -483,6 +492,7 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (29, "add_campaign_travel_graph"),
         (30, "add_private_random_resolutions"),
         (31, "add_memory_curation_actions"),
+        (32, "add_session_recap_reviews"),
     ]
 
 

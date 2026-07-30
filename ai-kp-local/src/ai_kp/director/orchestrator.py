@@ -11,6 +11,11 @@ from ai_kp.director.check_consequence import (
     parse_check_consequence_output,
 )
 from ai_kp.director.context_builder import ContextAssembly, ContextBuilder, estimate_tokens
+from ai_kp.director.session_recap import (
+    SessionRecapOutput,
+    build_session_recap_context,
+    parse_session_recap_output,
+)
 from ai_kp.director.turn_output import KpTurnOutput, StructuredOutputError, parse_kp_turn_output
 from ai_kp.director.world_expansion import (
     WORLD_EXPANSION_OUTPUT_INSTRUCTIONS,
@@ -20,7 +25,7 @@ from ai_kp.director.world_expansion import (
 from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
 CHECK_CONSEQUENCE_CONTEXT_BUDGET = 12000
-OutputT = TypeVar("OutputT", KpTurnOutput, WorldExpansionOutput)
+OutputT = TypeVar("OutputT")
 
 
 @dataclass(frozen=True)
@@ -147,6 +152,15 @@ class KpOrchestrator:
         return await self._complete_structured(
             context,
             parse_world_expansion_output,
+        )
+
+    async def handle_session_recap(
+        self,
+        snapshot: dict,
+    ) -> KpTurnResult[SessionRecapOutput]:
+        return await self._complete_structured(
+            build_session_recap_context(snapshot),
+            parse_session_recap_output,
         )
 
     async def _complete_structured(

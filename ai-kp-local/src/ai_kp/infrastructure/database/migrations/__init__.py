@@ -36,6 +36,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0029_campaign_travel_graph,
     v0030_private_random_resolutions,
     v0031_memory_curation,
+    v0032_session_recaps,
 )
 
 
@@ -199,6 +200,11 @@ MIGRATIONS = (
         v0031_memory_curation.VERSION,
         v0031_memory_curation.NAME,
         v0031_memory_curation.migrate,
+    ),
+    Migration(
+        v0032_session_recaps.VERSION,
+        v0032_session_recaps.NAME,
+        v0032_session_recaps.migrate,
     ),
 )
 

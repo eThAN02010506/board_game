@@ -20,6 +20,7 @@ from ai_kp.infrastructure.database.private_random_resolutions import (
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.rulebooks import RulebookRepository
 from ai_kp.infrastructure.database.security import SecurityRepository
+from ai_kp.infrastructure.database.session_recaps import SessionRecapRepository
 from ai_kp.infrastructure.database.session_seats import SessionSeatRepository
 from ai_kp.infrastructure.database.travel_graph import TravelGraphRepository
 from ai_kp.infrastructure.database.turns import TurnRepository
@@ -54,6 +55,7 @@ class Repository(
     TravelGraphRepository,
     PrivateRandomResolutionRepository,
     MemoryTimelineRepository,
+    SessionRecapRepository,
 ):
     """Backward-compatible facade over the feature-specific SQLite repositories."""
 

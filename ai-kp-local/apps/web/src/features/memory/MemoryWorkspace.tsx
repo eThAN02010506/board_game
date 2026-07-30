@@ -1,22 +1,33 @@
 import {
   BookOpenCheck,
   Brain,
+  CheckCircle2,
   Eye,
   EyeOff,
   Filter,
   RefreshCw,
   Save,
-  Search
+  Search,
+  Sparkles,
+  XCircle
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { curateMemory, listMemoryTimeline } from "../../api/client";
+import {
+  curateMemory,
+  generateSessionRecap,
+  getLatestSessionRecap,
+  listMemoryTimeline,
+  reviewSessionRecapCandidate
+} from "../../api/client";
 import type {
   AuthIdentity,
   Campaign,
   MemoryClassification,
   MemoryTimelineItem,
-  PlayerCharacter
+  PlayerCharacter,
+  SessionRecapCandidate,
+  SessionRecapRun
 } from "../../api/types";
 
 type Props = {
@@ -44,6 +55,128 @@ function displayTime(value: string | null): string {
       }).format(parsed);
 }
 
+const recapScopeLabels: Record<SessionRecapCandidate["scope"], string> = {
+  campaign_fact: "团内事实",
+  pc_major: "主要事件",
+  pc_side: "支线事件",
+  npc_interaction: "NPC 互动",
+  npc_relationship: "NPC 关系",
+  location_fact: "地点事实",
+  clue: "线索"
+};
+
+type RecapReviewInput = {
+  action: "approve" | "reject";
+  reason: string;
+  text: string;
+  scope: SessionRecapCandidate["scope"];
+  importance: number;
+  visibility: SessionRecapCandidate["visibility"];
+  pc_id: string | null;
+};
+
+function RecapCandidateCard({
+  candidate,
+  pcs,
+  busy,
+  onReview
+}: {
+  candidate: SessionRecapCandidate;
+  pcs: PlayerCharacter[];
+  busy: boolean;
+  onReview: (candidate: SessionRecapCandidate, input: RecapReviewInput) => Promise<void>;
+}) {
+  const [text, setText] = useState(candidate.text);
+  const [scope, setScope] = useState(candidate.scope);
+  const [importance, setImportance] = useState(candidate.importance);
+  const [visibility, setVisibility] = useState(candidate.visibility);
+  const [pcId, setPcId] = useState(candidate.pc_id ?? "");
+  const [reviewReason, setReviewReason] = useState("");
+
+  useEffect(() => {
+    setText(candidate.text);
+    setScope(candidate.scope);
+    setImportance(candidate.importance);
+    setVisibility(candidate.visibility);
+    setPcId(candidate.pc_id ?? "");
+    setReviewReason("");
+  }, [candidate]);
+
+  if (candidate.status !== "draft") {
+    return (
+      <article className={`recap-candidate recap-candidate-${candidate.status}`}>
+        <div className="recap-candidate-heading">
+          <strong>{candidate.text}</strong>
+          <span>
+            {candidate.status === "approved" ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
+            {candidate.status === "approved" ? "已批准" : "已拒绝"}
+          </span>
+        </div>
+        <small>{recapScopeLabels[candidate.scope]} · 重要性 {candidate.importance}/5</small>
+      </article>
+    );
+  }
+
+  function submit(action: "approve" | "reject") {
+    return onReview(candidate, {
+      action,
+      reason: reviewReason,
+      text,
+      scope,
+      importance,
+      visibility,
+      pc_id: pcId || null
+    });
+  }
+
+  return (
+    <article className="recap-candidate">
+      <div className="recap-candidate-heading">
+        <span className="memory-kind">{recapScopeLabels[candidate.scope]}</span>
+        <small>{candidate.source_event_ids.length} 条来源事件</small>
+      </div>
+      <label>候选记忆
+        <textarea value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} />
+      </label>
+      <div className="recap-edit-grid">
+        <label>类别
+          <select value={scope} onChange={(event) => setScope(event.target.value as SessionRecapCandidate["scope"])}>
+            {Object.entries(recapScopeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label>重要性
+          <input min={1} max={5} type="number" value={importance} onChange={(event) => setImportance(Number(event.target.value))} />
+        </label>
+        <label>可见性
+          <select value={visibility} onChange={(event) => setVisibility(event.target.value as SessionRecapCandidate["visibility"])}>
+            <option value="player">指定玩家</option>
+            <option value="table">全桌</option>
+            <option value="kp">仅 KP</option>
+          </select>
+        </label>
+        <label>调查员
+          <select value={pcId} onChange={(event) => setPcId(event.target.value)}>
+            <option value="">不指定</option>
+            {pcs.map((pc) => <option key={pc.id} value={pc.id}>{pc.name}</option>)}
+          </select>
+        </label>
+      </div>
+      <p className="recap-rationale"><b>模型理由</b>{candidate.rationale}</p>
+      <label>KP 审核理由
+        <input value={reviewReason} maxLength={1000} onChange={(event) => setReviewReason(event.target.value)} placeholder="批准或拒绝都必须说明" />
+      </label>
+      <div className="recap-actions">
+        <button className="primary-button" disabled={busy || !reviewReason.trim() || !text.trim()} type="button" onClick={() => void submit("approve")}>
+          <CheckCircle2 size={15} />批准并写入记忆
+        </button>
+        <button className="ghost-button" disabled={busy || !reviewReason.trim()} type="button" onClick={() => void submit("reject")}>
+          <XCircle size={15} />拒绝
+        </button>
+      </div>
+    </article>
+  );
+}
+
 export function MemoryWorkspace({ campaign, identity, pcs }: Props) {
   const [items, setItems] = useState<MemoryTimelineItem[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -58,6 +191,7 @@ export function MemoryWorkspace({ campaign, identity, pcs }: Props) {
   const [importance, setImportance] = useState(1);
   const [hidden, setHidden] = useState(false);
   const [reason, setReason] = useState("");
+  const [recap, setRecap] = useState<SessionRecapRun | null>(null);
 
   const selected = useMemo(
     () => items.find((item) => item.id === selectedId) ?? null,
@@ -86,6 +220,15 @@ export function MemoryWorkspace({ campaign, identity, pcs }: Props) {
     }
   }
 
+  async function refreshRecap() {
+    if (identity?.role !== "kp") return;
+    try {
+      setRecap(await getLatestSessionRecap(identity.session_id));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   useEffect(() => {
     setItems([]);
     setSelectedId("");
@@ -93,7 +236,9 @@ export function MemoryWorkspace({ campaign, identity, pcs }: Props) {
     setQuery("");
     setClassification("");
     setIncludeHidden(false);
+    setRecap(null);
     if (campaign && identity) void refresh(true);
+    if (identity?.role === "kp") void refreshRecap();
     // Refresh is intentionally keyed to the authenticated campaign boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [campaign?.id, identity?.member_id]);
@@ -126,6 +271,46 @@ export function MemoryWorkspace({ campaign, identity, pcs }: Props) {
       });
       setMessage("校正动作已追加，原记忆与来源事件保持不变。");
       await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateRecap() {
+    if (identity?.role !== "kp") return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const generated = await generateSessionRecap(identity.session_id);
+      setRecap(generated);
+      setMessage(
+        generated.candidates.length
+          ? `已生成 ${generated.candidates.length} 条待审候选；尚未写入正式记忆。`
+          : "本次事件窗口没有新的长期记忆候选。"
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reviewRecap(
+    candidate: SessionRecapCandidate,
+    input: RecapReviewInput
+  ) {
+    setBusy(true);
+    setMessage("");
+    try {
+      await reviewSessionRecapCandidate(candidate.id, input);
+      await Promise.all([refreshRecap(), refresh()]);
+      setMessage(
+        input.action === "approve"
+          ? "候选已批准并写入有来源的正式记忆。"
+          : "候选已拒绝，没有写入记忆。"
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -193,6 +378,44 @@ export function MemoryWorkspace({ campaign, identity, pcs }: Props) {
         </div>
         {message && <p className="memory-message" role="status">{message}</p>}
       </form>
+
+      {identity.role === "kp" && (
+        <section className="page-card recap-review-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">模型候选 · 人类确认</p>
+              <h3>本次团会话摘要</h3>
+            </div>
+            <button className="primary-button" disabled={busy} type="button" onClick={() => void generateRecap()}>
+              <Sparkles size={15} />生成团后摘要候选
+            </button>
+          </div>
+          <p className="recap-boundary-note">
+            生成只读取当前会话的冻结事件窗口；候选必须经 KP 逐项批准，关闭会话不会自动写入。
+          </p>
+          {recap ? (
+            <>
+              <div className="recap-run-meta">
+                <span>{recap.status === "completed" ? "审核完成" : "等待审核"}</span>
+                <span>{recap.event_ids.length} 条事件</span>
+                <span>{recap.source_model}</span>
+                <span>指纹 {recap.event_window_hash.slice(0, 10)}</span>
+              </div>
+              <div className="recap-candidate-list">
+                {recap.candidates.length ? recap.candidates.map((candidate) => (
+                  <RecapCandidateCard
+                    key={candidate.id}
+                    candidate={candidate}
+                    pcs={pcs}
+                    busy={busy}
+                    onReview={reviewRecap}
+                  />
+                )) : <p className="empty-state">当前事件窗口没有新的长期记忆候选。</p>}
+              </div>
+            </>
+          ) : <p className="empty-state">尚未为本次会话生成摘要候选。</p>}
+        </section>
+      )}
 
       <div className="memory-layout">
         <section className="page-card memory-timeline-panel">

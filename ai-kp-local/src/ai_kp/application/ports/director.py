@@ -43,4 +43,13 @@ class WorldExpansionDirector(Protocol):
     ) -> Any: ...
 
 
-__all__ = ["CheckConsequenceDirector", "KpDirector", "WorldExpansionDirector"]
+class SessionRecapDirector(Protocol):
+    async def handle_session_recap(self, snapshot: dict) -> Any: ...
+
+
+__all__ = [
+    "CheckConsequenceDirector",
+    "KpDirector",
+    "SessionRecapDirector",
+    "WorldExpansionDirector",
+]

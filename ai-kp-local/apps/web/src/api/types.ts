@@ -475,6 +475,64 @@ export type MemoryCurationInput = {
   expected_head_action_id: string | null;
 };
 
+export type SessionRecapCandidate = {
+  id: string;
+  run_id: string;
+  campaign_id: string;
+  order_index: number;
+  text: string;
+  scope:
+    | "campaign_fact"
+    | "pc_major"
+    | "pc_side"
+    | "npc_interaction"
+    | "npc_relationship"
+    | "location_fact"
+    | "clue";
+  importance: number;
+  visibility: "player" | "table" | "kp";
+  pc_id: string | null;
+  npc_id: string | null;
+  happened_at: string | null;
+  source_event_ids: string[];
+  rationale: string;
+  status: "draft" | "approved" | "rejected";
+  review_payload: Record<string, unknown>;
+  memory_id: string | null;
+  reviewed_by_member_id: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+};
+
+export type SessionRecapRun = {
+  id: string;
+  campaign_id: string;
+  session_id: string;
+  status: "draft" | "completed";
+  event_window_hash: string;
+  event_ids: string[];
+  generation_cutoff: string;
+  source_model: string;
+  prompt_version: string;
+  repaired: boolean;
+  created_by_member_id: string;
+  created_at: string;
+  completed_at: string | null;
+  candidates: SessionRecapCandidate[];
+};
+
+export type SessionRecapReviewInput = {
+  action: "approve" | "reject";
+  reason: string;
+  text?: string;
+  scope?: SessionRecapCandidate["scope"];
+  importance?: number;
+  visibility?: SessionRecapCandidate["visibility"];
+  pc_id?: string | null;
+  npc_id?: string | null;
+  happened_at?: string | null;
+};
+
 export type PlayerProfile = {
   id: string;
   display_name: string;

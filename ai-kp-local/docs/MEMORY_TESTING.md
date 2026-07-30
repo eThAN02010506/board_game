@@ -27,6 +27,14 @@ Use a fixed fixture campaign such as `雾港 1928` to test memory behavior after
 15. Concurrent curation: an editor with a stale `expected_head_action_id` receives HTTP 409.
 16. Timeline ownership: players require an assigned, approved, player-owned investigator and can
     never select another PC or include hidden items.
+17. Recap draft boundary: generating a session recap creates only evidence-bound candidates and
+    never writes a memory before explicit KP approval.
+18. Recap evidence boundary: every candidate cites one or more events from the frozen session
+    window; unknown IDs, cross-campaign PCs/NPCs and unsafe visibility escalation are rejected.
+19. Recap idempotency: the same frozen event-window hash reuses one run, repeated identical review
+    returns the same memory, and a conflicting second decision returns HTTP 409.
+20. Recap lifecycle: rejecting a candidate creates no memory, approving creates exactly one sourced
+    memory, and closing a session neither calls the model nor auto-approves drafts.
 
 ## Real Case Test
 
@@ -44,13 +52,15 @@ Expected:
 - The player timeline shows only that approved investigator's visible memories.
 - KP can reclassify one item as a clue, hide it, and restore it; the original memory and source
   event remain byte-for-byte unchanged.
+- KP can generate a bounded post-session recap draft, edit a candidate, approve one item, reject
+  another, and see only the approved item appear on the permitted timeline.
 
 Run the focused deterministic suite with:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
   .venv/bin/pytest -q tests/test_memory.py tests/test_context_builder.py \
-  tests/test_session_permissions.py
+  tests/test_session_permissions.py tests/test_session_recaps.py
 ```
 # Automated retrieval benchmark
 

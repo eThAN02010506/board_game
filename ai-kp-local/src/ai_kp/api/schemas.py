@@ -634,6 +634,26 @@ class MemoryCurationCreate(BaseModel):
     expected_head_action_id: str | None = None
 
 
+class SessionRecapReview(BaseModel):
+    action: Literal["approve", "reject"]
+    reason: str = Field(min_length=1, max_length=1000)
+    text: str | None = Field(default=None, min_length=1, max_length=2000)
+    scope: Literal[
+        "campaign_fact",
+        "pc_major",
+        "pc_side",
+        "npc_interaction",
+        "npc_relationship",
+        "location_fact",
+        "clue",
+    ] | None = None
+    importance: int | None = Field(default=None, ge=1, le=5)
+    visibility: Literal["player", "table", "kp"] | None = None
+    pc_id: str | None = None
+    npc_id: str | None = None
+    happened_at: str | None = None
+
+
 class KpTurnRequest(BaseModel):
     campaign_id: str
     player_action: str = Field(min_length=1, max_length=4000)

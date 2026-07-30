@@ -3177,6 +3177,111 @@ h2 {
   padding: 10px 12px;
 }
 
+.recap-review-panel {
+  display: grid;
+  gap: 14px;
+  background:
+    linear-gradient(120deg, rgb(240 232 215 / 60%), transparent 48%),
+    #fffdf8;
+}
+
+.recap-review-panel .panel-heading h3,
+.recap-review-panel .panel-heading p {
+  margin-bottom: 0;
+}
+
+.recap-boundary-note {
+  margin: 0;
+  border-left: 3px solid #9f7a47;
+  background: #f7f3e9;
+  color: #59635c;
+  padding: 10px 12px;
+  line-height: 1.55;
+}
+
+.recap-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.recap-run-meta span {
+  border: 1px solid #ded8cb;
+  border-radius: 999px;
+  background: #faf7ef;
+  color: #656d67;
+  padding: 4px 9px;
+  font-size: 0.76rem;
+}
+
+.recap-candidate-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.recap-candidate {
+  display: grid;
+  align-content: start;
+  gap: 11px;
+  min-width: 0;
+  border: 1px solid #dcd4c5;
+  border-radius: 10px;
+  background: #fff;
+  padding: 14px;
+}
+
+.recap-candidate-approved {
+  border-color: #b9cfb4;
+  background: #f2f7ef;
+}
+
+.recap-candidate-rejected {
+  border-color: #d8c9c3;
+  background: #f4f1ee;
+  opacity: 0.78;
+}
+
+.recap-candidate-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recap-candidate-heading > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  color: #5e685f;
+  font-size: 0.78rem;
+}
+
+.recap-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.recap-rationale {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  border-radius: 8px;
+  background: #f5f2ea;
+  color: #586159;
+  padding: 9px 10px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.recap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .memory-layout {
   display: grid;
   grid-template-columns: minmax(420px, 1.3fr) minmax(310px, 0.7fr);
@@ -3356,6 +3461,10 @@ h2 {
   }
 
   .memory-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .recap-candidate-list {
     grid-template-columns: 1fr;
   }
 

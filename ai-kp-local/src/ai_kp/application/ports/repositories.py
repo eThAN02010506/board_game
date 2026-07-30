@@ -38,6 +38,51 @@ class RealtimeOutbox(Protocol):
     ) -> dict[str, Any]: ...
 
 
+class SessionRecapStore(RealtimeOutbox, Protocol):
+    def begin_immediate(self) -> None: ...
+
+    def is_session_member_active(self, member_id: str, session_id: str) -> bool: ...
+
+    def get_campaign_session(self, session_id: str) -> dict: ...
+
+    def get_recap_generation_cutoff(self) -> str: ...
+
+    def list_session_recap_events(
+        self,
+        session_id: str,
+        *,
+        cutoff: str,
+    ) -> list[dict]: ...
+
+    def get_session_recap_snapshot_context(self, session_id: str) -> dict: ...
+
+    def find_session_recap_run(
+        self,
+        session_id: str,
+        event_window_hash: str,
+    ) -> dict | None: ...
+
+    def create_session_recap_run(self, **values: Any) -> dict: ...
+
+    def get_session_recap_run(self, run_id: str) -> dict: ...
+
+    def get_latest_session_recap_run(self, session_id: str) -> dict | None: ...
+
+    def get_session_recap_candidate(self, candidate_id: str) -> dict: ...
+
+    def review_session_recap_candidate(
+        self,
+        candidate_id: str,
+        **values: Any,
+    ) -> dict: ...
+
+    def list_events_by_ids(
+        self,
+        campaign_id: str,
+        event_ids: list[str],
+    ) -> list[dict]: ...
+
+
 class MapStore(CampaignStore, RealtimeOutbox, Protocol):
     def begin_immediate(self) -> None: ...
 

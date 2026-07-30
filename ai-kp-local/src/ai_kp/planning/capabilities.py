@@ -182,7 +182,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         summary=(
             "已实现活动模组的显式场景转换、自由/结构化/休整节奏、来源图实体的"
             "逐团发现状态、追加式审计和不写状态的玩家意图分析；尚缺安全暂停、"
-            "玩家资料揭示、检定后自动回接及团后记忆整理。"
+            "玩家资料揭示及检定后自动回接。"
         ),
         dependencies=(
             "module_library",
@@ -311,7 +311,8 @@ CAPABILITIES: tuple[Capability, ...] = (
             "已有独立的团内调查员时间线：玩家按已批准角色隔离查看主要/支线、"
             "NPC、线索记忆及可见来源；KP 可筛选、检查证据，并以追加动作改类、"
             "调整重要性、隐藏或恢复，陈旧编辑会冲突且不改写原始历史。"
-            "尚缺自动团后摘要与跨 Campaign 的永久时间线合并/分支策略。"
+            "团后摘要会按冻结事件窗口幂等生成带来源草稿，经 KP 逐条审核后才写入"
+            "正式记忆；尚缺跨 Campaign 的永久时间线合并/分支策略。"
         ),
         dependencies=("memory_foundation", "world_fact_ledger", "character_timeline"),
         acceptance=(
