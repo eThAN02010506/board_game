@@ -16,8 +16,8 @@ from ai_kp.rulesets.coc7.mechanics.skill_check import (
 )
 
 OpposedOutcome = Literal["left_wins", "right_wins", "tie"]
-OpposedDecision = Literal["success_level", "target", "unresolved_tie"]
-TieOption = Literal["stalemate", "reroll"]
+OpposedDecision = Literal["success_level", "target", "lower_roll", "exact_tie"]
+TieOption = Literal["reroll"]
 
 _SUCCESS_RANK: dict[SuccessLevel, int] = {
     "fumble": -1,
@@ -27,7 +27,7 @@ _SUCCESS_RANK: dict[SuccessLevel, int] = {
     "extreme": 3,
     "critical": 4,
 }
-_TIE_OPTIONS: tuple[TieOption, ...] = ("stalemate", "reroll")
+_TIE_OPTIONS: tuple[TieOption, ...] = ("reroll",)
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,7 @@ class OpposedParticipant:
     participant_id: str
     target: int
     roll: int
+    effective_success_level: SuccessLevel | None = None
 
     def __post_init__(self) -> None:
         if type(self.participant_id) is not str or not self.participant_id.strip():
@@ -46,10 +47,15 @@ class OpposedParticipant:
         if type(self.roll) is not int:
             raise ValueError("Opposed roll must be an integer")
         success_level(self.target, self.roll)
+        if (
+            self.effective_success_level is not None
+            and self.effective_success_level not in _SUCCESS_RANK
+        ):
+            raise ValueError("Unsupported effective success level")
 
     @property
     def success_level(self) -> SuccessLevel:
-        return success_level(self.target, self.roll)
+        return self.effective_success_level or success_level(self.target, self.roll)
 
     @classmethod
     def from_d100_resolution(
@@ -137,7 +143,11 @@ def resolve_opposed(
         return OpposedResolution(left, right, "left_wins", "target")
     if right.target > left.target:
         return OpposedResolution(left, right, "right_wins", "target")
-    return OpposedResolution(left, right, "tie", "unresolved_tie")
+    if left.roll < right.roll:
+        return OpposedResolution(left, right, "left_wins", "lower_roll")
+    if right.roll < left.roll:
+        return OpposedResolution(left, right, "right_wins", "lower_roll")
+    return OpposedResolution(left, right, "tie", "exact_tie")
 
 
 __all__ = [

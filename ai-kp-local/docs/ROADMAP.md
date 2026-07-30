@@ -28,10 +28,10 @@ leaf-only AI snapshot and a full-chain SHA-256 fingerprint. The KP-only conseque
 creates an idempotent draft, and ordinary proposal approval revalidates that fingerprint before
 atomically committing supported narration and world effects.
 
-The CoC7 opposed-check comparator is also implemented as a pure, replay-tested ruleset operation.
-What remains for that slice is persistence plus API and UI orchestration. Delivery status and the
+The CoC7 opposed-check comparator is implemented as a pure, replay-tested ruleset operation and
+its persisted API/UI orchestration now feeds the consequence fingerprint. Delivery status and the
 machine-readable summary remain authoritative in `src/ai_kp/planning/capabilities.py`; the
-complete backend state flow is documented in
+complete state flow is documented in
 [`CHECK_RESOLUTION.md`](CHECK_RESOLUTION.md).
 
 ## Adding or Updating a Capability

@@ -173,7 +173,7 @@ class FactService:
             selected = [
                 entry for entry in selected if entry.fact.category == fact_type
             ]
-        return [entry.as_dict() for entry in selected]
+        return [self._serialize_entry(entry, identity) for entry in selected]
 
     def get_fact(
         self,
@@ -191,7 +191,27 @@ class FactService:
         )
         if current not in visible:
             raise KeyError(f"World fact not found: {fact_key}")
-        return current.as_dict()
+        return self._serialize_entry(current, identity)
+
+    @staticmethod
+    def _serialize_entry(
+        entry: FactLedgerEntry,
+        identity: AuthenticatedMember,
+    ) -> dict[str, Any]:
+        payload = entry.as_dict()
+        if identity.role == "kp":
+            return payload
+        # Player projections deliberately omit provenance and operator details.
+        # Those fields can contain KP-only module references even when the fact
+        # itself is table-visible.
+        for field_name in (
+            "asserted_by",
+            "evidence_event_ids",
+            "source_reference",
+            "supersedes_event_id",
+        ):
+            payload.pop(field_name, None)
+        return payload
 
     def _publish_change(
         self,

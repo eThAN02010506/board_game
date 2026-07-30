@@ -287,6 +287,18 @@ class ModuleRunStore(Protocol):
 
     def list_module_run_entity_state_events(self, run_id: str) -> list[dict]: ...
 
+    def set_module_run_control(
+        self,
+        run_id: str,
+        *,
+        expected_version: int,
+        mode: str,
+        reason: str,
+        member_id: str,
+    ) -> dict: ...
+
+    def list_module_run_control_events(self, run_id: str) -> list[dict]: ...
+
     def search_module(
         self,
         module_id: str,
@@ -339,6 +351,35 @@ class CheckStore(CampaignStore, Protocol):
         self,
         player_action_id: str,
     ) -> list[dict[str, Any]]: ...
+
+    def create_opposed_check(
+        self,
+        *,
+        campaign_id: str,
+        session_id: str,
+        requested_by_member_id: str,
+        left_check_id: str,
+        right_check_id: str,
+        rerolled_from_opposed_check_id: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    def get_opposed_check(self, opposed_check_id: str) -> dict[str, Any]: ...
+
+    def list_opposed_checks(
+        self, campaign_id: str, session_id: str
+    ) -> list[dict[str, Any]]: ...
+
+    def list_opposed_checks_for_action(
+        self, player_action_id: str
+    ) -> list[dict[str, Any]]: ...
+
+    def resolve_opposed_check(
+        self,
+        opposed_check_id: str,
+        *,
+        actor_member_id: str,
+        result: dict[str, Any],
+    ) -> dict[str, Any]: ...
 
     def resolve_skill_check(
         self,
@@ -877,6 +918,30 @@ class TurnStore(CheckStore, ModuleRunStore, RealtimeOutbox, Protocol):
     def get_turn_proposal(self, proposal_id: str) -> dict: ...
 
     def list_fact_heads(self, campaign_id: str) -> list[Any]: ...
+
+    def list_fact_entries(self, campaign_id: str) -> list[Any]: ...
+
+    def get_fact_head(self, campaign_id: str, fact_key: str) -> Any: ...
+
+    def find_active_fact(
+        self,
+        campaign_id: str,
+        *,
+        category: str,
+        subject: str,
+        predicate: str,
+    ) -> Any | None: ...
+
+    def append_fact_entry(self, entry: Any) -> Any: ...
+
+    def add_proposal_action(
+        self,
+        proposal_id: str,
+        action_type: str,
+        actor: str = "human_kp",
+        note: str = "",
+        payload: dict | None = None,
+    ) -> dict: ...
 
     def attach_check_consequence_basis(
         self,

@@ -1,5 +1,48 @@
 export type Role = "kp" | "player";
 
+export type WorldFactType =
+  | "canonical_fact"
+  | "kp_secret"
+  | "character_belief"
+  | "rumor"
+  | "ai_hypothesis"
+  | "retconned";
+
+export type WorldFactEntry = {
+  campaign_id: string;
+  fact_key: string;
+  event_id: string;
+  revision: number;
+  active: boolean;
+  supersedes_event_id?: string | null;
+  asserted_by?: string;
+  evidence_event_ids?: string[];
+  source_reference?: Record<string, unknown>;
+  happened_at: string | null;
+  created_at: string | null;
+  fact: {
+    fact_id: string;
+    category: WorldFactType;
+    visibility: "table" | "kp" | "player";
+    subject: string;
+    predicate: string;
+    object_text: string;
+    pc_id: string | null;
+    supersedes_fact_id: string | null;
+  };
+};
+
+export type WorldFactCreateInput = {
+  fact_type: Exclude<WorldFactType, "retconned">;
+  subject: string;
+  predicate: string;
+  object_text: string;
+  pc_id?: string | null;
+  evidence_event_ids?: string[];
+  source_reference?: Record<string, unknown>;
+  happened_at?: string | null;
+};
+
 export type CapabilityStatus = "available" | "partial" | "planned";
 
 export type CapabilityAudience = "all" | "kp" | "player";
@@ -62,6 +105,8 @@ export type ModuleRun = {
   module_title: string;
   module_source_hash: string | null;
   status: ModuleRunStatus;
+  director_control_mode?: "ai_assist" | "safety_paused" | "human_kp";
+  director_control_reason?: string | null;
   current_scene_key: string | null;
   current_scene_title: string | null;
   play_pace: ModulePlayPace;
@@ -123,6 +168,13 @@ export type ModuleRunDirectorState = {
   entity_states: ModuleRunEntityState[];
   scene_events: ModuleRunSceneEvent[];
   entity_state_events: ModuleRunEntityStateEvent[];
+  control_events?: Array<{
+    id: string;
+    from_mode: ModuleRun["director_control_mode"];
+    to_mode: ModuleRun["director_control_mode"];
+    reason: string;
+    created_at: string;
+  }>;
 };
 
 export type SceneTransitionInput = {
@@ -421,6 +473,59 @@ export type CreateSkillCheckInput = {
   roller_member_id: string | null;
   pc_id: string | null;
   target: number | null;
+};
+
+export type OpposedCheckSideInput = {
+  skill_name: string;
+  target: number | null;
+  bonus_dice: number;
+  hidden: boolean;
+  roller_member_id: string | null;
+  pc_id: string | null;
+};
+
+export type CreateOpposedCheckInput = {
+  left: OpposedCheckSideInput;
+  right: OpposedCheckSideInput;
+};
+
+export type OpposedCheck = {
+  id: string;
+  campaign_id: string;
+  session_id: string;
+  status: "pending" | "resolved" | "reroll_required" | "cancelled";
+  left_check_id: string;
+  right_check_id: string;
+  left_check: SkillCheck;
+  right_check: SkillCheck;
+  result: {
+    outcome: "left_wins" | "right_wins" | "tie";
+    winner_id: string | null;
+    loser_id: string | null;
+    decided_by: "success_level" | "target" | "lower_roll" | "exact_tie";
+    tie_options: Array<"reroll">;
+    participant_labels: Record<string, string>;
+  } | null;
+  result_fingerprint: string | null;
+  created_at: string;
+  resolved_at: string | null;
+};
+
+export type Handout = {
+  id: string;
+  campaign_id: string;
+  title: string;
+  body: string;
+  kind: "clue" | "handbook" | "image" | "note";
+  status: "draft" | "revealed" | "withdrawn";
+  pinned: boolean;
+  link_type: "fact" | "npc" | "map" | "location" | "module_entity" | null;
+  link_id: string | null;
+  version: number;
+  read?: boolean;
+  read_receipts?: Array<{ member_id: string; first_read_at: string; last_read_at: string }>;
+  created_at: string;
+  updated_at: string;
 };
 
 export type PlayerCharacter = {
@@ -895,6 +1000,17 @@ export type SavedMap = {
   locations?: MapLocation[];
   routes?: MapRoute[];
   tokens?: MapToken[];
+  fog_regions?: MapFogRegion[];
+};
+
+export type MapFogRegion = {
+  id: string;
+  map_id: string;
+  revision_id: string;
+  label: string;
+  polygon: Array<{ x: number; y: number }>;
+  status: "hidden" | "revealed";
+  version: number;
 };
 
 export type MapVisibility = "player" | "table" | "kp";
@@ -1106,6 +1222,12 @@ export type TurnProposal = {
   proposed_memories: Record<string, unknown>[];
   proposed_npc_updates: Record<string, unknown>[];
   proposed_map_moves: Record<string, unknown>[];
+  proposed_facts?: Record<string, unknown>[];
+  applied_facts?: Array<{
+    fact_key: string;
+    event_id: string;
+    fact_type: Exclude<WorldFactType, "retconned">;
+  }>;
 };
 
 export type WorldExpansionEncounterInput = {

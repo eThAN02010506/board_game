@@ -152,6 +152,7 @@ def test_init_db_migrates_legacy_schema_once_and_is_idempotent(tmp_path: Path) -
         assert _column_names(connection, "turn_proposals") >= {
             "proposed_checks_json",
             "proposed_npc_updates_json",
+            "proposed_facts_json",
         }
         assert "client_action_id" in _column_names(connection, "player_actions")
         assert "status" in _column_names(connection, "maps")

@@ -7,6 +7,7 @@ from ai_kp.core.ids import new_id
 from ai_kp.director.turn_output import (
     CheckCandidate,
     EventCandidate,
+    FactCandidate,
     MapMoveCandidate,
     MemoryCandidate,
     NpcUpdateCandidate,
@@ -25,10 +26,12 @@ PROPOSAL_JSON_FIELDS = (
     "proposed_memories",
     "proposed_npc_updates",
     "proposed_map_moves",
+    "proposed_facts",
 )
 CHECK_CONSEQUENCE_ACTION_TYPE = "check_consequence_basis"
 WORLD_EXPANSION_ACTION_TYPE = "world_expansion_basis"
 WORLD_EXPANSION_MATERIALIZED_ACTION_TYPE = "world_expansion_materialized"
+PROPOSED_FACTS_APPLIED_ACTION_TYPE = "proposed_facts_applied"
 
 
 class TurnRepository(SQLiteRepository):
@@ -46,6 +49,7 @@ class TurnRepository(SQLiteRepository):
         proposed_memories: list[dict] | None = None,
         proposed_npc_updates: list[dict] | None = None,
         proposed_map_moves: list[dict] | None = None,
+        proposed_facts: list[dict] | None = None,
         source_model: str = "unknown",
     ) -> dict:
         if pc_id:
@@ -55,6 +59,7 @@ class TurnRepository(SQLiteRepository):
         memories = dump_candidates(proposed_memories or [], MemoryCandidate)
         npc_updates = dump_candidates(proposed_npc_updates or [], NpcUpdateCandidate)
         map_moves = dump_candidates(proposed_map_moves or [], MapMoveCandidate)
+        facts = dump_candidates(proposed_facts or [], FactCandidate)
         proposal_id = new_id("proposal")
         self.connection.execute(
             """
@@ -62,9 +67,10 @@ class TurnRepository(SQLiteRepository):
               (
                 id, campaign_id, pc_id, status, player_action, public_narration, kp_notes,
                 proposed_checks_json, proposed_events_json, proposed_memories_json,
-                proposed_npc_updates_json, proposed_map_moves_json, source_model
+                proposed_npc_updates_json, proposed_map_moves_json,
+                proposed_facts_json, source_model
               )
-            VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 proposal_id,
@@ -78,6 +84,7 @@ class TurnRepository(SQLiteRepository):
                 json.dumps(memories, ensure_ascii=False),
                 json.dumps(npc_updates, ensure_ascii=False),
                 json.dumps(map_moves, ensure_ascii=False),
+                json.dumps(facts, ensure_ascii=False),
                 source_model,
             ),
         )
@@ -219,6 +226,18 @@ class TurnRepository(SQLiteRepository):
         proposal["check_consequence"] = consequence
         proposal["world_expansion"] = world_expansion
         proposal["world_expansion_materialization"] = materialization
+        applied_fact_matches = [
+            action["payload"]
+            for action in resolved_actions
+            if action["action_type"] == PROPOSED_FACTS_APPLIED_ACTION_TYPE
+        ]
+        if len(applied_fact_matches) > 1:
+            raise ValueError("A proposal has multiple proposed-fact application records")
+        proposal["applied_facts"] = (
+            applied_fact_matches[0].get("facts", [])
+            if applied_fact_matches
+            else []
+        )
         return proposal
 
     def attach_world_expansion_basis(
@@ -716,7 +735,9 @@ class TurnRepository(SQLiteRepository):
                 "Check consequence batch crosses its campaign, session, "
                 "action, or origin proposal boundary"
             )
-        snapshot = build_check_consequence_snapshot(checks)
+        snapshot = build_check_consequence_snapshot(
+            checks, self.list_opposed_checks_for_action(str(action["id"]))
+        )
         if sorted(basis.get("check_ids") or []) != sorted(
             item["id"] for item in checks
         ):

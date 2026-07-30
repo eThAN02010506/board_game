@@ -7,6 +7,7 @@ from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.llm import create_llm_client
 from ai_kp.api.schemas import (
     DirectorAnalysisRequest,
+    DirectorControlUpdate,
     ModuleRunEntityStateUpdate,
     ModuleRunStart,
     ModuleRunUpdate,
@@ -15,6 +16,7 @@ from ai_kp.api.schemas import (
 )
 from ai_kp.application.errors import KpSessionEndedError
 from ai_kp.application.module_run_service import (
+    DirectorControlCommand,
     EntityStateCommand,
     ModuleRunService,
     SceneTransitionCommand,
@@ -112,7 +114,27 @@ def get_module_run_director_state(
         "entity_states": repo.list_module_run_entity_states(run_id),
         "scene_events": repo.list_module_run_scene_events(run_id),
         "entity_state_events": repo.list_module_run_entity_state_events(run_id),
+        "control_events": repo.list_module_run_control_events(run_id),
     }
+
+
+@router.post("/module-runs/{run_id}/director/control")
+def update_director_control(
+    run_id: str,
+    payload: DirectorControlUpdate,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    _require_run_kp(run_id, identity, repo)
+    return ModuleRunService(repo).set_control(
+        run_id,
+        DirectorControlCommand(
+            expected_version=payload.expected_version,
+            mode=payload.mode,
+            reason=payload.reason,
+        ),
+        member_id=identity.member_id,
+    )
 
 
 @router.post("/module-runs/{run_id}/scene-transitions")
@@ -180,6 +202,8 @@ async def create_world_expansion_proposal(
     settings: Settings = Depends(get_app_settings),
 ) -> dict:
     run = _require_run_kp(run_id, identity, repo)
+    if run.get("director_control_mode") != "ai_assist":
+        raise HTTPException(status_code=409, detail="AI director is not in control")
     if payload.pc_id:
         require_approved_pc_binding(repo, str(run["campaign_id"]), payload.pc_id)
     try:

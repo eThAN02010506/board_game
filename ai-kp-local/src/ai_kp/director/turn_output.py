@@ -7,6 +7,13 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 Visibility = Literal["player", "table", "kp"]
+AssertableFactType = Literal[
+    "canonical_fact",
+    "kp_secret",
+    "character_belief",
+    "rumor",
+    "ai_hypothesis",
+]
 MemoryScope = Literal[
     "campaign_fact",
     "pc_major",
@@ -65,6 +72,24 @@ class MapMoveCandidate(StrictModel):
     require_route: bool = True
 
 
+class FactCandidate(StrictModel):
+    fact_type: AssertableFactType
+    subject: str = Field(min_length=1, max_length=200)
+    predicate: str = Field(min_length=1, max_length=120)
+    object_text: str = Field(min_length=1, max_length=4000)
+    pc_id: str | None = Field(default=None, max_length=100)
+    evidence_event_ids: list[str] = Field(default_factory=list, max_length=20)
+    happened_at: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_character_scope(self) -> "FactCandidate":
+        if self.fact_type == "character_belief" and self.pc_id is None:
+            raise ValueError("character_belief requires pc_id")
+        if self.fact_type != "character_belief" and self.pc_id is not None:
+            raise ValueError("Only character_belief can target a PC")
+        return self
+
+
 class KpTurnOutput(StrictModel):
     public_narration: str = Field(min_length=1, max_length=12000)
     kp_notes: str = Field(default="", max_length=4000)
@@ -73,6 +98,7 @@ class KpTurnOutput(StrictModel):
     proposed_memories: list[MemoryCandidate] = Field(default_factory=list, max_length=10)
     proposed_npc_updates: list[NpcUpdateCandidate] = Field(default_factory=list, max_length=8)
     proposed_map_moves: list[MapMoveCandidate] = Field(default_factory=list, max_length=12)
+    proposed_facts: list[FactCandidate] = Field(default_factory=list, max_length=12)
 
     @model_validator(mode="after")
     def unresolved_checks_cannot_commit_dependent_effects(self) -> "KpTurnOutput":
@@ -82,6 +108,7 @@ class KpTurnOutput(StrictModel):
                 self.proposed_memories,
                 self.proposed_npc_updates,
                 self.proposed_map_moves,
+                self.proposed_facts,
             )
         ):
             raise ValueError(
@@ -98,10 +125,14 @@ STRUCTURED_OUTPUT_INSTRUCTIONS = """只返回一个 JSON 对象，不要 Markdow
   "proposed_events": [{"event_type":"类型","summary":"事实摘要","actor_type":"system|pc|npc|kp|environment","actor_id":null,"visibility":"player|table|kp","happened_at":null,"payload":{}}],
   "proposed_memories": [{"text":"值得长期记得的事实","scope":"campaign_fact|pc_major|pc_side|npc_interaction|npc_relationship|location_fact|clue","importance":1,"visibility":"player|table|kp","pc_id":null,"npc_id":null,"happened_at":null}],
   "proposed_npc_updates": [{"npc_id":"已知 NPC id","appeared":false,"relationship_delta":0,"last_seen_time":null,"note":""}],
-  "proposed_map_moves": [{"token_id":"已知棋子 id","to_location_name":"目标地点","reason":"移动原因","require_route":true}]
+  "proposed_map_moves": [{"token_id":"已知棋子 id","to_location_name":"目标地点","reason":"移动原因","require_route":true}],
+  "proposed_facts": [{"fact_type":"canonical_fact|kp_secret|character_belief|rumor|ai_hypothesis","subject":"主体","predicate":"关系或属性","object_text":"值或陈述","pc_id":null,"evidence_event_ids":[],"happened_at":null}]
 }
-没有的候选项必须返回空数组。不得编造 NPC id、PC id 或棋子 id。
-如果 proposed_checks 非空，则 proposed_events、proposed_memories、proposed_npc_updates 和 proposed_map_moves 必须全部为空；检定结果不得预写。
+没有的候选项必须返回空数组。不得编造 NPC id、PC id、事件 id 或棋子 id。
+只有已经在当前场景中成立、并且值得作为长期真相区分检索的内容才进入 proposed_facts；
+传闻必须标为 rumor，角色个人认知必须标为 character_belief，推测必须标为 ai_hypothesis。
+如果 proposed_checks 非空，则 proposed_events、proposed_memories、proposed_npc_updates、
+proposed_map_moves 和 proposed_facts 必须全部为空；检定结果不得预写。
 """.strip()
 
 

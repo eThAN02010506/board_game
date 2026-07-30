@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+from ai_kp.observability import operational_telemetry
 from ai_kp.platform.memory.retrieval import MemoryRetriever
 
 
@@ -79,7 +80,7 @@ def evaluate_memory_retrieval(
         )
 
     count = len(results)
-    return MemoryEvaluationReport(
+    report = MemoryEvaluationReport(
         case_count=count,
         mean_recall_at_k=(
             sum(result.recall_at_k for result in results) / count if count else 0.0
@@ -90,3 +91,5 @@ def evaluate_memory_retrieval(
         forbidden_hit_count=sum(len(result.forbidden_hits) for result in results),
         results=tuple(results),
     )
+    operational_telemetry.record_retrieval(report.to_dict())
+    return report

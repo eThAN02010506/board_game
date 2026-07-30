@@ -4339,6 +4339,101 @@ textarea {
   gap: 10px;
 }
 
+.opposed-list {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.35rem;
+}
+
+.opposed-list h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.opposed-card {
+  border-left: 3px solid color-mix(in srgb, var(--accent) 70%, #7565a8);
+}
+
+.director-control-card {
+  display: grid;
+  gap: 0.7rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 92%, var(--accent));
+}
+
+.director-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.handout-workspace,
+.handout-create,
+.handout-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.handout-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.handout-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.handout-card header,
+.handout-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.map-structure-editor,
+.fog-editor {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.map-structure-editor textarea {
+  width: 100%;
+  font: 0.75rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.fog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.simulation-workbench,
+.simulation-case-list,
+.simulation-case-list article {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.simulation-workbench textarea {
+  font: 0.78rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.simulation-case-list article {
+  grid-template-columns: minmax(160px, 1fr) auto auto;
+  align-items: center;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
 .check-create,
 .physical-dice-entry,
 .check-kp-tools {
@@ -5639,5 +5734,149 @@ textarea::placeholder {
   .play-character-card {
     border-radius: 12px;
     padding: 15px;
+  }
+}
+.fact-workspace {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.8fr) minmax(360px, 1.25fr) minmax(300px, 0.95fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.fact-workspace.player {
+  grid-template-columns: minmax(280px, 0.8fr) minmax(420px, 1.2fr);
+}
+
+.fact-filters,
+.fact-create-panel form,
+.fact-retcon-form {
+  display: grid;
+  gap: 12px;
+}
+
+.fact-records {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  max-height: 68vh;
+  overflow: auto;
+}
+
+.fact-record {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  color: inherit;
+  text-align: left;
+}
+
+.fact-record:hover,
+.fact-record.selected {
+  border-color: var(--focus);
+  background: color-mix(in srgb, var(--focus) 8%, var(--paper));
+}
+
+.fact-kind {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  width: fit-content;
+  color: var(--ink-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.fact-kind-kp_secret,
+.fact-kind-ai_hypothesis {
+  color: #9a5d24;
+}
+
+.fact-kind-character_belief {
+  color: #4f67a4;
+}
+
+.fact-kind-rumor {
+  color: #7b5d91;
+}
+
+.fact-kind-retconned {
+  color: var(--ember-700);
+}
+
+.fact-definition {
+  display: grid;
+  gap: 0;
+  margin: 8px 0 20px;
+}
+
+.fact-definition > div {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.fact-definition dt {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+}
+
+.fact-definition dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.revision-pill {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--focus) 12%, transparent);
+  color: var(--focus);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.warning-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #b67a2d 12%, transparent);
+  color: #8b5b1f;
+  font-size: 0.82rem;
+}
+
+.workspace-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+@media (max-width: 1120px) {
+  .fact-workspace,
+  .fact-workspace.player {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .fact-create-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .fact-workspace,
+  .fact-workspace.player {
+    grid-template-columns: 1fr;
+  }
+
+  .fact-create-panel {
+    grid-column: auto;
   }
 }

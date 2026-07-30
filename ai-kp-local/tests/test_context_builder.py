@@ -410,7 +410,7 @@ class ContextBuilderTests(unittest.TestCase):
                     ValueError,
                     "Required context source exceeds token budget",
                 ):
-                    ContextBuilder(connection, max_context_tokens=1200).build(
+                    ContextBuilder(connection, max_context_tokens=1300).build(
                         campaign_id=campaign["id"],
                         player_action="我检查门锁。",
                         additional_sources=(required_source,),

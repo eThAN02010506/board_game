@@ -14,10 +14,12 @@ import type {
   AuthIdentity,
   Campaign,
   CampaignInvestigator,
+  CreateOpposedCheckInput,
   CreateSkillCheckInput,
   ContextAssembly,
   MapGenerationInput,
   MapToken,
+  OpposedCheck,
   NpcReappearanceCandidate,
   PlayerActionRecord,
   PlayerCharacter,
@@ -36,6 +38,7 @@ import { CampaignPanel } from "../features/campaigns/CampaignPanel";
 import { CheckPanel } from "../features/checks/CheckPanel";
 import { MapGeneratorPanel } from "../features/maps/MapGeneratorPanel";
 import { MapStage } from "../features/maps/MapStage";
+import { MapStructureEditor } from "../features/maps/MapStructureEditor";
 import { TokenPanel } from "../features/maps/TokenPanel";
 import { PlanningPanel } from "../features/planning/PlanningPanel";
 import { useCapabilities } from "../features/planning/useCapabilities";
@@ -82,6 +85,21 @@ const NpcWorkspace = lazy(() =>
 const MemoryWorkspace = lazy(() =>
   import("../features/memory/MemoryWorkspace").then((module) => ({
     default: module.MemoryWorkspace
+  }))
+);
+const FactWorkspace = lazy(() =>
+  import("../features/facts/FactWorkspace").then((module) => ({
+    default: module.FactWorkspace
+  }))
+);
+const HandoutWorkspace = lazy(() =>
+  import("../features/handouts/HandoutWorkspace").then((module) => ({
+    default: module.HandoutWorkspace
+  }))
+);
+const SimulationWorkbench = lazy(() =>
+  import("../features/evaluations/SimulationWorkbench").then((module) => ({
+    default: module.SimulationWorkbench
   }))
 );
 
@@ -158,6 +176,7 @@ export default function App() {
   const [sessionMembers, setSessionMembers] = useState<SessionMember[]>([]);
   const [sessionSeats, setSessionSeats] = useState<SessionSeat[]>([]);
   const [skillChecks, setSkillChecks] = useState<SkillCheck[]>([]);
+  const [opposedChecks, setOpposedChecks] = useState<OpposedCheck[]>([]);
   const [recoverableSeats, setRecoverableSeats] = useState<SessionSeat[]>([]);
   const [visibleSeatInvites, setVisibleSeatInvites] = useState<Record<string, string>>({});
   const [pcs, setPcs] = useState<PlayerCharacter[]>([]);
@@ -330,6 +349,7 @@ export default function App() {
     setSessionMembers([]);
     setSessionSeats([]);
     setSkillChecks([]);
+    setOpposedChecks([]);
     setVisibleSeatInvites({});
     setPcs([]);
     setContactInvestigators([]);
@@ -751,6 +771,41 @@ export default function App() {
       silent
     );
     if (checks && activeCampaignIdRef.current === campaign.id) setSkillChecks(checks);
+    const contests = await perform(
+      "读取对抗检定",
+      () => requestJson<OpposedCheck[]>(`/campaigns/${campaign.id}/opposed-checks`),
+      silent
+    );
+    if (contests && activeCampaignIdRef.current === campaign.id) setOpposedChecks(contests);
+  }
+
+  async function createOpposedCheck(input: CreateOpposedCheckInput) {
+    if (!activeCampaign || credentialBridge.snapshot().role !== "kp") return;
+    const result = await run("发布对抗检定", () =>
+      requestJson<OpposedCheck>(`/campaigns/${activeCampaign.id}/opposed-checks`, {
+        method: "POST",
+        body: JSON.stringify(input)
+      })
+    );
+    if (result) void loadSkillChecks(activeCampaign, true);
+  }
+
+  async function resolveOpposedCheck(opposedCheckId: string) {
+    const result = await run("裁决对抗检定", () =>
+      requestJson<OpposedCheck>(`/opposed-checks/${opposedCheckId}/resolve`, {
+        method: "POST"
+      })
+    );
+    if (result) setOpposedChecks((items) => items.map((item) => item.id === result.id ? result : item));
+  }
+
+  async function rerollOpposedCheck(opposedCheckId: string) {
+    const result = await run("创建对抗重掷", () =>
+      requestJson<OpposedCheck>(`/opposed-checks/${opposedCheckId}/reroll`, {
+        method: "POST"
+      })
+    );
+    if (result) void loadSkillChecks(activeCampaign, true);
   }
 
   async function createSkillCheck(input: CreateSkillCheckInput) {
@@ -1542,6 +1597,13 @@ export default function App() {
             tokenLocation={tokenLocation}
           />
 
+          {authIdentity?.role === "kp" && (
+            <MapStructureEditor
+              map={activeMap}
+              onSaved={() => activeMap && void openMap(activeMap.id)}
+            />
+          )}
+
           <section className="response-panel page-log-panel">
             <div className="panel-heading"><h2>地图操作记录</h2><AlertCircle size={18} /></div>
             <pre>{log}</pre>
@@ -1623,11 +1685,13 @@ export default function App() {
           <div className="play-action-column">
           <CheckPanel
             checks={skillChecks}
+            opposedChecks={opposedChecks}
             identity={authIdentity}
             loading={loading}
             members={sessionMembers}
             onCancel={(checkId, reason) => void decideSkillCheck(checkId, "cancel", reason)}
             onCreate={(input) => void createSkillCheck(input)}
+            onCreateOpposed={(input) => void createOpposedCheck(input)}
             onGenerateConsequence={(checkId) => void generateCheckConsequence(checkId)}
             onOverride={(checkId, successLevel, passed, reason) => void overrideSkillCheck(checkId, successLevel, passed, reason)}
             onPush={(checkId, reason) => void decideSkillCheck(checkId, "push", reason)}
@@ -1635,6 +1699,8 @@ export default function App() {
             onReplay={(checkId) => void replaySkillCheck(checkId)}
             onResolveDigital={(checkId) => void resolveSkillCheck(checkId, "digital")}
             onResolvePhysical={(checkId, onesDigit, tensDigits) => void resolveSkillCheck(checkId, "physical", onesDigit, tensDigits)}
+            onResolveOpposed={(opposedCheckId) => void resolveOpposedCheck(opposedCheckId)}
+            onRerollOpposed={(opposedCheckId) => void rerollOpposedCheck(opposedCheckId)}
           />
           <ActionPanel
             identity={authIdentity}
@@ -1696,6 +1762,24 @@ export default function App() {
         {activeNav === "memory" && (
           <Suspense fallback={<section className="page-card">正在载入角色记忆……</section>}>
             <MemoryWorkspace campaign={activeCampaign} identity={authIdentity} pcs={pcs} />
+          </Suspense>
+        )}
+
+        {activeNav === "facts" && (
+          <Suspense fallback={<section className="page-card">正在载入世界事实……</section>}>
+            <FactWorkspace campaign={activeCampaign} identity={authIdentity} pcs={pcs} />
+          </Suspense>
+        )}
+
+        {activeNav === "handouts" && (
+          <Suspense fallback={<section className="page-card">正在载入玩家手册……</section>}>
+            <HandoutWorkspace campaign={activeCampaign} identity={authIdentity} />
+          </Suspense>
+        )}
+
+        {activeNav === "evaluations" && (
+          <Suspense fallback={<section className="page-card">正在载入模拟团评测……</section>}>
+            <SimulationWorkbench campaign={activeCampaign} identity={authIdentity} />
           </Suspense>
         )}
 

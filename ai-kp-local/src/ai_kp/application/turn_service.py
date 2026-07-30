@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ai_kp.application.errors import ConflictError, InvalidInputError, KpSessionEndedError
+from ai_kp.application.fact_service import AssertWorldFactCommand, FactService
 from ai_kp.application.module_run_service import ModuleRunService
 from ai_kp.application.play.proposal_approval import plan_proposed_checks
 from ai_kp.application.ports.director import KpDirector, WorldExpansionDirector
@@ -27,6 +28,7 @@ class ManualProposalCommand:
     proposed_memories: Sequence[Any] = ()
     proposed_npc_updates: Sequence[Any] = ()
     proposed_map_moves: Sequence[Any] = ()
+    proposed_facts: Sequence[Any] = ()
     source_model: str = "manual-dev"
 
 
@@ -85,6 +87,7 @@ class TurnService:
             command.proposed_memories,
             command.proposed_npc_updates,
             command.proposed_map_moves,
+            command.proposed_facts,
         )
         queued_action = self._queued_action(
             command.player_action_id,
@@ -104,6 +107,7 @@ class TurnService:
             proposed_memories=list(command.proposed_memories),
             proposed_npc_updates=list(command.proposed_npc_updates),
             proposed_map_moves=list(command.proposed_map_moves),
+            proposed_facts=list(command.proposed_facts),
             source_model=command.source_model,
         )
         if queued_action:
@@ -161,6 +165,7 @@ class TurnService:
             proposed_memories=output.proposed_memories,
             proposed_npc_updates=output.proposed_npc_updates,
             proposed_map_moves=output.proposed_map_moves,
+            proposed_facts=output.proposed_facts,
             source_model=source_model,
         )
         self.repo.create_context_assembly(
@@ -284,6 +289,7 @@ class TurnService:
             proposed_memories=[],
             proposed_npc_updates=[],
             proposed_map_moves=[],
+            proposed_facts=[],
             source_model=source_model,
         )
         self.repo.attach_world_expansion_basis(
@@ -327,6 +333,7 @@ class TurnService:
             pending["proposed_memories"],
             pending["proposed_npc_updates"],
             pending["proposed_map_moves"],
+            pending["proposed_facts"],
         )
         campaign = self.repo.get_campaign(campaign_id)
         ruleset = get_ruleset(str(campaign["system"]))
@@ -337,12 +344,54 @@ class TurnService:
         self.repo.begin_immediate()
         pending = self.repo.get_turn_proposal(proposal_id)
         self._validate_world_expansion_approval(pending, campaign_id)
-        proposal = self.repo.approve_turn_proposal(
+        self.repo.approve_turn_proposal(
             proposal_id,
             actor=f"kp:{identity.member_id}",
             note=note,
             override_public_narration=override_public_narration,
         )
+        applied_facts = []
+        if pending["proposed_facts"]:
+            fact_service = FactService(self.repo)
+            for candidate in pending["proposed_facts"]:
+                applied_facts.append(
+                    fact_service.assert_fact(
+                        campaign_id,
+                        identity,
+                        AssertWorldFactCommand(
+                            fact_type=str(candidate["fact_type"]),
+                            subject=str(candidate["subject"]),
+                            predicate=str(candidate["predicate"]),
+                            object_text=str(candidate["object_text"]),
+                            pc_id=candidate.get("pc_id"),
+                            evidence_event_ids=tuple(
+                                candidate.get("evidence_event_ids") or ()
+                            ),
+                            source_reference={
+                                "kind": "approved_turn_proposal",
+                                "proposal_id": proposal_id,
+                                "source_model": str(pending["source_model"]),
+                            },
+                            happened_at=candidate.get("happened_at"),
+                        ),
+                    )
+                )
+            self.repo.add_proposal_action(
+                proposal_id,
+                "proposed_facts_applied",
+                actor=f"kp:{identity.member_id}",
+                note="approved typed world facts",
+                payload={
+                    "facts": [
+                        {
+                            "fact_key": fact["fact_key"],
+                            "event_id": fact["event_id"],
+                            "fact_type": fact["fact"]["category"],
+                        }
+                        for fact in applied_facts
+                    ]
+                },
+            )
         player_action_id = self.repo.player_action_id_for_proposal(proposal_id)
         for planned_check in planned_checks:
             self.repo.create_skill_check(
@@ -376,7 +425,7 @@ class TurnService:
             resource_type="campaign",
             resource_id=campaign_id,
         )
-        return proposal
+        return self.repo.get_turn_proposal(proposal_id)
 
     def reject(
         self,

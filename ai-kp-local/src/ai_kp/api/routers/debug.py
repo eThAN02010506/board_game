@@ -30,6 +30,7 @@ from ai_kp.infrastructure.llm.model_configuration import (
     public_model_configuration,
 )
 from ai_kp.infrastructure.realtime.websocket import handle_realtime_websocket
+from ai_kp.observability import operational_telemetry
 from ai_kp.rulesets.coc7.character.xlsx_import import (
     MAX_XLSX_BYTES,
     import_coc_character_xlsx,
@@ -116,6 +117,9 @@ class DebugTelemetryMiddleware(BaseHTTPMiddleware):
                 status=status,
                 duration_ms=(time.perf_counter() - started) * 1000,
                 client=request.client.host if request.client else None,
+            )
+            operational_telemetry.record_request(
+                (time.perf_counter() - started) * 1000
             )
 
 
@@ -297,6 +301,7 @@ def diagnostics(
             "cpu_count": os.cpu_count(),
         },
         "telemetry": _telemetry(request).summary(),
+        "operational_telemetry": operational_telemetry.snapshot(),
         "settings": {
             "llm_base_url": settings.llm_base_url,
             "llm_model": settings.llm_model,
@@ -335,6 +340,13 @@ def recent_requests(
         "summary": telemetry.summary(),
         "requests": list(telemetry.recent)[:limit],
     }
+
+
+@router.get("/debug/observability")
+def observability(
+    _admin: None = Depends(require_local_admin),
+) -> dict[str, Any]:
+    return operational_telemetry.snapshot()
 
 
 @router.get("/debug/database/tables/{table_name}")

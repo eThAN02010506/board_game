@@ -321,7 +321,28 @@ class MapRepository:
             result["assets"] = [
                 self._asset_for_response(item) for item in self.list_map_assets(map_id)
             ]
+            result["fog_regions"] = self.list_map_fog_regions(
+                map_id, include_revealed=True
+            )
+        else:
+            result["fog_regions"] = self.list_map_fog_regions(
+                map_id, include_revealed=False
+            )
         return result
+
+    def get_map_fog_region(self, fog_id: str) -> dict:
+        row = self.connection.execute(
+            "SELECT map_id FROM map_fog_regions WHERE id = ?", (fog_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Fog region not found: {fog_id}")
+        return next(
+            item
+            for item in self.list_map_fog_regions(
+                str(row["map_id"]), include_revealed=True
+            )
+            if item["id"] == fog_id
+        )
 
     def _create_map_revision(
         self,
@@ -376,6 +397,169 @@ class MapRepository:
         result["spec"] = json.loads(result.pop("spec_json"))
         result["validation"] = json.loads(result.pop("validation_json"))
         return result
+
+    def create_map_revision_from_spec(
+        self,
+        map_id: str,
+        *,
+        expected_revision_id: str,
+        map_spec: dict[str, Any],
+        member_id: str,
+    ) -> dict[str, Any]:
+        if not self.connection.in_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")
+        current = self.get_current_map_revision(map_id)
+        if current is None or current["id"] != expected_revision_id:
+            raise ValueError("Map revision changed; refresh before editing")
+        report = require_valid_map_spec(map_spec).to_dict()
+        if not report["valid"]:
+            raise ValueError("Map specification is invalid")
+        existing_locations = {
+            str(row["element_id"]): row_to_dict(row)
+            for row in self.connection.execute(
+                "SELECT * FROM map_locations WHERE map_id = ?", (map_id,)
+            ).fetchall()
+            if row["element_id"]
+        }
+        incoming_ids = {str(item["id"]) for item in map_spec["locations"]}
+        removed = set(existing_locations) - incoming_ids
+        if removed:
+            placeholders = ",".join("?" for _ in removed)
+            occupied = self.connection.execute(
+                f"""
+                SELECT COUNT(*) FROM map_tokens t
+                JOIN map_locations l ON l.id = t.location_id
+                WHERE l.map_id = ? AND l.element_id IN ({placeholders})
+                """,
+                (map_id, *sorted(removed)),
+            ).fetchone()[0]
+            if occupied:
+                raise ValueError("Move tokens before removing occupied locations")
+        location_row_ids: dict[str, str] = {}
+        for index, item in enumerate(map_spec["locations"]):
+            element_id = str(item["id"])
+            prior = existing_locations.get(element_id)
+            row_id = str(prior["id"]) if prior else new_id("loc")
+            location_row_ids[element_id] = row_id
+            values = (
+                str(item["name"]),
+                float(item["position"]["x"]),
+                float(item["position"]["y"]),
+                str(item["visibility"]),
+                str(item.get("public_description", "")),
+                index,
+            )
+            if prior:
+                self.connection.execute(
+                    """
+                    UPDATE map_locations SET name = ?, x = ?, y = ?, visibility = ?,
+                      notes = ?, order_index = ? WHERE id = ?
+                    """,
+                    (*values, row_id),
+                )
+            else:
+                self.connection.execute(
+                    """
+                    INSERT INTO map_locations
+                      (id, map_id, element_id, name, x, y, visibility, notes, order_index)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (row_id, map_id, element_id, *values),
+                )
+        if removed:
+            placeholders = ",".join("?" for _ in removed)
+            self.connection.execute(
+                f"DELETE FROM map_locations WHERE map_id = ? AND element_id IN ({placeholders})",
+                (map_id, *sorted(removed)),
+            )
+        self.connection.execute("DELETE FROM map_routes WHERE map_id = ?", (map_id,))
+        for item in map_spec["connections"]:
+            traversal = item.get("traversal") or {}
+            self.connection.execute(
+                """
+                INSERT INTO map_routes
+                  (id, map_id, element_id, start_location_id, end_location_id,
+                   travel_time, visibility, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("route"), map_id, str(item["id"]),
+                    location_row_ids[str(item["from_location_id"])],
+                    location_row_ids[str(item["to_location_id"])],
+                    traversal.get("travel_time"), str(item["visibility"]),
+                    str(item.get("public_description", "")),
+                ),
+            )
+        revision_id = self._create_map_revision(
+            map_id, map_spec, report, created_by=f"kp:{member_id}"
+        )
+        self.connection.execute(
+            "UPDATE maps SET current_revision_id = ?, title = ?, width = ?, height = ? WHERE id = ?",
+            (
+                revision_id, str(map_spec["title"]), int(map_spec["canvas"]["width"]),
+                int(map_spec["canvas"]["height"]), map_id,
+            ),
+        )
+        return self.get_map(map_id)
+
+    def list_map_fog_regions(self, map_id: str, *, include_revealed: bool) -> list[dict]:
+        clause = "" if include_revealed else "AND status = 'hidden'"
+        rows = self.connection.execute(
+            f"""
+            SELECT * FROM map_fog_regions WHERE map_id = ? {clause}
+            ORDER BY created_at, id
+            """,
+            (map_id,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = row_to_dict(row)
+            item["polygon"] = json.loads(item.pop("polygon_json"))
+            result.append(item)
+        return result
+
+    def create_map_fog_region(
+        self, map_id: str, *, label: str, polygon: list[dict], member_id: str
+    ) -> dict:
+        revision = self.get_current_map_revision(map_id)
+        if revision is None:
+            raise ValueError("Map requires a current revision")
+        if len(polygon) < 3 or len(polygon) > 64:
+            raise ValueError("Fog polygon requires 3-64 points")
+        width, height = revision["spec"]["canvas"]["width"], revision["spec"]["canvas"]["height"]
+        if any(
+            not 0 <= float(point["x"]) <= width or not 0 <= float(point["y"]) <= height
+            for point in polygon
+        ):
+            raise ValueError("Fog polygon points must remain inside the map")
+        fog_id = new_id("fog")
+        self.connection.execute(
+            """
+            INSERT INTO map_fog_regions
+              (id, map_id, revision_id, label, polygon_json, created_by_member_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (fog_id, map_id, revision["id"], label.strip(), json.dumps(polygon), member_id),
+        )
+        return next(item for item in self.list_map_fog_regions(map_id, include_revealed=True) if item["id"] == fog_id)
+
+    def reveal_map_fog_region(
+        self, fog_id: str, *, expected_version: int
+    ) -> dict:
+        cursor = self.connection.execute(
+            """
+            UPDATE map_fog_regions SET status = 'revealed', version = version + 1,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND version = ? AND status = 'hidden'
+            """,
+            (fog_id, expected_version),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError("Fog region changed; refresh before revealing")
+        row = self.connection.execute(
+            "SELECT map_id FROM map_fog_regions WHERE id = ?", (fog_id,)
+        ).fetchone()
+        return next(item for item in self.list_map_fog_regions(str(row["map_id"]), include_revealed=True) if item["id"] == fog_id)
 
     def _legacy_spec_from_rows(
         self,

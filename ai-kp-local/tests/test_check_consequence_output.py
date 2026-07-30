@@ -131,11 +131,25 @@ class CheckConsequenceOutputTests(unittest.TestCase):
                 "note": "因暗骰结果改变关系。",
             }
         ]
+        leaking_fact = payload()
+        leaking_fact["proposed_events"] = []
+        leaking_fact["proposed_facts"] = [
+            {
+                "fact_type": "canonical_fact",
+                "subject": "密门",
+                "predicate": "存在",
+                "object_text": "暗骰已发现",
+                "pc_id": None,
+                "evidence_event_ids": [],
+                "happened_at": None,
+            }
+        ]
 
         cases = (
             (leaking_event, "KP-visible events"),
             (leaking_memory, "KP-visible memories"),
             (leaking_npc, "cannot propose NPC updates"),
+            (leaking_fact, "KP-visible facts"),
         )
         for candidate, message in cases:
             with self.subTest(message=message):

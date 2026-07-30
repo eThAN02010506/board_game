@@ -1,11 +1,14 @@
 import {
   Brain,
+  BookOpenCheck,
   Cpu,
   Dice5,
+  FlaskConical,
   LayoutDashboard,
   Library,
   ListChecks,
   Map,
+  ScrollText,
   UserRound,
   Users
 } from "lucide-react";
@@ -17,10 +20,13 @@ export const workspaceRoutes = [
   { id: "investigators", label: "调查员", icon: UserRound, path: "/investigators", planned: false },
   { id: "maps", label: "地图棋子", icon: Map, path: "/maps", planned: false },
   { id: "memory", label: "角色记忆", icon: Brain, path: "/memory", planned: false },
+  { id: "facts", label: "世界事实", icon: ScrollText, path: "/facts", planned: false },
+  { id: "handouts", label: "手册线索", icon: BookOpenCheck, path: "/handouts", planned: false },
   { id: "npcs", label: "NPC", icon: Users, path: "/npcs", planned: false },
   { id: "rules", label: "规则知识", icon: Dice5, path: "/rules", planned: false },
   { id: "modules", label: "KP 本", icon: Library, path: "/modules", planned: false },
   { id: "models", label: "模型设置", icon: Cpu, path: "/models", planned: false },
+  { id: "evaluations", label: "模拟团评测", icon: FlaskConical, path: "/evaluations", planned: false },
   { id: "planning", label: "功能规划", icon: ListChecks, path: "/planning", planned: true }
 ] as const;
 

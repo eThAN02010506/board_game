@@ -380,6 +380,7 @@ def check_consequence_fingerprint(
 
 def build_check_consequence_snapshot(
     checks: Iterable[Mapping[str, Any]],
+    opposed_checks: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Return leaf-only effective results safe to include as AI data context."""
 
@@ -412,12 +413,38 @@ def build_check_consequence_snapshot(
                 "ruleset": check["ruleset"],
             }
         )
+    opposed_results = []
+    for opposed in sorted(opposed_checks, key=lambda item: str(item["id"])):
+        if opposed["status"] not in {"resolved", "reroll_required"}:
+            raise ValueError("All linked opposed checks must be terminal")
+        opposed_results.append(
+            {
+                "opposed_check_id": opposed["id"],
+                "status": opposed["status"],
+                "left_check_id": opposed["left_check_id"],
+                "right_check_id": opposed["right_check_id"],
+                "result": opposed["result"],
+                "result_fingerprint": opposed["result_fingerprint"],
+            }
+        )
+    skill_fingerprint = _payload_fingerprint(payload)
+    combined_fingerprint = (
+        _payload_fingerprint(
+            {
+                "skill_check_fingerprint": skill_fingerprint,
+                "opposed_results": opposed_results,
+            }
+        )
+        if opposed_results
+        else skill_fingerprint
+    )
     return {
         "schema_version": CHECK_CONSEQUENCE_SCHEMA_VERSION,
         "origin": payload["origin"],
-        "result_fingerprint": _payload_fingerprint(payload),
+        "result_fingerprint": combined_fingerprint,
         "has_hidden_checks": any(check["hidden"] for check in ordered),
         "effective_results": effective_results,
+        "opposed_results": opposed_results,
     }
 
 

@@ -386,6 +386,16 @@ export function MapStage({
                 <title>{token.label}: {token.location_name}</title>
               </g>
             ))}
+            {props.activeMap.fog_regions?.filter((fog) => fog.status === "hidden").map((fog) => (
+              <polygon
+                aria-label={`迷雾：${fog.label}`}
+                fill="rgba(11, 14, 19, 0.94)"
+                key={fog.id}
+                points={fog.polygon.map((point) => `${point.x},${point.y}`).join(" ")}
+                stroke="rgba(196, 174, 126, 0.4)"
+                strokeWidth="2"
+              />
+            ))}
           </svg>
         ) : (
           <div className="empty-state">

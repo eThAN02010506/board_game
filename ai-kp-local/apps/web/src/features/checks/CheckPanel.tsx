@@ -3,7 +3,9 @@ import { useMemo, useState } from "react";
 
 import type {
   AuthIdentity,
+  CreateOpposedCheckInput,
   CreateSkillCheckInput,
+  OpposedCheck,
   SessionMember,
   SkillCheck
 } from "../../api/types";
@@ -12,10 +14,14 @@ import { statusLabel } from "../../ui/statusLabels";
 type Props = {
   identity: AuthIdentity | null;
   checks: SkillCheck[];
+  opposedChecks: OpposedCheck[];
   members: SessionMember[];
   loading: boolean;
   onRefresh: () => void;
   onCreate: (input: CreateSkillCheckInput) => void;
+  onCreateOpposed: (input: CreateOpposedCheckInput) => void;
+  onResolveOpposed: (opposedCheckId: string) => void;
+  onRerollOpposed: (opposedCheckId: string) => void;
   onResolveDigital: (checkId: string) => void;
   onResolvePhysical: (checkId: string, onesDigit: number, tensDigits: number[]) => void;
   onGenerateConsequence: (checkId: string) => void;
@@ -56,6 +62,14 @@ export function CheckPanel(props: Props) {
   const [physicalDrafts, setPhysicalDrafts] = useState<Record<string, { ones: string; tens: string }>>({});
   const [decisionReason, setDecisionReason] = useState("KP 根据现场裁定");
   const [overrideLevel, setOverrideLevel] = useState<NonNullable<SkillCheck["success_level"]>>("regular");
+  const [opposedDraft, setOpposedDraft] = useState({
+    leftSkill: "斗殴",
+    leftTarget: "50",
+    leftMemberId: "",
+    rightSkill: "斗殴",
+    rightTarget: "50",
+    rightMemberId: ""
+  });
 
   const playerMembers = useMemo(
     () => props.members.filter((member) => member.role === "player" && !member.revoked_at),
@@ -135,6 +149,66 @@ export function CheckPanel(props: Props) {
           </div>
           <button className="primary-button" disabled={props.loading || !skillName.trim()} onClick={submitCheck} type="button"><Dice5 size={15} />发布检定</button>
         </details>
+      )}
+
+      {props.identity?.role === "kp" && (
+        <details className="check-create opposed-create">
+          <summary>创建对抗检定</summary>
+          <p className="form-hint">两边分别掷骰；服务器按成功等级、技能值、较低骰值依次裁决。完全相同才要求重掷。</p>
+          <div className="check-create-grid">
+            <label>左方技能<input value={opposedDraft.leftSkill} onChange={(event) => setOpposedDraft((value) => ({ ...value, leftSkill: event.target.value }))} /></label>
+            <label>左方目标<input min={0} max={100} type="number" value={opposedDraft.leftTarget} onChange={(event) => setOpposedDraft((value) => ({ ...value, leftTarget: event.target.value }))} /></label>
+            <label>左方玩家<select value={opposedDraft.leftMemberId} onChange={(event) => setOpposedDraft((value) => ({ ...value, leftMemberId: event.target.value }))}><option value="">NPC / KP</option>{playerMembers.map((member) => <option key={member.id} value={member.id}>{member.display_name}</option>)}</select></label>
+            <label>右方技能<input value={opposedDraft.rightSkill} onChange={(event) => setOpposedDraft((value) => ({ ...value, rightSkill: event.target.value }))} /></label>
+            <label>右方目标<input min={0} max={100} type="number" value={opposedDraft.rightTarget} onChange={(event) => setOpposedDraft((value) => ({ ...value, rightTarget: event.target.value }))} /></label>
+            <label>右方玩家<select value={opposedDraft.rightMemberId} onChange={(event) => setOpposedDraft((value) => ({ ...value, rightMemberId: event.target.value }))}><option value="">NPC / KP</option>{playerMembers.map((member) => <option key={member.id} value={member.id}>{member.display_name}</option>)}</select></label>
+          </div>
+          <button
+            className="primary-button"
+            disabled={props.loading || !opposedDraft.leftSkill.trim() || !opposedDraft.rightSkill.trim()}
+            onClick={() => {
+              const side = (skill: string, targetValue: string, memberId: string) => {
+                const member = playerMembers.find((item) => item.id === memberId);
+                return {
+                  skill_name: skill,
+                  target: targetValue.trim() ? Number(targetValue) : null,
+                  bonus_dice: 0,
+                  hidden: false,
+                  roller_member_id: member?.id ?? null,
+                  pc_id: member?.pc_id ?? null
+                };
+              };
+              props.onCreateOpposed({
+                left: side(opposedDraft.leftSkill, opposedDraft.leftTarget, opposedDraft.leftMemberId),
+                right: side(opposedDraft.rightSkill, opposedDraft.rightTarget, opposedDraft.rightMemberId)
+              });
+            }}
+            type="button"
+          ><Dice5 size={15} />发布双方检定</button>
+        </details>
+      )}
+
+      {props.opposedChecks.length > 0 && (
+        <div className="opposed-list" aria-label="对抗检定">
+          <h3>对抗检定</h3>
+          {props.opposedChecks.map((contest) => {
+            const winner = contest.result?.winner_id === contest.left_check_id
+              ? contest.left_check.skill_name
+              : contest.result?.winner_id === contest.right_check_id
+                ? contest.right_check.skill_name
+                : null;
+            const ready = [contest.left_check, contest.right_check].every((item) =>
+              ["resolved", "overridden"].includes(item.status)
+            );
+            return <article className="check-card opposed-card" key={contest.id}>
+              <div className="check-card-heading"><strong>{contest.left_check.skill_name} vs {contest.right_check.skill_name}</strong><span>{statusLabel(contest.status)}</span></div>
+              <small>左 {contest.left_check.target} / {contest.left_check.selected_roll ?? "待掷"} · 右 {contest.right_check.target} / {contest.right_check.selected_roll ?? "待掷"}</small>
+              {contest.result && <div className="check-result"><strong>{winner ? `${winner} 获胜` : "完全相同，双方重掷"}</strong><span>裁决依据：{contest.result.decided_by}</span></div>}
+              {props.identity?.role === "kp" && contest.status === "pending" && <button className="primary-button" disabled={!ready || props.loading} onClick={() => props.onResolveOpposed(contest.id)} type="button">裁决对抗结果</button>}
+              {props.identity?.role === "kp" && contest.status === "reroll_required" && <button className="primary-button" disabled={props.loading} onClick={() => props.onRerollOpposed(contest.id)} type="button">创建双方重掷</button>}
+            </article>;
+          })}
+        </div>
       )}
 
       <div className="check-list">

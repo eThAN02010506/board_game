@@ -17,8 +17,8 @@ check, but it does not calculate the result.
   `rules/dice.py` remains a compatibility import; neither path has database, HTTP or UI
   dependencies.
 - `rulesets/coc7/mechanics/opposed_check.py` compares two selected percentile
-  results by success level and then skill/attribute value. An exact tie remains
-  an explicit Keeper choice between stalemate and reroll.
+  results by success level, skill/attribute value and then the lower D100. Only
+  an exactly equal roll requires both sides to reroll.
 - `rulesets/registry.py` is the executable-system allow-list; the installed CoC7
   plugin exposes the pure comparison through `Ruleset.resolve_opposed_check`.
 - `infrastructure/database/checks.py` owns check rows, raw dice, audit actions and character target
@@ -114,11 +114,10 @@ savepoint, so proposal effects, concrete checks, action state and realtime outbo
 commit or all roll back. The action becomes `resolved` only after consequence approval, not merely
 when the dice finish.
 
-The pure opposed-check comparator is implemented and replay-tested. It deliberately does not
-choose a difficulty level or permit a pushed roll; bonus or penalty dice are selected by the
-existing percentile resolver before comparison. The two-stage AI consequence backend is now
-implemented. Opposed-check persistence, API orchestration and UI remain future work, so the
-capability stays `partial` rather than `available`.
+Opposed checks persist a parent contest plus two ordinary non-pushable skill checks. The server
+alone calculates the outcome after both sides are terminal; KP overrides remain explicit inputs.
+The result and fingerprint enter the check-consequence snapshot, so scene narration cannot use a
+client-invented winner. API and play-page UI support creation, rolling, resolution and replay.
 
 ## HTTP surface
 
@@ -132,6 +131,10 @@ POST /checks/{check_id}/override
 POST /checks/{check_id}/cancel
 POST /checks/{check_id}/push
 POST /checks/{check_id}/consequence-proposal
+POST /campaigns/{campaign_id}/opposed-checks
+GET  /campaigns/{campaign_id}/opposed-checks
+POST /opposed-checks/{opposed_check_id}/resolve
+POST /opposed-checks/{opposed_check_id}/reroll
 
 GET  /kp/proposals/{proposal_id}
 GET  /kp/proposals/{proposal_id}/context

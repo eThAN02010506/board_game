@@ -11,9 +11,12 @@ from ai_kp.api.authz import (
 )
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.schemas import (
+    MapFogCreate,
+    MapFogReveal,
     MapGenerateRequest,
     MapImageGenerateRequest,
     MapPublishRequest,
+    MapRevisionCreate,
     MapTokenCreate,
     MapTokenMove,
 )
@@ -34,6 +37,55 @@ from ai_kp.platform.scenes.map_spec import build_image_prompt
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
 router = APIRouter()
+
+
+@router.post("/maps/{map_id}/revisions")
+def create_map_revision(
+    map_id: str,
+    payload: MapRevisionCreate,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    campaign_id = campaign_for_map(repo, map_id)
+    require_campaign_role(identity, campaign_id, ("kp",))
+    return repo.create_map_revision_from_spec(
+        map_id,
+        expected_revision_id=payload.expected_revision_id,
+        map_spec=payload.map_spec,
+        member_id=identity.member_id,
+    )
+
+
+@router.post("/maps/{map_id}/fog-regions")
+def create_map_fog_region(
+    map_id: str,
+    payload: MapFogCreate,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    campaign_id = campaign_for_map(repo, map_id)
+    require_campaign_role(identity, campaign_id, ("kp",))
+    return repo.create_map_fog_region(
+        map_id,
+        label=payload.label,
+        polygon=payload.polygon,
+        member_id=identity.member_id,
+    )
+
+
+@router.post("/map-fog-regions/{fog_id}/reveal")
+def reveal_map_fog_region(
+    fog_id: str,
+    payload: MapFogReveal,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    fog = repo.get_map_fog_region(fog_id)
+    campaign_id = campaign_for_map(repo, str(fog["map_id"]))
+    require_campaign_role(identity, campaign_id, ("kp",))
+    return repo.reveal_map_fog_region(
+        fog_id, expected_version=payload.expected_version
+    )
 
 
 @router.get("/campaigns/{campaign_id}/maps")

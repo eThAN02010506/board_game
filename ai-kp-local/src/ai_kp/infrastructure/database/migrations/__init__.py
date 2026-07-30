@@ -38,6 +38,14 @@ from ai_kp.infrastructure.database.migrations import (
     v0031_memory_curation,
     v0032_session_recaps,
     v0033_character_timelines,
+    v0034_proposed_world_facts,
+    v0035_opposed_checks,
+    v0036_director_control,
+    v0037_handouts,
+    v0038_map_fog,
+    v0039_simulation_evals,
+    v0040_opposed_rerolls,
+    v0041_control_event_sequence,
 )
 
 
@@ -211,6 +219,38 @@ MIGRATIONS = (
         v0033_character_timelines.VERSION,
         v0033_character_timelines.NAME,
         v0033_character_timelines.migrate,
+    ),
+    Migration(
+        v0034_proposed_world_facts.VERSION,
+        v0034_proposed_world_facts.NAME,
+        v0034_proposed_world_facts.migrate,
+    ),
+    Migration(
+        v0035_opposed_checks.VERSION,
+        v0035_opposed_checks.NAME,
+        v0035_opposed_checks.migrate,
+    ),
+    Migration(
+        v0036_director_control.VERSION,
+        v0036_director_control.NAME,
+        v0036_director_control.migrate,
+    ),
+    Migration(v0037_handouts.VERSION, v0037_handouts.NAME, v0037_handouts.migrate),
+    Migration(v0038_map_fog.VERSION, v0038_map_fog.NAME, v0038_map_fog.migrate),
+    Migration(
+        v0039_simulation_evals.VERSION,
+        v0039_simulation_evals.NAME,
+        v0039_simulation_evals.migrate,
+    ),
+    Migration(
+        v0040_opposed_rerolls.VERSION,
+        v0040_opposed_rerolls.NAME,
+        v0040_opposed_rerolls.migrate,
+    ),
+    Migration(
+        v0041_control_event_sequence.VERSION,
+        v0041_control_event_sequence.NAME,
+        v0041_control_event_sequence.migrate,
     ),
 )
 

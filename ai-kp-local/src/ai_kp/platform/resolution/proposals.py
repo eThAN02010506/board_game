@@ -10,6 +10,7 @@ def validate_unresolved_check_boundary(
     proposed_memories: Sequence[Any],
     proposed_npc_updates: Sequence[Any],
     proposed_map_moves: Sequence[Any],
+    proposed_facts: Sequence[Any] = (),
 ) -> None:
     has_world_effects = any(
         (
@@ -17,6 +18,7 @@ def validate_unresolved_check_boundary(
             proposed_memories,
             proposed_npc_updates,
             proposed_map_moves,
+            proposed_facts,
         )
     )
     if proposed_checks and has_world_effects:
@@ -32,6 +34,7 @@ def validate_proposal_resolution_boundary(proposal: dict[str, Any]) -> None:
         proposal.get("proposed_memories") or (),
         proposal.get("proposed_npc_updates") or (),
         proposal.get("proposed_map_moves") or (),
+        proposal.get("proposed_facts") or (),
     )
 
 

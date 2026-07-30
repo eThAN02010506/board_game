@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from ai_kp.api.authz import require_approved_pc_binding, require_campaign_role
 from ai_kp.api.dependencies import get_identity, get_repo
 from ai_kp.api.schemas import (
+    OpposedCheckCreate,
     SkillCheckCreate,
     SkillCheckDecision,
     SkillCheckOverride,
@@ -11,12 +12,25 @@ from ai_kp.api.schemas import (
 from ai_kp.application.check_service import (
     CheckService,
     CreateCheckCommand,
+    CreateOpposedCheckCommand,
+    OpposedSideCommand,
     ResolveCheckCommand,
 )
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
 router = APIRouter()
+
+
+def _opposed_side(payload) -> OpposedSideCommand:
+    return OpposedSideCommand(
+        skill_name=payload.skill_name,
+        target=payload.target,
+        bonus_dice=payload.bonus_dice,
+        hidden=payload.hidden,
+        roller_member_id=payload.roller_member_id,
+        pc_id=payload.pc_id,
+    )
 
 
 @router.post("/campaigns/{campaign_id}/checks")
@@ -65,6 +79,63 @@ def list_skill_checks(
     repo: Repository = Depends(get_repo),
 ) -> list[dict]:
     return CheckService(repo).list(campaign_id, identity)
+
+
+@router.post("/campaigns/{campaign_id}/opposed-checks")
+def create_opposed_check(
+    campaign_id: str,
+    payload: OpposedCheckCreate,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp",))
+    for side in (payload.left, payload.right):
+        if side.pc_id:
+            owner_profile_id = None
+            if side.roller_member_id:
+                owner_profile_id = repo.get_session_member(
+                    side.roller_member_id
+                ).get("player_profile_id")
+            require_approved_pc_binding(
+                repo, campaign_id, side.pc_id, owner_profile_id=owner_profile_id
+            )
+    return CheckService(repo).create_opposed(
+        campaign_id,
+        identity,
+        CreateOpposedCheckCommand(
+            left=_opposed_side(payload.left),
+            right=_opposed_side(payload.right),
+            proposal_id=payload.proposal_id,
+            player_action_id=payload.player_action_id,
+        ),
+    )
+
+
+@router.get("/campaigns/{campaign_id}/opposed-checks")
+def list_opposed_checks(
+    campaign_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    return CheckService(repo).list_opposed(campaign_id, identity)
+
+
+@router.post("/opposed-checks/{opposed_check_id}/resolve")
+def resolve_opposed_check(
+    opposed_check_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    return CheckService(repo).resolve_opposed(opposed_check_id, identity)
+
+
+@router.post("/opposed-checks/{opposed_check_id}/reroll")
+def reroll_opposed_check(
+    opposed_check_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    return CheckService(repo).reroll_opposed(opposed_check_id, identity)
 
 
 @router.get("/checks/{check_id}")

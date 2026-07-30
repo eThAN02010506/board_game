@@ -596,6 +596,7 @@ CREATE TABLE IF NOT EXISTS turn_proposals (
   proposed_memories_json TEXT NOT NULL DEFAULT '[]',
   proposed_npc_updates_json TEXT NOT NULL DEFAULT '[]',
   proposed_map_moves_json TEXT NOT NULL DEFAULT '[]',
+  proposed_facts_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(proposed_facts_json)),
   source_model TEXT NOT NULL DEFAULT 'unknown',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   applied_at TEXT

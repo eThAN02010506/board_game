@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from hashlib import sha256
 from typing import Any
 
 from ai_kp.core.ids import new_id
@@ -262,6 +263,174 @@ class SkillCheckRepository(SQLiteRepository):
             (campaign_id, session_id),
         ).fetchall()
         return [self.get_skill_check(str(row["id"])) for row in rows]
+
+    def create_opposed_check(
+        self,
+        *,
+        campaign_id: str,
+        session_id: str,
+        requested_by_member_id: str,
+        left_check_id: str,
+        right_check_id: str,
+        rerolled_from_opposed_check_id: str | None = None,
+    ) -> dict[str, Any]:
+        self._validate_check_scope(campaign_id, session_id, requested_by_member_id)
+        checks = [self.get_skill_check(left_check_id), self.get_skill_check(right_check_id)]
+        if left_check_id == right_check_id:
+            raise ValueError("Opposed checks require two distinct checks")
+        for check in checks:
+            if check["campaign_id"] != campaign_id or check["session_id"] != session_id:
+                raise ValueError("Opposed check participants must share campaign and session")
+            if check["ruleset_id"] != checks[0]["ruleset_id"]:
+                raise ValueError("Opposed check participants must share a ruleset")
+            if check["pushed_from_check_id"] is not None or check["allow_push"]:
+                raise ValueError("Opposed checks cannot use pushed or pushable checks")
+        opposed_id = new_id("opposed")
+        self.connection.execute(
+            """
+            INSERT INTO opposed_checks
+              (id, campaign_id, session_id, requested_by_member_id,
+               left_check_id, right_check_id, rerolled_from_opposed_check_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                opposed_id,
+                campaign_id,
+                session_id,
+                requested_by_member_id,
+                left_check_id,
+                right_check_id,
+                rerolled_from_opposed_check_id,
+            ),
+        )
+        self._add_opposed_action(opposed_id, "requested", requested_by_member_id)
+        return self.get_opposed_check(opposed_id)
+
+    def get_opposed_check(self, opposed_check_id: str) -> dict[str, Any]:
+        row = self.connection.execute(
+            "SELECT * FROM opposed_checks WHERE id = ?", (opposed_check_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Opposed check not found: {opposed_check_id}")
+        result = row_to_dict(row)
+        result_json = result.pop("result_json")
+        result["result"] = (
+            decode_json_field(result_json, None) if result_json is not None else None
+        )
+        result["left_check"] = self.get_skill_check(str(result["left_check_id"]))
+        result["right_check"] = self.get_skill_check(str(result["right_check_id"]))
+        actions = self.connection.execute(
+            """
+            SELECT * FROM opposed_check_actions
+            WHERE opposed_check_id = ? ORDER BY created_at, id
+            """,
+            (opposed_check_id,),
+        ).fetchall()
+        result["actions"] = []
+        for action_row in actions:
+            action = row_to_dict(action_row)
+            action["payload"] = decode_json_field(action.pop("payload_json"), {})
+            result["actions"].append(action)
+        return result
+
+    def list_opposed_checks(
+        self, campaign_id: str, session_id: str
+    ) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT id FROM opposed_checks
+            WHERE campaign_id = ? AND session_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (campaign_id, session_id),
+        ).fetchall()
+        return [self.get_opposed_check(str(row["id"])) for row in rows]
+
+    def list_opposed_checks_for_action(
+        self, player_action_id: str
+    ) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT DISTINCT opposed.id
+            FROM opposed_checks AS opposed
+            JOIN skill_checks AS left_check ON left_check.id = opposed.left_check_id
+            JOIN skill_checks AS right_check ON right_check.id = opposed.right_check_id
+            WHERE left_check.player_action_id = ? OR right_check.player_action_id = ?
+            ORDER BY opposed.created_at, opposed.id
+            """,
+            (player_action_id, player_action_id),
+        ).fetchall()
+        return [self.get_opposed_check(str(row["id"])) for row in rows]
+
+    def resolve_opposed_check(
+        self,
+        opposed_check_id: str,
+        *,
+        actor_member_id: str,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        opposed = self.get_opposed_check(opposed_check_id)
+        if opposed["status"] != "pending":
+            raise ValueError("Only a pending opposed check can be resolved")
+        payload = json.dumps(
+            result, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        status = "reroll_required" if result["outcome"] == "tie" else "resolved"
+        updated = self.connection.execute(
+            """
+            UPDATE opposed_checks
+            SET status = ?, result_json = ?, result_fingerprint = ?,
+                resolved_by_member_id = ?, resolved_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status = 'pending'
+            """,
+            (
+                status,
+                payload,
+                sha256(payload.encode("utf-8")).hexdigest(),
+                actor_member_id,
+                opposed_check_id,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("Opposed check changed concurrently")
+        self._add_opposed_action(opposed_check_id, status, actor_member_id, result)
+        self.append_realtime_event(
+            session_id=str(opposed["session_id"]),
+            campaign_id=str(opposed["campaign_id"]),
+            audience=(
+                "kp"
+                if opposed["left_check"]["hidden"] or opposed["right_check"]["hidden"]
+                else "session"
+            ),
+            event_type=f"opposed_check.{status}",
+            resource_type="opposed_check",
+            resource_id=opposed_check_id,
+            payload={"status": status, "result_fingerprint": sha256(payload.encode()).hexdigest()},
+        )
+        return self.get_opposed_check(opposed_check_id)
+
+    def _add_opposed_action(
+        self,
+        opposed_check_id: str,
+        action_type: str,
+        actor_member_id: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO opposed_check_actions
+              (id, opposed_check_id, action_type, actor_member_id, payload_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("opposedaction"),
+                opposed_check_id,
+                action_type,
+                actor_member_id,
+                json.dumps(payload or {}, ensure_ascii=False),
+            ),
+        )
 
     def list_skill_check_actions(self, check_id: str) -> list[dict[str, Any]]:
         rows = self.connection.execute(
@@ -606,7 +775,10 @@ class SkillCheckRepository(SQLiteRepository):
         checks = self.list_skill_checks_for_action(str(action_id))
         if not checks or any(item["status"] == "requested" for item in checks):
             return
-        snapshot = build_check_consequence_snapshot(checks)
+        opposed_checks = self.list_opposed_checks_for_action(str(action_id))
+        if any(item["status"] == "pending" for item in opposed_checks):
+            return
+        snapshot = build_check_consequence_snapshot(checks, opposed_checks)
         self.append_realtime_event(
             session_id=str(check["session_id"]),
             campaign_id=str(check["campaign_id"]),

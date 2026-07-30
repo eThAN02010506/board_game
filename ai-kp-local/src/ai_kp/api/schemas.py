@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ai_kp.director.turn_output import (
     CheckCandidate,
     EventCandidate,
+    FactCandidate,
     MapMoveCandidate,
     MemoryCandidate,
     NpcUpdateCandidate,
@@ -190,6 +191,26 @@ class SkillCheckDecision(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class OpposedCheckSideCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: str = Field(min_length=1, max_length=100)
+    target: int | None = Field(default=None, ge=0, le=100)
+    bonus_dice: int = Field(default=0, ge=-2, le=2)
+    hidden: bool = False
+    roller_member_id: str | None = None
+    pc_id: str | None = None
+
+
+class OpposedCheckCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    left: OpposedCheckSideCreate
+    right: OpposedCheckSideCreate
+    proposal_id: str | None = None
+    player_action_id: str | None = None
+
+
 class PlayerActionCreate(BaseModel):
     action_text: str = Field(min_length=1, max_length=4000)
     token_id: str | None = None
@@ -338,6 +359,61 @@ class ModuleRunEntityStateUpdate(BaseModel):
 
 class DirectorAnalysisRequest(BaseModel):
     player_intent: str = Field(min_length=1, max_length=1000)
+
+
+class DirectorControlUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+    mode: Literal["ai_assist", "safety_paused", "human_kp"]
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class HandoutCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=300)
+    body: str = Field(min_length=1, max_length=20_000)
+    kind: Literal["clue", "handbook", "image", "note"] = "clue"
+    link_type: Literal["fact", "npc", "map", "location", "module_entity"] | None = None
+    link_id: str | None = Field(default=None, max_length=200)
+
+
+class HandoutUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+    status: Literal["draft", "revealed", "withdrawn"]
+    pinned: bool = False
+    link_type: Literal["fact", "npc", "map", "location", "module_entity"] | None = None
+    link_id: str | None = Field(default=None, max_length=200)
+
+
+class MapRevisionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision_id: str
+    map_spec: dict[str, Any]
+
+
+class MapFogCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=200)
+    polygon: list[dict[str, float]] = Field(min_length=3, max_length=64)
+
+
+class MapFogReveal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+
+
+class SimulationCaseCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    definition: dict[str, Any]
 
 
 class WorldExpansionProposalRequest(BaseModel):
@@ -713,4 +789,5 @@ class TurnProposalCreate(BaseModel):
     proposed_memories: list[MemoryCandidate] = Field(default_factory=list, max_length=10)
     proposed_npc_updates: list[NpcUpdateCandidate] = Field(default_factory=list, max_length=8)
     proposed_map_moves: list[MapMoveCandidate] = Field(default_factory=list, max_length=12)
+    proposed_facts: list[FactCandidate] = Field(default_factory=list, max_length=12)
     source_model: str = "manual-dev"

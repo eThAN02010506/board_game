@@ -129,6 +129,7 @@ export function ProposalPanel(props: Props) {
               <ProposalEffectList title="长期记忆" items={props.activeProposal.proposed_memories} />
               <ProposalEffectList title="NPC 变更" items={props.activeProposal.proposed_npc_updates} />
               <ProposalEffectList title="地图移动" items={props.activeProposal.proposed_map_moves} />
+              <ProposalEffectList title="严格世界事实" items={props.activeProposal.proposed_facts ?? []} />
             </div>
           </>
         ) : (

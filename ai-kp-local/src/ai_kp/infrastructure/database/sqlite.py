@@ -1,6 +1,9 @@
 """Canonical shared SQLite repository base adapter."""
 
 import sqlite3
+import time
+
+from ai_kp.observability import operational_telemetry
 
 
 class SQLiteRepository:
@@ -17,4 +20,10 @@ class SQLiteRepository:
 
     def begin_immediate(self) -> None:
         if not self.connection.in_transaction:
-            self.connection.execute("BEGIN IMMEDIATE")
+            started = time.perf_counter()
+            try:
+                self.connection.execute("BEGIN IMMEDIATE")
+            finally:
+                operational_telemetry.record_lock_wait(
+                    (time.perf_counter() - started) * 1000
+                )

@@ -6,9 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ai_kp.api.main import create_app
+from ai_kp.application.errors import ConflictError
 from ai_kp.application.module_graph_service import ModuleGraphService
 from ai_kp.application.module_knowledge_service import ModuleKnowledgeService
-from ai_kp.application.module_run_service import ModuleRunService
+from ai_kp.application.module_run_service import (
+    DirectorControlCommand,
+    ModuleRunService,
+)
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.schema import connect, init_db
@@ -131,6 +135,74 @@ def test_module_run_rejects_cross_campaign_module(tmp_path: Path) -> None:
                 state={},
                 started_by_member_id=None,
             )
+    finally:
+        connection.close()
+
+
+def test_director_control_handoff_is_audited_and_blocks_ai_analysis(
+    tmp_path: Path,
+) -> None:
+    connection = connect(tmp_path / "director-control.sqlite3")
+    try:
+        init_db(connection)
+        repo = Repository(connection)
+        campaign = repo.create_campaign("人工接管")
+        kp = repo.create_campaign_session(
+            campaign["id"], kp_display_name="人工 KP"
+        )["member"]
+        module = _module(repo, campaign["id"], "接管模组")
+        run = repo.start_campaign_module_run(
+            campaign_id=campaign["id"],
+            module_id=module["id"],
+            current_scene_key="scene-1",
+            active_spoiler_tags=["act-1"],
+            state={},
+            started_by_member_id=kp["id"],
+        )
+        service = ModuleRunService(repo)
+
+        paused = service.set_control(
+            run["id"],
+            DirectorControlCommand(
+                expected_version=run["version"],
+                mode="safety_paused",
+                reason="模型输出触及未揭示真相，等待人工复核",
+            ),
+            member_id=kp["id"],
+        )
+
+        assert paused["director_control_mode"] == "safety_paused"
+        assert paused["version"] == run["version"] + 1
+        with pytest.raises(ConflictError, match="human KP control"):
+            service.analyze(run["id"], "继续调查")
+        with pytest.raises(ConflictError, match="refresh"):
+            service.set_control(
+                run["id"],
+                DirectorControlCommand(
+                    expected_version=run["version"],
+                    mode="human_kp",
+                    reason="过期页面试图接管",
+                ),
+                member_id=kp["id"],
+            )
+
+        resumed = service.set_control(
+            run["id"],
+            DirectorControlCommand(
+                expected_version=paused["version"],
+                mode="ai_assist",
+                reason="人工确认上下文安全，交还 AI",
+            ),
+            member_id=kp["id"],
+        )
+        assert resumed["director_control_mode"] == "ai_assist"
+        events = repo.list_module_run_control_events(run["id"])
+        assert [
+            (item["from_mode"], item["to_mode"]) for item in events
+        ] == [
+            ("ai_assist", "safety_paused"),
+            ("safety_paused", "ai_assist"),
+        ]
     finally:
         connection.close()
 

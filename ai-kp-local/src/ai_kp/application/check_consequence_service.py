@@ -41,7 +41,8 @@ class CheckConsequenceService:
         action = self.repo.get_player_action(str(action_id))
         checks = self.repo.list_skill_checks_for_action(str(action_id))
         self._require_linked_scope(identity, check, action, checks)
-        snapshot = build_check_consequence_snapshot(checks)
+        opposed_checks = self.repo.list_opposed_checks_for_action(str(action_id))
+        snapshot = build_check_consequence_snapshot(checks, opposed_checks)
         existing = self.repo.find_live_check_consequence(
             str(action["campaign_id"]),
             player_action_id=str(action_id),
@@ -71,13 +72,16 @@ class CheckConsequenceService:
             )
         current_action = self.repo.get_player_action(str(action_id))
         current_checks = self.repo.list_skill_checks_for_action(str(action_id))
+        current_opposed_checks = self.repo.list_opposed_checks_for_action(str(action_id))
         self._require_linked_scope(
             identity,
             self.repo.get_skill_check(command.check_id),
             current_action,
             current_checks,
         )
-        current_snapshot = build_check_consequence_snapshot(current_checks)
+        current_snapshot = build_check_consequence_snapshot(
+            current_checks, current_opposed_checks
+        )
         if (
             current_snapshot["result_fingerprint"]
             != snapshot["result_fingerprint"]
@@ -114,6 +118,7 @@ class CheckConsequenceService:
             proposed_memories=output.proposed_memories,
             proposed_npc_updates=output.proposed_npc_updates,
             proposed_map_moves=[],
+            proposed_facts=output.proposed_facts,
             source_model=source_model,
         )
         self.repo.attach_check_consequence_basis(

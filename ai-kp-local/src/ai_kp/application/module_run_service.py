@@ -35,6 +35,13 @@ class EntityStateCommand:
     note: str = ""
 
 
+@dataclass(frozen=True)
+class DirectorControlCommand:
+    expected_version: int
+    mode: str
+    reason: str
+
+
 class ModuleRunService:
     def __init__(self, repo: ModuleRunStore):
         self.repo = repo
@@ -121,6 +128,10 @@ class ModuleRunService:
         if len(intent) > 1000:
             raise InvalidInputError("Player intent is too long")
         run = self.repo.get_campaign_module_run(run_id)
+        if run.get("director_control_mode") != "ai_assist":
+            raise ConflictError(
+                "AI director is paused or under human KP control; return control first"
+            )
         entity_states = self.repo.list_module_run_entity_states(run_id)
         active_entry_ids = tuple(
             str(item["entity_id"])
@@ -213,6 +224,24 @@ class ModuleRunService:
             "unreachable_anchor_count": len(unreachable_anchors),
             "writes_performed": False,
         }
+
+    def set_control(
+        self,
+        run_id: str,
+        command: DirectorControlCommand,
+        *,
+        member_id: str,
+    ) -> dict:
+        try:
+            return self.repo.set_module_run_control(
+                run_id,
+                expected_version=command.expected_version,
+                mode=command.mode,
+                reason=command.reason,
+                member_id=member_id,
+            )
+        except ValueError as exc:
+            self._raise_input_or_conflict(exc)
 
     @staticmethod
     def _raise_input_or_conflict(exc: ValueError) -> NoReturn:

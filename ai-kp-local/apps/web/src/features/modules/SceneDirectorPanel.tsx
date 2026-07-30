@@ -17,6 +17,7 @@ import {
   getModuleRunDirectorState,
   isApiError,
   transitionModuleRunScene,
+  updateDirectorControl,
   updateModuleRunEntityState
 } from "../../api/client";
 import type {
@@ -68,6 +69,7 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
   const [locationId, setLocationId] = useState(run.current_location_entity_id ?? "");
   const [worldTime, setWorldTime] = useState(run.scene_started_world_time ?? "");
   const [transitionNote, setTransitionNote] = useState("");
+  const [controlReason, setControlReason] = useState("KP 主动切换导演控制权");
   const [entityDrafts, setEntityDrafts] = useState<
     Record<string, ModuleRuntimeEntityStatus>
   >({});
@@ -75,6 +77,25 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
   const [busy, setBusy] = useState(false);
   const requestEpoch = useRef(0);
   const activeRun = directorState?.run ?? run;
+  const controlMode = activeRun.director_control_mode ?? "ai_assist";
+
+  async function changeControl(mode: "ai_assist" | "safety_paused" | "human_kp") {
+    setBusy(true);
+    try {
+      const updated = await updateDirectorControl(activeRun.id, {
+        expected_version: activeRun.version,
+        mode,
+        reason: controlReason
+      });
+      onRunChanged(updated);
+      await loadState(updated.id, true);
+      setMessage(mode === "ai_assist" ? "控制权已交还 AI 辅助。" : mode === "human_kp" ? "人类 KP 已完全接管。" : "AI 已安全暂停。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function loadState(runId: string, silent = false) {
     const epoch = ++requestEpoch.current;
@@ -252,6 +273,16 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
       </header>
 
       <div className="scene-director-grid">
+        <section className="director-control-card" aria-label="导演控制权">
+          <div className="director-card-title"><ShieldAlert size={17} /><div><strong>安全暂停与接管</strong><small>状态持久化，所有切换写入审计</small></div></div>
+          <label>切换理由<input maxLength={2000} value={controlReason} onChange={(event) => setControlReason(event.target.value)} /></label>
+          <div className="director-control-actions">
+            <button disabled={busy || controlMode === "safety_paused"} onClick={() => void changeControl("safety_paused")} type="button">安全暂停</button>
+            <button disabled={busy || controlMode === "human_kp"} onClick={() => void changeControl("human_kp")} type="button">人类 KP 接管</button>
+            <button disabled={busy || controlMode === "ai_assist"} onClick={() => void changeControl("ai_assist")} type="button">交还 AI 辅助</button>
+          </div>
+          <small>当前：{controlMode === "ai_assist" ? "AI 可辅助" : controlMode === "human_kp" ? "人类 KP 完全接管" : "AI 安全暂停"}{activeRun.director_control_reason ? ` · ${activeRun.director_control_reason}` : ""}</small>
+        </section>
         <form className="scene-transition-card" onSubmit={(event) => void transitionScene(event)}>
           <div className="director-card-title">
             <MapPin size={17} />
@@ -346,7 +377,7 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
               value={intent}
             />
           </label>
-          <button disabled={busy} type="submit">
+          <button disabled={busy || controlMode !== "ai_assist"} type="submit">
             <Search size={15} />分析现有答案与世界缺口
           </button>
           {analysis && (

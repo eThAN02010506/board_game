@@ -43,6 +43,9 @@ class CapabilityPlaceholderTests(unittest.TestCase):
             "image_map_generation",
             "model_quantization_profiles",
             "human_kp_modes",
+            "player_handouts",
+            "simulated_campaign_evaluation",
+            "operational_safety",
             "voice_companion",
             "webrtc_rooms",
         }

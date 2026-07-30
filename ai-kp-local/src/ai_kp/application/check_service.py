@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from ai_kp.application.ports.repositories import CheckStore
@@ -24,6 +26,24 @@ class ResolveCheckCommand:
     input_method: str = "digital"
     ones_digit: int | None = None
     tens_digits: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class OpposedSideCommand:
+    skill_name: str
+    target: int | None = None
+    bonus_dice: int = 0
+    hidden: bool = False
+    roller_member_id: str | None = None
+    pc_id: str | None = None
+
+
+@dataclass(frozen=True)
+class CreateOpposedCheckCommand:
+    left: OpposedSideCommand
+    right: OpposedSideCommand
+    proposal_id: str | None = None
+    player_action_id: str | None = None
 
 
 class CheckService:
@@ -81,6 +101,161 @@ class CheckService:
         check = self.repo.get_skill_check(check_id)
         self._require_visible(check, identity)
         return check
+
+    def create_opposed(
+        self,
+        campaign_id: str,
+        identity: AuthenticatedMember,
+        command: CreateOpposedCheckCommand,
+    ) -> dict:
+        self._require_kp(identity, campaign_id)
+        self.repo.begin_immediate()
+        created: list[dict] = []
+        for side in (command.left, command.right):
+            created.append(
+                self.create(
+                    campaign_id,
+                    identity,
+                    CreateCheckCommand(
+                        skill_name=side.skill_name,
+                        difficulty="regular",
+                        bonus_dice=side.bonus_dice,
+                        hidden=side.hidden,
+                        allow_push=False,
+                        roller_member_id=side.roller_member_id,
+                        pc_id=side.pc_id,
+                        target=side.target,
+                        proposal_id=command.proposal_id,
+                        player_action_id=command.player_action_id,
+                    ),
+                )
+            )
+        return self.repo.create_opposed_check(
+            campaign_id=campaign_id,
+            session_id=identity.session_id,
+            requested_by_member_id=identity.member_id,
+            left_check_id=str(created[0]["id"]),
+            right_check_id=str(created[1]["id"]),
+        )
+
+    def list_opposed(
+        self, campaign_id: str, identity: AuthenticatedMember
+    ) -> list[dict]:
+        self._require_campaign(identity, campaign_id)
+        contests = self.repo.list_opposed_checks(campaign_id, identity.session_id)
+        if identity.role == "kp":
+            return contests
+        return [
+            contest
+            for contest in contests
+            if not contest["left_check"]["hidden"]
+            and not contest["right_check"]["hidden"]
+            and identity.member_id
+            in {
+                contest["left_check"]["roller_member_id"],
+                contest["right_check"]["roller_member_id"],
+            }
+        ]
+
+    def resolve_opposed(
+        self, opposed_check_id: str, identity: AuthenticatedMember
+    ) -> dict:
+        opposed = self.repo.get_opposed_check(opposed_check_id)
+        self._require_kp(identity, str(opposed["campaign_id"]))
+        if identity.session_id != opposed["session_id"]:
+            raise PermissionError("Opposed check belongs to another session")
+        left, right = opposed["left_check"], opposed["right_check"]
+        if any(check["status"] not in {"resolved", "overridden"} for check in (left, right)):
+            raise ValueError("Both sides must have terminal rolled results")
+        if left["ruleset_id"] != right["ruleset_id"]:
+            raise ValueError("Opposed check rulesets no longer match")
+        ruleset = get_ruleset(str(left["ruleset_id"]))
+        result = ruleset.resolve_opposed_check(
+            left_participant_id=str(left["id"]),
+            left_target=int(left["target"]),
+            left_roll=int(left["selected_roll"]),
+            right_participant_id=str(right["id"]),
+            right_target=int(right["target"]),
+            right_roll=int(right["selected_roll"]),
+        )
+        # KP overrides are authoritative inputs, never silently discarded.
+        if left["status"] == "overridden" or right["status"] == "overridden":
+            from ai_kp.rulesets.coc7.mechanics.opposed_check import (
+                OpposedParticipant,
+                resolve_opposed,
+            )
+
+            result = resolve_opposed(
+                OpposedParticipant(
+                    str(left["id"]), int(left["target"]), int(left["selected_roll"]),
+                    left["success_level"],
+                ),
+                OpposedParticipant(
+                    str(right["id"]), int(right["target"]), int(right["selected_roll"]),
+                    right["success_level"],
+                ),
+            ).as_dict()
+        result["participant_labels"] = {
+            str(left["id"]): left["skill_name"],
+            str(right["id"]): right["skill_name"],
+        }
+        return self.repo.resolve_opposed_check(
+            opposed_check_id,
+            actor_member_id=identity.member_id,
+            result=result,
+        )
+
+    def reroll_opposed(
+        self, opposed_check_id: str, identity: AuthenticatedMember
+    ) -> dict:
+        opposed = self.repo.get_opposed_check(opposed_check_id)
+        self._require_kp(identity, str(opposed["campaign_id"]))
+        if identity.session_id != opposed["session_id"]:
+            raise PermissionError("Opposed check belongs to another session")
+        if opposed["status"] != "reroll_required":
+            raise ValueError("Only an exact tied opposed check can be rerolled")
+        existing = next(
+            (
+                item
+                for item in self.repo.list_opposed_checks(
+                    str(opposed["campaign_id"]), identity.session_id
+                )
+                if item.get("rerolled_from_opposed_check_id") == opposed_check_id
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        left, right = opposed["left_check"], opposed["right_check"]
+        self.repo.begin_immediate()
+        children = []
+        for check in (left, right):
+            children.append(
+                self.create(
+                    str(opposed["campaign_id"]),
+                    identity,
+                    CreateCheckCommand(
+                        skill_name=str(check["skill_name"]),
+                        difficulty="regular",
+                        bonus_dice=int(check["bonus_dice"]),
+                        hidden=bool(check["hidden"]),
+                        allow_push=False,
+                        roller_member_id=check["roller_member_id"],
+                        pc_id=check["pc_id"],
+                        target=int(check["target"]),
+                        proposal_id=check["proposal_id"],
+                        player_action_id=check["player_action_id"],
+                    ),
+                )
+            )
+        return self.repo.create_opposed_check(
+            campaign_id=str(opposed["campaign_id"]),
+            session_id=identity.session_id,
+            requested_by_member_id=identity.member_id,
+            left_check_id=str(children[0]["id"]),
+            right_check_id=str(children[1]["id"]),
+            rerolled_from_opposed_check_id=opposed_check_id,
+        )
 
     def resolve(
         self,
@@ -216,4 +391,10 @@ class CheckService:
             raise ValueError("Only a requested check can be resolved")
 
 
-__all__ = ["CheckService", "CreateCheckCommand", "ResolveCheckCommand"]
+__all__ = [
+    "CheckService",
+    "CreateCheckCommand",
+    "CreateOpposedCheckCommand",
+    "OpposedSideCommand",
+    "ResolveCheckCommand",
+]

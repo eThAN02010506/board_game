@@ -110,6 +110,9 @@ function renderPanel({
   const callbacks = {
     onRefresh: vi.fn(),
     onCreate: vi.fn(),
+    onCreateOpposed: vi.fn(),
+    onResolveOpposed: vi.fn(),
+    onRerollOpposed: vi.fn(),
     onResolveDigital: vi.fn(),
     onResolvePhysical: vi.fn(),
     onGenerateConsequence: vi.fn(),
@@ -122,6 +125,7 @@ function renderPanel({
   const view = render(
     <CheckPanel
       checks={checks}
+      opposedChecks={[]}
       identity={identity}
       loading={loading}
       members={members}
@@ -136,7 +140,7 @@ describe("CheckPanel", () => {
   it("lets a KP assign a check only to active player members", () => {
     const { onCreate } = renderPanel();
 
-    expect(screen.getByRole("option", { name: "林若川" })).toBeInTheDocument();
+    expect(screen.getAllByRole("option", { name: "林若川" })).toHaveLength(3);
     expect(screen.queryByRole("option", { name: "已离席玩家" })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "协助守密人" })).not.toBeInTheDocument();
 
@@ -184,11 +188,13 @@ describe("CheckPanel", () => {
     rerender(
       <CheckPanel
         checks={[check]}
+        opposedChecks={[]}
         identity={{ ...playerIdentity, member_id: "member_other_player" }}
         loading={false}
         members={members}
         onCancel={vi.fn()}
         onCreate={vi.fn()}
+        onCreateOpposed={vi.fn()}
         onGenerateConsequence={vi.fn()}
         onOverride={vi.fn()}
         onPush={vi.fn()}
@@ -196,6 +202,8 @@ describe("CheckPanel", () => {
         onReplay={vi.fn()}
         onResolveDigital={onResolveDigital}
         onResolvePhysical={vi.fn()}
+        onResolveOpposed={vi.fn()}
+        onRerollOpposed={vi.fn()}
       />
     );
 

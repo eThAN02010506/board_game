@@ -11,7 +11,9 @@ from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.character_timelines import CharacterTimelineRepository
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
 from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
+from ai_kp.infrastructure.database.evaluations import EvaluationRepository
 from ai_kp.infrastructure.database.facts import FactRepository
+from ai_kp.infrastructure.database.handouts import HandoutRepository
 from ai_kp.infrastructure.database.investigators import InvestigatorRepository
 from ai_kp.infrastructure.database.maps import MapRepository
 from ai_kp.infrastructure.database.memory_timeline import MemoryTimelineRepository
@@ -403,7 +405,9 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
 def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     assert Repository.__bases__ == (
         WorldRepository,
+        EvaluationRepository,
         FactRepository,
+        HandoutRepository,
         TurnRepository,
         MapRepository,
         ContextAssemblyRepository,
@@ -465,7 +469,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 33
+    assert LATEST_SCHEMA_VERSION == 41
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -500,6 +504,14 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (31, "add_memory_curation_actions"),
         (32, "add_session_recap_reviews"),
         (33, "add_cross_campaign_character_timelines"),
+        (34, "add_proposed_world_facts"),
+        (35, "add_persisted_opposed_checks"),
+        (36, "add_director_control_handoff"),
+        (37, "add_player_handouts"),
+        (38, "add_map_fog_regions"),
+        (39, "add_simulated_campaign_evaluations"),
+        (40, "add_opposed_check_reroll_lineage"),
+        (41, "add_director_control_event_sequence"),
     ]
 
 

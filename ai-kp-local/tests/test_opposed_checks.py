@@ -34,21 +34,30 @@ class OpposedCheckRuleTests(unittest.TestCase):
         self.assertEqual(result.winner_id, "felix")
         self.assertEqual(result.decided_by, "target")
 
-    def test_equal_level_and_target_leave_keeper_choice_explicit(self) -> None:
+    def test_equal_level_and_target_uses_lower_roll(self) -> None:
         left = OpposedParticipant("left", target=50, roll=30)
         right = OpposedParticipant("right", target=50, roll=40)
 
         result = resolve_opposed(left, right)
         serialized = result.as_dict()
 
-        self.assertEqual(result.outcome, "tie")
-        self.assertIsNone(result.winner_id)
-        self.assertIsNone(result.loser_id)
-        self.assertEqual(result.decided_by, "unresolved_tie")
-        self.assertEqual(result.tie_options, ("stalemate", "reroll"))
-        self.assertEqual(serialized["tie_options"], ["stalemate", "reroll"])
+        self.assertEqual(result.outcome, "left_wins")
+        self.assertEqual(result.winner_id, "left")
+        self.assertEqual(result.decided_by, "lower_roll")
+        self.assertEqual(result.tie_options, ())
+        self.assertEqual(serialized["tie_options"], [])
         self.assertFalse(serialized["push_allowed"])
         self.assertFalse(serialized["difficulty_used"])
+
+    def test_exact_tie_requires_reroll(self) -> None:
+        result = resolve_opposed(
+            OpposedParticipant("left", target=50, roll=30),
+            OpposedParticipant("right", target=50, roll=30),
+        )
+
+        self.assertEqual(result.outcome, "tie")
+        self.assertEqual(result.decided_by, "exact_tie")
+        self.assertEqual(result.tie_options, ("reroll",))
 
     def test_failure_and_fumble_remain_distinct_success_levels(self) -> None:
         left = OpposedParticipant("failed", target=60, roll=90)

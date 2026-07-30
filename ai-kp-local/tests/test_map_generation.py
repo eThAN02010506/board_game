@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 from ai_kp.core.db import db_session
@@ -116,6 +117,79 @@ class MapGenerationTests(unittest.TestCase):
 
                 with self.assertRaises(ValueError):
                     repo.move_map_token(token["id"], "报社")
+
+    def test_map_revision_and_fog_are_versioned_without_leaking_revealed_fog(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "map-editing.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("地图编辑")
+                kp = repo.create_campaign_session(
+                    campaign["id"], kp_display_name="地图 KP"
+                )["member"]
+                saved = repo.create_map(
+                    campaign["id"],
+                    generate_map(
+                        title="旧宅",
+                        prompt="门厅与书房",
+                        location_names=["门厅", "书房"],
+                        routes=[("门厅", "书房")],
+                    ),
+                )
+                prior_revision_id = saved["revision_id"]
+                edited_spec = deepcopy(saved["map_spec"])
+                edited_spec["title"] = "旧宅·夜间"
+                edited_spec["locations"][0]["position"]["x"] += 10
+
+                revised = repo.create_map_revision_from_spec(
+                    saved["id"],
+                    expected_revision_id=prior_revision_id,
+                    map_spec=edited_spec,
+                    member_id=kp["id"],
+                )
+
+                self.assertEqual(revised["revision_no"], saved["revision_no"] + 1)
+                self.assertNotEqual(revised["revision_id"], prior_revision_id)
+                self.assertEqual(revised["title"], "旧宅·夜间")
+                with self.assertRaisesRegex(ValueError, "refresh"):
+                    repo.create_map_revision_from_spec(
+                        saved["id"],
+                        expected_revision_id=prior_revision_id,
+                        map_spec=edited_spec,
+                        member_id=kp["id"],
+                    )
+
+                fog = repo.create_map_fog_region(
+                    saved["id"],
+                    label="未探索书房",
+                    polygon=[
+                        {"x": 10, "y": 10},
+                        {"x": 100, "y": 10},
+                        {"x": 100, "y": 100},
+                        {"x": 10, "y": 100},
+                    ],
+                    member_id=kp["id"],
+                )
+                player_map = repo.get_map(
+                    saved["id"], allowed_visibility=("player", "table")
+                )
+                self.assertEqual(
+                    [item["id"] for item in player_map["fog_regions"]], [fog["id"]]
+                )
+
+                revealed = repo.reveal_map_fog_region(
+                    fog["id"], expected_version=fog["version"]
+                )
+                self.assertEqual(revealed["status"], "revealed")
+                player_map = repo.get_map(
+                    saved["id"], allowed_visibility=("player", "table")
+                )
+                self.assertEqual(player_map["fog_regions"], [])
+                with self.assertRaisesRegex(ValueError, "refresh"):
+                    repo.reveal_map_fog_region(
+                        fog["id"], expected_version=fog["version"]
+                    )
 
 
 if __name__ == "__main__":

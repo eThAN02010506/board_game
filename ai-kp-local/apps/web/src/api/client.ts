@@ -27,7 +27,10 @@ import type {
   RuleReviewSubmission,
   Role,
   TurnProposal,
-  WorldExpansionEncounterInput
+  WorldExpansionEncounterInput,
+  WorldFactCreateInput,
+  WorldFactEntry,
+  WorldFactType
 } from "./types";
 
 export const apiBase = "/api";
@@ -244,6 +247,53 @@ export function fetchCapabilities(): Promise<Capability[]> {
   return requestJson<Capability[]>("/capabilities");
 }
 
+export function listWorldFacts(
+  campaignId: string,
+  options: {
+    includeHistory?: boolean;
+    factType?: WorldFactType | "";
+  } = {}
+): Promise<WorldFactEntry[]> {
+  const params = new URLSearchParams();
+  if (options.includeHistory) params.set("include_history", "true");
+  if (options.factType) params.set("fact_type", options.factType);
+  const query = params.size ? `?${params.toString()}` : "";
+  return requestJson<WorldFactEntry[]>(
+    `/campaigns/${encodeURIComponent(campaignId)}/facts${query}`
+  );
+}
+
+export function createWorldFact(
+  campaignId: string,
+  payload: WorldFactCreateInput
+): Promise<WorldFactEntry> {
+  return requestJson<WorldFactEntry>(
+    `/campaigns/${encodeURIComponent(campaignId)}/facts`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function retconWorldFact(
+  campaignId: string,
+  factKey: string,
+  payload: {
+    expected_head_event_id: string;
+    reason: string;
+    evidence_event_ids?: string[];
+    source_reference?: Record<string, unknown>;
+    happened_at?: string | null;
+  }
+): Promise<{
+  append_only: true;
+  retained_revision: WorldFactEntry;
+  appended_revision: WorldFactEntry;
+}> {
+  return requestJson(
+    `/campaigns/${encodeURIComponent(campaignId)}/facts/${encodeURIComponent(factKey)}/retcon`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
 export function listModuleRuns(
   campaignId: string,
   options: { limit?: number; offset?: number } = {}
@@ -332,6 +382,20 @@ export function analyzeModuleRunIntent(
       method: "POST",
       body: JSON.stringify({ player_intent: playerIntent })
     }
+  );
+}
+
+export function updateDirectorControl(
+  runId: string,
+  payload: {
+    expected_version: number;
+    mode: ModuleRun["director_control_mode"];
+    reason: string;
+  }
+): Promise<ModuleRun> {
+  return requestJson<ModuleRun>(
+    `/module-runs/${encodeURIComponent(runId)}/director/control`,
+    { method: "POST", body: JSON.stringify(payload) }
   );
 }
 

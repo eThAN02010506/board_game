@@ -75,7 +75,8 @@ CAPABILITIES: tuple[Capability, ...] = (
         summary=(
             "已用权威事件流实现 canonical fact、KP secret、角色认知、传闻与 AI 假设的"
             "严格分型、当前 head 投影、追加式纠错和 AI 上下文注入；"
-            "尚缺事实工作台 UI 与 AI 草稿的 proposed_facts 审批接入。"
+            "独立事实工作台与 AI/人工 proposed_facts 已接入同一原子审批事务，玩家响应"
+            "使用不含 KP 来源元数据的安全投影；尚待真人团验证工作台负担与默认筛选。"
         ),
         dependencies=("memory_foundation", "proposal_approval"),
         acceptance=(
@@ -181,8 +182,8 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="kp",
         summary=(
             "已实现活动模组的显式场景转换、自由/结构化/休整节奏、来源图实体的"
-            "逐团发现状态、追加式审计和不写状态的玩家意图分析；尚缺安全暂停、"
-            "玩家资料揭示及检定后自动回接。"
+            "逐团发现状态、追加式审计和不写状态的玩家意图分析；已加入持久安全暂停、"
+            "人类 KP 接管/交还、玩家资料揭示及指纹化检定后果回接，尚待真人团验证。"
         ),
         dependencies=(
             "module_library",
@@ -241,7 +242,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         summary=(
             "已按本地 CoC7 规则来源实现普通/困难/极难检定、数字骰、实体骰、"
             "奖惩骰、暗骰、孤注一掷、KP 覆盖、重放审计及检定结果驱动的"
-            "指纹化 AI 二阶段草稿；已有纯对抗比较器，尚缺其持久化、API 与 UI。"
+            "指纹化 AI 二阶段草稿；对抗检定已持久化双方结果并接入 API/UI 与后果快照。"
         ),
         dependencies=("proposal_approval", "character_sheets"),
         acceptance=(
@@ -350,7 +351,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="kp",
         summary=(
             "MapSpec revision、规范哈希、布局哈希、图片生成参数与内容寻址文件已经分离并可重启恢复；"
-            "尚缺 KP 结构编辑产生后续 revision 的工作流。"
+            "KP 已可验证并保存地点/路线后续 revision；尚缺发布差异预览。"
         ),
         dependencies=("map_workspace",),
         acceptance=("关闭模型并重启后仍能打开原图，编辑产生新 revision 而不覆盖旧版。",),
@@ -358,10 +359,10 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="map_reveal_editor",
         label="地图揭示与路线编辑",
-        status="planned",
+        status="partial",
         phase="F4",
         audience="kp",
-        summary="让 KP 编辑地点、路线和雾区，并以显式操作逐步向玩家揭示。",
+        summary="已支持验证后保存地点/路线新 revision、绘制雾区和显式揭开；尚待图形化多边形编辑、发布差异预览与真人桌面验证。",
         dependencies=("map_workspace",),
         acceptance=("揭示前玩家无法从列表、SVG、移动历史或实时事件推断隐藏地点。",),
     ),
@@ -437,9 +438,49 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="partial",
         phase="F5",
         audience="kp",
-        summary="已有草稿批准/拒绝与暗骰裁定；缺少 AI 暂停、人类完全接管、分层揭示与交还控制。",
+        summary="已有草稿裁定、持久安全暂停、人类完全接管与显式交还；模型入口在非 AI 控制态由服务端拒绝，尚待真人团验证交接体验。",
         dependencies=("proposal_approval", "check_resolution"),
         acceptance=("人类 KP 接管后 AI 停止推进，交还时 AI 从已确认事实继续。",),
+    ),
+    Capability(
+        id="player_handouts",
+        label="玩家手册与线索揭示",
+        status="partial",
+        phase="F5",
+        audience="all",
+        summary=(
+            "已实现草稿、揭示、撤回、固定、事实/NPC/地图/地点/模组实体关联和逐席"
+            "幂等已读；玩家只接收服务端安全投影，尚待图片附件与真人团呈现验证。"
+        ),
+        dependencies=("session_roles", "proposal_approval"),
+        acceptance=("未揭示资料和其他席位已读信息不能进入玩家响应。",),
+    ),
+    Capability(
+        id="simulated_campaign_evaluation",
+        label="可重放模拟团评测",
+        status="partial",
+        phase="F5",
+        audience="kp",
+        summary=(
+            "已有持久化 case/run、定义哈希、runner 版本、确定性轨迹、可见性断言和"
+            "结果指纹；尚待扩充完整 golden campaign、模型对比和外部依赖故障库。"
+        ),
+        dependencies=("proposal_approval", "memory_foundation"),
+        acceptance=("同一定义和 runner 版本重放得到相同指纹，秘密可见性失败必须告警。",),
+    ),
+    Capability(
+        id="operational_safety",
+        label="运行监测与安全回归",
+        status="partial",
+        phase="F5",
+        audience="kp",
+        summary=(
+            "Debug 台已汇总请求延迟、SQLite 写锁等待、检索 recall/MRR/禁入命中与"
+            "秘密泄露告警；已有授权矩阵、跨团污染与事务故障注入，尚待 WAL/恢复"
+            "基线、WebSocket 侧信道和更多外部依赖故障。"
+        ),
+        dependencies=("session_roles", "simulated_campaign_evaluation"),
+        acceptance=("跨团对象替换不得泄露资源，事务中途失败不得留下部分写入。",),
     ),
     Capability(
         id="voice_companion",

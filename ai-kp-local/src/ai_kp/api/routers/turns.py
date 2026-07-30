@@ -38,6 +38,15 @@ from ai_kp.platform.sessions.models import AuthenticatedMember
 router = APIRouter()
 
 
+def _require_ai_director_control(repo: Repository, campaign_id: str) -> None:
+    run = repo.get_active_campaign_module_run(campaign_id)
+    if run is not None and run.get("director_control_mode") != "ai_assist":
+        raise HTTPException(
+            status_code=409,
+            detail="AI director is paused or controlled by the human KP",
+        )
+
+
 @router.post("/campaigns/{campaign_id}/actions")
 def submit_player_action(
     campaign_id: str,
@@ -120,6 +129,7 @@ def create_manual_proposal(
             proposed_checks=payload.proposed_checks,
             proposed_npc_updates=payload.proposed_npc_updates,
             proposed_map_moves=payload.proposed_map_moves,
+            proposed_facts=payload.proposed_facts,
             source_model=payload.source_model,
         ),
     )
@@ -227,6 +237,7 @@ async def kp_turn(
     settings: Settings = Depends(get_app_settings),
 ) -> dict:
     require_campaign_role(identity, payload.campaign_id, ("kp",))
+    _require_ai_director_control(repo, payload.campaign_id)
     if payload.pc_id:
         require_approved_pc_binding(repo, payload.campaign_id, payload.pc_id)
     try:
@@ -264,6 +275,9 @@ async def create_check_consequence_proposal(
     repo: Repository = Depends(get_repo),
     settings: Settings = Depends(get_app_settings),
 ) -> dict:
+    check = repo.get_skill_check(check_id)
+    require_campaign_role(identity, str(check["campaign_id"]), ("kp",))
+    _require_ai_director_control(repo, str(check["campaign_id"]))
     try:
         return await CheckConsequenceService(repo).generate(
             GenerateCheckConsequenceCommand(check_id=check_id),

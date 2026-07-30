@@ -118,8 +118,8 @@ Against a disposable running backend:
 When the disposable backend is configured with a reachable LLM, add
 `--world-expansion` to exercise generation, review and approval as well.
 
-## Deferred work
+## Control and adjacent slices
 
-Safety pause, private lines/veils, handout reveal, automatic check-consequence return, strict
-World Fact materialization after actual contact, and end-of-session memory review are
-intentionally separate vertical slices. Their absence keeps this capability `partial`.
+Safety pause, human-KP takeover/return, player handout reveal, strict World Fact approval and
+check-consequence return are now durable adjacent slices. Private lines/veils and real-table
+validation remain separate work; see `CONTROL_AND_EVALUATION.md`.

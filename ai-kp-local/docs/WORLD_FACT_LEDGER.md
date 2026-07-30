@@ -39,6 +39,16 @@
 
 通用 `/events` 写入和 AI 的普通 `proposed_events` 都不能伪造 `world_fact.*` 保留事件；它们必须经过事实服务。
 
+AI 与人工回合可以提交独立的 `proposed_facts`。每项候选都必须通过与事实 API 相同的
+类型、长度和角色范围校验。存在未解决 `proposed_checks` 时，候选事实与其他世界效果
+一样必须为空，避免提前把成功后果写成真相。
+
+批准普通或检定后果 proposal 时，服务先取得短写事务，再执行现有效果、重新检查事实
+冲突、追加事实事件、记录 `proposed_facts_applied` 审计和 realtime outbox。任何候选
+无效、证据跨团、角色不属于当前团或权威事实冲突，整次批准都会回滚，proposal 保持
+`draft`。世界补全 proposal 仍是例外：批准只认可候选，必须经过玩家实际接触接口才可
+落地事实。
+
 ## API
 
 ```http
@@ -47,6 +57,10 @@ GET  /campaigns/{campaign_id}/facts
 GET  /campaigns/{campaign_id}/facts/{fact_key}
 POST /campaigns/{campaign_id}/facts/{fact_key}/retcon
 ```
+
+独立前端 `/facts` 使用这些接口。KP 可以筛选当前 head、查看历史 revision、人工追加
+和撤回；玩家只能读取公开 head 与本人角色认知，不能读取 `source_reference`、
+`evidence_event_ids`、`asserted_by` 或 KP 历史。
 
 断言示例：
 
@@ -79,9 +93,18 @@ POST /campaigns/{campaign_id}/facts/{fact_key}/retcon
 - `character_belief`、`rumor`、`ai_hypothesis` 不得被自行升级为事实。
 - 已 `retconned` 的旧内容不进入正常 AI 上下文。
 
-## 尚未完成
+## 后续扩展
 
-- KP/玩家事实工作台 UI。
-- AI 草稿中的 `proposed_facts` 及人类审批。
-- 从模组结构化导入事实候选。
-- 冲突对比和替代事实的一次性原子操作。
+- 从已审核模组实体导入事实候选。
+- 在工作台中提供并排冲突比较，以及“撤回旧事实并建立替代事实”的一次性原子操作。
+- 真人团验证筛选、来源展示和人工确认负担后，再决定默认视图与自动化强度。
+
+## 实现依据
+
+- [SQLite Transactions](https://www.sqlite.org/lang_transaction.html) 与
+  [SQLite Savepoints](https://www.sqlite.org/lang_savepoint.html)：proposal 效果、
+  事实追加和 outbox 使用同一外层事务；内部 savepoint 释放不代表已独立提交。
+- [OWASP API1:2023 Broken Object Level Authorization](https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/)：
+  每个 campaign/fact 标识都需要服务端对象级授权，不能依靠不可预测 ID。
+- [OWASP API3:2023 Broken Object Property Level Authorization](https://owasp.org/API-Security/editions/2023/en/0xa3-broken-object-property-level-authorization/)：
+  玩家响应使用显式安全投影，不能把完整事实对象交给前端后再隐藏敏感字段。

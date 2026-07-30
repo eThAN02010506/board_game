@@ -201,6 +201,74 @@ class ModuleRunRepository(SQLiteRepository):
             )
         return updated
 
+    def set_module_run_control(
+        self,
+        run_id: str,
+        *,
+        expected_version: int,
+        mode: str,
+        reason: str,
+        member_id: str,
+    ) -> dict:
+        self.begin_immediate()
+        run = self.get_campaign_module_run(run_id)
+        self._require_expected_version(run, expected_version)
+        if mode not in {"ai_assist", "safety_paused", "human_kp"}:
+            raise ValueError("Unsupported director control mode")
+        normalized_reason = self._require_text(reason, "Control handoff reason", 2000)
+        prior = str(run.get("director_control_mode") or "ai_assist")
+        if prior == mode:
+            return run
+        event_seq = int(
+            self.connection.execute(
+                """
+                SELECT COALESCE(MAX(event_seq), 0) + 1
+                FROM module_run_control_events
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()[0]
+        )
+        self.connection.execute(
+            """
+            INSERT INTO module_run_control_events
+              (id, run_id, event_seq, from_mode, to_mode, reason,
+               changed_by_member_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("control"),
+                run_id,
+                event_seq,
+                prior,
+                mode,
+                normalized_reason,
+                member_id,
+            ),
+        )
+        cursor = self.connection.execute(
+            """
+            UPDATE campaign_module_runs
+            SET director_control_mode = ?, director_control_reason = ?,
+                version = version + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND version = ?
+            """,
+            (mode, normalized_reason, run_id, expected_version),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError("Module run changed; refresh it before applying this update")
+        return self.get_campaign_module_run(run_id)
+
+    def list_module_run_control_events(self, run_id: str) -> list[dict]:
+        rows = self.connection.execute(
+            """
+            SELECT * FROM module_run_control_events
+            WHERE run_id = ? ORDER BY event_seq
+            """,
+            (run_id,),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
     def transition_module_run_scene(
         self,
         run_id: str,
