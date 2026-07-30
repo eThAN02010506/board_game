@@ -115,6 +115,7 @@ class InvestigatorRepository(SQLiteRepository):
         template_id: str | None,
         parser_version: str | None,
         warnings: list[str] | None = None,
+        origin_type: str | None = None,
     ) -> dict:
         revision_id = new_id("charrev")
         identity = canonical_sheet.get("identity") or {}
@@ -138,8 +139,9 @@ class InvestigatorRepository(SQLiteRepository):
             """
             INSERT INTO investigator_revisions
               (id, investigator_id, revision_no, canonical_json, public_summary_json,
-               source_type, source_hash, template_id, parser_version, warnings_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               source_type, source_hash, template_id, parser_version, warnings_json,
+               origin_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 revision_id,
@@ -152,6 +154,8 @@ class InvestigatorRepository(SQLiteRepository):
                 template_id,
                 parser_version,
                 json.dumps(warnings or [], ensure_ascii=False),
+                origin_type
+                or ("xlsx_import" if source_type == "xlsx" else "player_edit"),
             ),
         )
         return self.get_investigator_revision(revision_id)
@@ -281,9 +285,15 @@ class InvestigatorRepository(SQLiteRepository):
         owner_profile_id: str,
         member_id: str,
         session_id: str,
+        timeline_branch_id: str | None = None,
     ) -> dict:
         self.begin_immediate()
         investigator = self.get_investigator(investigator_id, owner_profile_id)
+        branch = self.select_timeline_branch(
+            investigator_id,
+            owner_profile_id,
+            timeline_branch_id,
+        )
         revision = self.get_investigator_revision(revision_id)
         if revision["investigator_id"] != investigator_id:
             raise ValueError("Revision does not belong to this investigator")
@@ -330,8 +340,9 @@ class InvestigatorRepository(SQLiteRepository):
             """
             INSERT INTO campaign_investigators
               (campaign_id, investigator_id, owner_profile_id, submitted_revision_id,
-               status, review_comment, reviewed_by_member_id, reviewed_at)
-            VALUES (?, ?, ?, ?, 'submitted', NULL, NULL, NULL)
+               status, review_comment, reviewed_by_member_id, reviewed_at,
+               timeline_branch_id)
+            VALUES (?, ?, ?, ?, 'submitted', NULL, NULL, NULL, ?)
             ON CONFLICT(campaign_id, investigator_id) DO UPDATE SET
               owner_profile_id = excluded.owner_profile_id,
               submitted_revision_id = excluded.submitted_revision_id,
@@ -339,9 +350,16 @@ class InvestigatorRepository(SQLiteRepository):
               review_comment = NULL,
               reviewed_by_member_id = NULL,
               reviewed_at = NULL,
+              timeline_branch_id = excluded.timeline_branch_id,
               updated_at = CURRENT_TIMESTAMP
             """,
-            (campaign_id, investigator_id, owner_profile_id, revision_id),
+            (
+                campaign_id,
+                investigator_id,
+                owner_profile_id,
+                revision_id,
+                branch["id"],
+            ),
         )
         self._append_character_review(
             campaign_id=campaign_id,
@@ -420,6 +438,10 @@ class InvestigatorRepository(SQLiteRepository):
         )
         result["approved_revision"] = (
             self.get_investigator_revision(str(approved_id)) if approved_id else None
+        )
+        branch_id = result.get("timeline_branch_id")
+        result["timeline_branch"] = (
+            self.get_timeline_branch(str(branch_id)) if branch_id else None
         )
         state_row = self.connection.execute(
             """
@@ -553,6 +575,14 @@ class InvestigatorRepository(SQLiteRepository):
                     revision_id,
                 ),
             )
+            self.ensure_timeline_participation(
+                campaign_id=campaign_id,
+                session_id=session_id,
+                investigator_id=investigator_id,
+                branch_id=str(record["timeline_branch_id"]),
+                approved_revision_id=revision_id,
+                legacy_pc_id=str(legacy_pc_id),
+            )
         else:
             reviewed = self.connection.execute(
                 """
@@ -621,6 +651,14 @@ class InvestigatorRepository(SQLiteRepository):
             )
         if member["player_profile_id"] != record["owner_profile_id"]:
             raise ValueError("Investigator belongs to another player profile")
+        self.ensure_timeline_participation(
+            campaign_id=str(member["campaign_id"]),
+            session_id=session_id,
+            investigator_id=investigator_id,
+            branch_id=str(record["timeline_branch_id"]),
+            approved_revision_id=str(record["approved_revision_id"]),
+            legacy_pc_id=str(record["legacy_pc_id"]),
+        )
         assigned = self.connection.execute(
             """
             SELECT id FROM session_members

@@ -95,6 +95,7 @@ class InvestigatorService:
         owner_profile_id: str,
         member_id: str,
         session_id: str,
+        timeline_branch_id: str | None = None,
     ) -> dict:
         investigator = self.repo.get_investigator(investigator_id, owner_profile_id)
         selected_revision_id = revision_id or str(investigator["current_revision_id"])
@@ -105,6 +106,7 @@ class InvestigatorService:
             owner_profile_id=owner_profile_id,
             member_id=member_id,
             session_id=session_id,
+            timeline_branch_id=timeline_branch_id,
         )
         return self._with_diff(result)
 

@@ -273,12 +273,21 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="character_timeline",
         label="跨本角色身份与时间线",
-        status="planned",
+        status="available",
         phase="F2",
         audience="all",
-        summary="区分现实团次时间、游戏世界时间、全局角色身份和各模组临时状态。",
+        summary=(
+            "已区分稳定调查员身份、不可变角色卡版本、现实团会话、世界时间和团内"
+            "临时状态；同一时间线只允许一个进行中团，玩家可显式建立平行分支。"
+            "旧团安全记忆、NPC 接触与参团履历作为可重建读取投影提供，KP 可从已落地"
+            "事件提出永久变化，玩家接受后才生成带乐观并发保护的里程碑版本。"
+        ),
         dependencies=("character_sheets", "memory_foundation"),
-        acceptance=("同一角色在本 A/B 的永久经历连续，临时状态不会错误覆盖。",),
+        acceptance=(
+            "同一角色在本 A/B 的永久经历连续，临时状态不会错误覆盖。",
+            "同一分支不得同时参与两个进行中团；平行经历必须由玩家显式建立分支。",
+            "跨团投影不暴露旧团 KP/秘密事件、隐藏记忆或永久变化内部裁定依据。",
+        ),
     ),
     Capability(
         id="npc_reappearance",
@@ -304,7 +313,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         id="memory_workspace",
         label="主要/支线事件记忆工作台",
-        status="partial",
+        status="available",
         phase="F3",
         audience="all",
         summary=(
@@ -312,7 +321,7 @@ CAPABILITIES: tuple[Capability, ...] = (
             "NPC、线索记忆及可见来源；KP 可筛选、检查证据，并以追加动作改类、"
             "调整重要性、隐藏或恢复，陈旧编辑会冲突且不改写原始历史。"
             "团后摘要会按冻结事件窗口幂等生成带来源草稿，经 KP 逐条审核后才写入"
-            "正式记忆；尚缺跨 Campaign 的永久时间线合并/分支策略。"
+            "正式记忆；跨 Campaign 角色投影、显式平行分支和永久里程碑版本也已接通。"
         ),
         dependencies=("memory_foundation", "world_fact_ledger", "character_timeline"),
         acceptance=(

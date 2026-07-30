@@ -35,6 +35,15 @@ Use a fixed fixture campaign such as `雾港 1928` to test memory behavior after
     returns the same memory, and a conflicting second decision returns HTTP 409.
 20. Recap lifecycle: rejecting a candidate creates no memory, approving creates exactly one sourced
     memory, and closing a session neither calls the model nor auto-approves drafts.
+21. Cross-campaign safety: the owner and a later campaign's KP see only player/table memories and
+    encounters sourced from player/table events; KP/secret and hidden records remain absent.
+22. Timeline concurrency: one branch can have only one active campaign participation; an explicit
+    alternate branch permits parallel play and session close completes its active participation.
+23. Permanent milestones: a sourced KP proposal creates no revision until the owner accepts it
+    against the expected base revision; rejection leaves the card unchanged and conflicting retries
+    return HTTP 409.
+24. Runtime isolation: a new campaign initializes HP, SAN, MP and Luck from its approved revision,
+    never from another campaign's damaged runtime state.
 
 ## Real Case Test
 
@@ -54,6 +63,9 @@ Expected:
   event remain byte-for-byte unchanged.
 - KP can generate a bounded post-session recap draft, edit a candidate, approve one item, reject
   another, and see only the approved item appear on the permitted timeline.
+- A permanent scar proposed from a real event appears in no character revision before player
+  acceptance; after acceptance it is present in the milestone revision while old-campaign HP loss
+  remains isolated.
 
 Run the focused deterministic suite with:
 

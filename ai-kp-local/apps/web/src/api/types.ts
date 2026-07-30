@@ -465,6 +465,7 @@ export type MemoryTimelineItem = {
   curated_by_member_id?: string | null;
   curated_at?: string | null;
   created_at: string;
+  campaign_title?: string;
 };
 
 export type MemoryCurationInput = {
@@ -618,6 +619,7 @@ export type InvestigatorRevision = {
   investigator_id: string;
   revision_no: number;
   source_type: "manual" | "xlsx";
+  origin_type: "player_edit" | "xlsx_import" | "milestone";
   canonical_sheet: CharacterSheet;
   public_summary: Record<string, unknown>;
   warnings: string[];
@@ -696,12 +698,77 @@ export type CampaignInvestigator = {
   submitted_revision_id: string | null;
   approved_revision_id: string | null;
   legacy_pc_id: string | null;
+  timeline_branch_id: string | null;
+  timeline_branch: InvestigatorTimelineBranch | null;
   review_comment: string | null;
   submitted_revision: InvestigatorRevision | null;
   approved_revision: InvestigatorRevision | null;
   campaign_state: InvestigatorCampaignState | null;
   reviews: CharacterReview[];
   diff: Array<{ path: string; before: unknown; after: unknown }>;
+};
+
+export type InvestigatorTimelineBranch = {
+  id: string;
+  investigator_id: string;
+  label: string;
+  is_primary: boolean;
+  status: "active" | "archived";
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InvestigatorTimelineParticipation = {
+  id: string;
+  branch_id: string;
+  investigator_id: string;
+  campaign_id: string;
+  campaign_title: string;
+  session_id: string;
+  session_title: string;
+  approved_revision_id: string;
+  status: "active" | "completed";
+  world_started_at: string | null;
+  world_ended_at: string | null;
+  started_at: string;
+  ended_at: string | null;
+};
+
+export type InvestigatorPermanentChange = {
+  id: string;
+  investigator_id: string;
+  campaign_id: string;
+  campaign_title: string;
+  branch_id: string;
+  base_revision_id: string;
+  source_event_id: string;
+  kind: "major_experience" | "scar" | "relationship" | "spell" | "characteristic" | "skill";
+  summary: string;
+  change: Record<string, unknown>;
+  rationale?: string;
+  status: "proposed" | "accepted" | "rejected";
+  resulting_revision_id: string | null;
+  created_at: string;
+  decided_at: string | null;
+};
+
+export type InvestigatorCharacterTimeline = {
+  investigator_id: string;
+  branches: InvestigatorTimelineBranch[];
+  participations: InvestigatorTimelineParticipation[];
+  memories: MemoryTimelineItem[];
+  npc_encounters: Array<{
+    id: string;
+    npc_id: string;
+    npc_name: string;
+    campaign_id: string;
+    campaign_title: string;
+    interaction_summary: string;
+    happened_at: string | null;
+    created_at: string;
+  }>;
+  permanent_changes: InvestigatorPermanentChange[];
 };
 
 export type RuleSource = {

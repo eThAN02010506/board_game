@@ -26,13 +26,21 @@ import type {
   CharacterSkillCatalogItem,
   CharacterSkillRecommendation,
   Investigator,
+  InvestigatorCharacterTimeline,
   InvestigatorImportPreview,
   InvestigatorManualPreview,
+  InvestigatorPermanentChange,
   PlayerProfile,
   PlayerProfileBundle,
   SessionMember
 } from "../../api/types";
 import { readPlayerProfileToken, writePlayerProfileToken } from "../../session/session-storage";
+import {
+  CharacterTimelinePanel,
+  EMPTY_PERMANENT_CHANGE,
+  KpTimelineTools,
+  type PermanentChangeDraft
+} from "./CharacterTimelinePanel";
 
 const attributeFields = ["str", "con", "siz", "dex", "app", "int", "pow", "edu", "luck"];
 const backgroundFields = [
@@ -116,7 +124,6 @@ const statusLabels: Record<CampaignInvestigator["status"], string> = {
   approved: "已批准",
   withdrawn: "已撤回"
 };
-
 function payloadFromPreview(preview: InvestigatorImportPreview) {
   return {
     canonical_sheet: preview.canonical_sheet,
@@ -355,6 +362,12 @@ export function InvestigatorPage({ campaign, identity }: Props) {
   const [reviewComments, setReviewComments] = useState<Record<string, string>>({});
   const [bindingMembers, setBindingMembers] = useState<Record<string, string>>({});
   const [stateDrafts, setStateDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [timelines, setTimelines] = useState<Record<string, InvestigatorCharacterTimeline>>({});
+  const [permanentChanges, setPermanentChanges] = useState<Record<string, InvestigatorPermanentChange[]>>({});
+  const [branchSelections, setBranchSelections] = useState<Record<string, string>>({});
+  const [branchLabels, setBranchLabels] = useState<Record<string, string>>({});
+  const [decisionReasons, setDecisionReasons] = useState<Record<string, string>>({});
+  const [changeDrafts, setChangeDrafts] = useState<Record<string, PermanentChangeDraft>>({});
   const [message, setMessage] = useState("正在读取本地玩家档案……");
   const [busy, setBusy] = useState(false);
   const libraryRequestVersion = useRef(0);
@@ -678,10 +691,134 @@ export function InvestigatorPage({ campaign, identity }: Props) {
     try {
       const record = await requestJson<CampaignInvestigator>(
         `/campaigns/${campaign.id}/investigators/${investigator.id}/submit`,
-        { method: "POST", body: JSON.stringify({ revision_id: investigator.current_revision_id }) }
+        {
+          method: "POST",
+          body: JSON.stringify({
+            revision_id: investigator.current_revision_id,
+            timeline_branch_id: branchSelections[investigator.id] || undefined
+          })
+        }
       );
       setMessage(`${investigator.name} v${record.submitted_revision?.revision_no} 已提交给 KP。`);
       await loadCampaignRecords(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadTimeline(investigatorId: string) {
+    setBusy(true);
+    try {
+      const path = identity?.role === "kp" && campaign
+        ? `/campaigns/${campaign.id}/investigators/${investigatorId}/timeline`
+        : `/investigators/${investigatorId}/timeline`;
+      const timeline = await requestJson<InvestigatorCharacterTimeline>(path);
+      setTimelines((current) => ({ ...current, [investigatorId]: timeline }));
+      if (profile && identity?.role !== "kp") {
+        const changes = await requestJson<InvestigatorPermanentChange[]>(
+          `/investigators/${investigatorId}/permanent-changes`
+        );
+        setPermanentChanges((current) => ({ ...current, [investigatorId]: changes }));
+      }
+      setBranchSelections((current) => ({
+        ...current,
+        [investigatorId]: current[investigatorId]
+          || timeline.branches.find((branch) => branch.is_primary)?.id
+          || timeline.branches[0]?.id
+          || ""
+      }));
+      setMessage("已读取调查员的跨团时间线；这里只显示玩家可知事实。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createTimelineBranch(investigatorId: string) {
+    const label = (branchLabels[investigatorId] || "").trim();
+    if (!label) return;
+    setBusy(true);
+    try {
+      const branch = await requestJson<{ id: string }>(
+        `/investigators/${investigatorId}/timeline-branches`,
+        { method: "POST", body: JSON.stringify({ label }) }
+      );
+      setBranchSelections((current) => ({ ...current, [investigatorId]: branch.id }));
+      setBranchLabels((current) => ({ ...current, [investigatorId]: "" }));
+      await loadTimeline(investigatorId);
+      setMessage("已建立明确的平行时间线分支；角色可在另一场同时进行的团中使用。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decidePermanentChange(
+    investigator: Investigator,
+    proposal: InvestigatorPermanentChange,
+    action: "accepted" | "rejected"
+  ) {
+    const reason = (decisionReasons[proposal.id] || "").trim();
+    if (!reason) {
+      setMessage("接受或拒绝永久变化前，请填写决定理由。");
+      return;
+    }
+    setBusy(true);
+    try {
+      await requestJson(`/investigator-permanent-changes/${proposal.id}/decision`, {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          reason,
+          expected_revision_id: investigator.current_revision_id
+        })
+      });
+      await loadLibrary(true);
+      await loadTimeline(investigator.id);
+      setMessage(action === "accepted"
+        ? "已接受永久变化，并创建新的里程碑角色卡版本。"
+        : "已拒绝永久变化，原角色卡保持不变。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function proposePermanentChange(record: CampaignInvestigator) {
+    if (!campaign) return;
+    const draft = changeDrafts[record.investigator_id];
+    if (!draft) return;
+    const change = draft.kind === "characteristic"
+      ? { key: draft.targetKey.trim().toLowerCase(), new_value: number(draft.newValue) }
+      : draft.kind === "skill"
+        ? { skill_key: draft.targetKey.trim(), new_value: number(draft.newValue) }
+        : { text: draft.text.trim() };
+    setBusy(true);
+    try {
+      await requestJson(
+        `/campaigns/${campaign.id}/investigators/${record.investigator_id}/permanent-changes`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            kind: draft.kind,
+            summary: draft.summary.trim(),
+            change,
+            source_event_id: draft.sourceEventId.trim(),
+            rationale: draft.rationale.trim()
+          })
+        }
+      );
+      setChangeDrafts((current) => {
+        const next = { ...current };
+        delete next[record.investigator_id];
+        return next;
+      });
+      setMessage("永久变化候选已提交给玩家；玩家接受前不会改写角色卡。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -778,7 +915,25 @@ export function InvestigatorPage({ campaign, identity }: Props) {
                   {record && <span className={`proposal-status ${record.status}`}>{statusLabels[record.status]}</span>}
                   {record?.review_comment && <p className="permission-hint">KP：{record.review_comment}</p>}
                   <details className="character-sheet-details"><summary>查看角色卡摘要</summary><div className="derived-grid"><span>HP <strong>{investigator.current_revision.canonical_sheet.derived.max_hp}</strong></span><span>SAN <strong>{investigator.current_revision.canonical_sheet.derived.initial_san}</strong></span><span>MP <strong>{investigator.current_revision.canonical_sheet.derived.max_mp}</strong></span><span>MOV <strong>{investigator.current_revision.canonical_sheet.derived.mov}</strong></span><span>DB <strong>{investigator.current_revision.canonical_sheet.derived.damage_bonus}</strong></span><span>体格 <strong>{investigator.current_revision.canonical_sheet.derived.build}</strong></span></div><div className="skill-preview">{[...investigator.current_revision.canonical_sheet.skills].sort((left, right) => right.current_value - left.current_value).slice(0, 8).map((skill) => <span key={skill.skill_key}>{skill.display_name} {skill.current_value}</span>)}</div></details>
-                  <div className="inline-actions"><button className="ghost-button" disabled={busy} onClick={() => editInvestigator(investigator)} type="button">载入编辑器</button>{campaign && identity?.role === "player" && <button className="secondary-button" disabled={busy || record?.status === "submitted"} onClick={() => void submitInvestigator(investigator)} type="button">提交当前版本给 {campaign.title} KP</button>}</div>
+                  <div className="inline-actions">
+                    <button className="ghost-button" disabled={busy} onClick={() => editInvestigator(investigator)} type="button">载入编辑器</button>
+                    <button className="ghost-button" disabled={busy} onClick={() => void loadTimeline(investigator.id)} type="button">跨团时间线</button>
+                    {campaign && identity?.role === "player" && <button className="secondary-button" disabled={busy || record?.status === "submitted"} onClick={() => void submitInvestigator(investigator)} type="button">提交当前版本给 {campaign.title} KP</button>}
+                  </div>
+                  {timelines[investigator.id] && <CharacterTimelinePanel
+                    branchId={branchSelections[investigator.id] || ""}
+                    branchLabel={branchLabels[investigator.id] || ""}
+                    busy={busy}
+                    decisionReasons={decisionReasons}
+                    investigatorName={investigator.name}
+                    onBranchChange={(branchId) => setBranchSelections((current) => ({ ...current, [investigator.id]: branchId }))}
+                    onBranchLabelChange={(label) => setBranchLabels((current) => ({ ...current, [investigator.id]: label }))}
+                    onCreateBranch={() => void createTimelineBranch(investigator.id)}
+                    onDecision={(proposal, action) => void decidePermanentChange(investigator, proposal, action)}
+                    onDecisionReasonChange={(proposalId, reason) => setDecisionReasons((current) => ({ ...current, [proposalId]: reason }))}
+                    proposals={permanentChanges[investigator.id] || []}
+                    timeline={timelines[investigator.id]}
+                  />}
                 </article>;
               }) : <p className="empty-copy">还没有调查员。</p>}
             </div>
@@ -890,6 +1045,20 @@ export function InvestigatorPage({ campaign, identity }: Props) {
           {record.status === "submitted" && <><label>给玩家的审核意见<textarea rows={3} value={reviewComments[record.investigator_id] || ""} onChange={(event) => setReviewComments((current) => ({ ...current, [record.investigator_id]: event.target.value }))} /></label><div className="inline-actions"><button className="primary-button" disabled={busy} onClick={() => void review(record, "approved")} type="button"><CheckCircle2 size={16} />批准当前版本</button><button className="secondary-button" disabled={busy || !(reviewComments[record.investigator_id] || "").trim()} onClick={() => void review(record, "changes_requested")} type="button"><XCircle size={16} />退回修改</button></div></>}
           {record.approved_revision_id && <div className="approval-tools"><label>绑定到玩家席位<select value={bindingMembers[record.investigator_id] || ""} onChange={(event) => setBindingMembers((current) => ({ ...current, [record.investigator_id]: event.target.value }))}><option value="">选择玩家</option>{members.map((member) => <option key={member.id} value={member.id}>{member.display_name}{member.pc_id ? "（已有角色）" : ""}</option>)}</select></label><button className="secondary-button" disabled={busy || !bindingMembers[record.investigator_id]} onClick={() => void bindInvestigator(record)} type="button">绑定已批准角色</button></div>}
           {record.campaign_state && <div className="runtime-state-editor"><strong>团内运行状态 · v{record.campaign_state.state_version}</strong><div className="attribute-entry-grid">{(["current_hp", "current_san", "current_mp", "current_luck"] as const).map((key) => <label key={key}>{key.replace("current_", "").toUpperCase()}<input min="0" type="number" value={stateDrafts[record.investigator_id]?.[key] ?? ""} onChange={(event) => setStateDrafts((current) => ({ ...current, [record.investigator_id]: { ...current[record.investigator_id], [key]: event.target.value } }))} /></label>)}</div><button className="ghost-button" disabled={busy} onClick={() => void updateRuntimeState(record)} type="button">保存团内状态</button></div>}
+          {record.status === "approved" && <KpTimelineTools
+            busy={busy}
+            draft={changeDrafts[record.investigator_id] || EMPTY_PERMANENT_CHANGE}
+            onDraftChange={(changes) => setChangeDrafts((current) => ({
+              ...current,
+              [record.investigator_id]: {
+                ...(current[record.investigator_id] || EMPTY_PERMANENT_CHANGE),
+                ...changes
+              }
+            }))}
+            onLoad={() => void loadTimeline(record.investigator_id)}
+            onPropose={() => void proposePermanentChange(record)}
+            timeline={timelines[record.investigator_id]}
+          />}
         </article>) : <p className="empty-copy">当前团还没有玩家提交调查员。</p>}
       </section>}
       <p className="inline-message investigator-global-message">{message}</p>

@@ -396,6 +396,8 @@ describe("ProposalPanel", () => {
       submitted_revision_id: "rev_1",
       approved_revision_id: "rev_1",
       legacy_pc_id: "pc_1",
+      timeline_branch_id: "branch_primary",
+      timeline_branch: null,
       review_comment: null,
       submitted_revision: null,
       approved_revision: null,

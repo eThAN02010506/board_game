@@ -2,6 +2,7 @@
 
 import sqlite3
 
+from ai_kp.infrastructure.database.character_timelines import CharacterTimelineRepository
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
 from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
 from ai_kp.infrastructure.database.facts import FactRepository
@@ -56,6 +57,7 @@ class Repository(
     PrivateRandomResolutionRepository,
     MemoryTimelineRepository,
     SessionRecapRepository,
+    CharacterTimelineRepository,
 ):
     """Backward-compatible facade over the feature-specific SQLite repositories."""
 

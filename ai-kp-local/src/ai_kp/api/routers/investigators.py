@@ -7,12 +7,20 @@ from ai_kp.api.schemas import (
     InvestigatorAssignment,
     InvestigatorCampaignStateUpdate,
     InvestigatorCreate,
+    InvestigatorPermanentChangeCreate,
+    InvestigatorPermanentChangeDecision,
     InvestigatorReview,
     InvestigatorSkillRecommendationRequest,
     InvestigatorSubmit,
+    InvestigatorTimelineBranchCreate,
     PlayerProfileCreate,
 )
 from ai_kp.api.uploads import read_limited_body, safe_upload_filename
+from ai_kp.application.character_timeline_service import (
+    CharacterTimelineService,
+    PermanentChangeCommand,
+    PermanentChangeDecisionCommand,
+)
 from ai_kp.application.investigator_service import (
     CreateInvestigatorCommand,
     InvestigatorService,
@@ -155,6 +163,59 @@ def submit_investigator_to_campaign(
         owner_profile_id=player.profile_id,
         member_id=identity.member_id,
         session_id=identity.session_id,
+        timeline_branch_id=payload.timeline_branch_id,
+    )
+
+
+@router.post("/investigators/{investigator_id}/timeline-branches")
+def create_investigator_timeline_branch(
+    investigator_id: str,
+    payload: InvestigatorTimelineBranchCreate,
+    player: AuthenticatedPlayer = Depends(get_player_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    return CharacterTimelineService(repo).create_branch(
+        investigator_id,
+        player.profile_id,
+        payload.label,
+    )
+
+
+@router.get("/investigators/{investigator_id}/timeline")
+def get_owned_investigator_timeline(
+    investigator_id: str,
+    player: AuthenticatedPlayer = Depends(get_player_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    return CharacterTimelineService(repo).owner_timeline(
+        investigator_id,
+        player.profile_id,
+    )
+
+
+@router.get("/investigators/{investigator_id}/permanent-changes")
+def list_owned_permanent_changes(
+    investigator_id: str,
+    player: AuthenticatedPlayer = Depends(get_player_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    return CharacterTimelineService(repo).list_proposals(
+        investigator_id,
+        player.profile_id,
+    )
+
+
+@router.post("/investigator-permanent-changes/{proposal_id}/decision")
+def decide_investigator_permanent_change(
+    proposal_id: str,
+    payload: InvestigatorPermanentChangeDecision,
+    player: AuthenticatedPlayer = Depends(get_player_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    return CharacterTimelineService(repo).decide(
+        proposal_id,
+        player.profile_id,
+        PermanentChangeDecisionCommand(**payload.model_dump()),
     )
 
 
@@ -242,4 +303,39 @@ def update_campaign_investigator_state(
         investigator_id=investigator_id,
         expected_version=payload.expected_version,
         changes=changes,
+    )
+
+
+@router.get(
+    "/campaigns/{campaign_id}/investigators/{investigator_id}/timeline"
+)
+def get_campaign_investigator_timeline(
+    campaign_id: str,
+    investigator_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp",))
+    return CharacterTimelineService(repo).keeper_timeline(
+        campaign_id,
+        investigator_id,
+    )
+
+
+@router.post(
+    "/campaigns/{campaign_id}/investigators/{investigator_id}/permanent-changes"
+)
+def propose_investigator_permanent_change(
+    campaign_id: str,
+    investigator_id: str,
+    payload: InvestigatorPermanentChangeCreate,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp",))
+    return CharacterTimelineService(repo).propose(
+        campaign_id=campaign_id,
+        investigator_id=investigator_id,
+        member_id=identity.member_id,
+        command=PermanentChangeCommand(**payload.model_dump()),
     )

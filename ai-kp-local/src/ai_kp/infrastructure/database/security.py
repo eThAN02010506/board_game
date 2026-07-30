@@ -319,6 +319,7 @@ class SecurityRepository:
         if updated.rowcount != 1:
             session = self.get_campaign_session(session_id)
             raise ValueError(f"Session is already {session['status']}")
+        self.complete_session_timeline_participations(session_id)
         session = self.get_campaign_session(session_id)
         self.append_realtime_event(
             session_id=session_id,

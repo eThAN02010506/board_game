@@ -429,6 +429,7 @@ class InvestigatorStore(Protocol):
         owner_profile_id: str,
         member_id: str,
         session_id: str,
+        timeline_branch_id: str | None = None,
     ) -> dict: ...
 
     def list_campaign_investigators(
@@ -465,6 +466,33 @@ class InvestigatorStore(Protocol):
         investigator_id: str,
         expected_version: int,
         changes: dict[str, Any],
+    ) -> dict: ...
+
+
+class CharacterTimelineStore(InvestigatorStore, Protocol):
+    def create_timeline_branch(
+        self,
+        investigator_id: str,
+        owner_profile_id: str,
+        label: str,
+    ) -> dict: ...
+
+    def get_character_timeline(self, investigator_id: str) -> dict: ...
+
+    def create_permanent_change_proposal(self, **values: Any) -> dict: ...
+
+    def get_permanent_change_proposal(self, proposal_id: str) -> dict: ...
+
+    def list_permanent_change_proposals(
+        self,
+        investigator_id: str,
+        owner_profile_id: str,
+    ) -> list[dict]: ...
+
+    def decide_permanent_change(
+        self,
+        proposal_id: str,
+        **values: Any,
     ) -> dict: ...
 
 

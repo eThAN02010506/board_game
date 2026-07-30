@@ -352,6 +352,7 @@ class ModuleReachabilityCheck(BaseModel):
 
 class InvestigatorSubmit(BaseModel):
     revision_id: str | None = None
+    timeline_branch_id: str | None = Field(default=None, max_length=160)
 
 
 class InvestigatorReview(BaseModel):
@@ -372,6 +373,37 @@ class InvestigatorCampaignStateUpdate(BaseModel):
     conditions: list[dict[str, Any]] | None = None
     inventory_delta: dict[str, Any] | None = None
     current_game_time: str | None = Field(default=None, max_length=120)
+
+
+class InvestigatorTimelineBranchCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=120)
+
+
+class InvestigatorPermanentChangeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal[
+        "major_experience",
+        "scar",
+        "relationship",
+        "spell",
+        "characteristic",
+        "skill",
+    ]
+    summary: str = Field(min_length=1, max_length=1000)
+    change: dict[str, Any] = Field(default_factory=dict, max_length=4)
+    source_event_id: str = Field(min_length=1, max_length=160)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class InvestigatorPermanentChangeDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["accepted", "rejected"]
+    reason: str = Field(min_length=1, max_length=1000)
+    expected_revision_id: str = Field(min_length=1, max_length=160)
 
 
 class RuleQueryRequest(BaseModel):

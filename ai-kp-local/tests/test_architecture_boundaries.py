@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from ai_kp.api import main as compatibility_main
 from ai_kp.application.world_service import WorldService
 from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.database.character_timelines import CharacterTimelineRepository
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
 from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
 from ai_kp.infrastructure.database.facts import FactRepository
@@ -423,6 +424,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         PrivateRandomResolutionRepository,
         MemoryTimelineRepository,
         SessionRecapRepository,
+        CharacterTimelineRepository,
     )
     assert Repository.__mro__.count(SQLiteRepository) == 1
     assert Repository.create_campaign is WorldRepository.create_campaign
@@ -447,6 +449,10 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         Repository.create_session_recap_run
         is SessionRecapRepository.create_session_recap_run
     )
+    assert (
+        Repository.get_character_timeline
+        is CharacterTimelineRepository.get_character_timeline
+    )
     assert Repository.create_rule_source is RulebookRepository.create_rule_source
     assert (
         Repository.save_model_configuration
@@ -459,7 +465,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 32
+    assert LATEST_SCHEMA_VERSION == 33
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -493,6 +499,7 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (30, "add_private_random_resolutions"),
         (31, "add_memory_curation_actions"),
         (32, "add_session_recap_reviews"),
+        (33, "add_cross_campaign_character_timelines"),
     ]
 
 

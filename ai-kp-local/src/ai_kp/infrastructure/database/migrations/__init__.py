@@ -37,6 +37,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0030_private_random_resolutions,
     v0031_memory_curation,
     v0032_session_recaps,
+    v0033_character_timelines,
 )
 
 
@@ -205,6 +206,11 @@ MIGRATIONS = (
         v0032_session_recaps.VERSION,
         v0032_session_recaps.NAME,
         v0032_session_recaps.migrate,
+    ),
+    Migration(
+        v0033_character_timelines.VERSION,
+        v0033_character_timelines.NAME,
+        v0033_character_timelines.migrate,
     ),
 )
 

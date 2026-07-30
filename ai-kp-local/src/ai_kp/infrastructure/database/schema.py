@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS investigator_revisions (
   template_id TEXT,
   parser_version TEXT,
   warnings_json TEXT NOT NULL DEFAULT '[]',
+  origin_type TEXT NOT NULL DEFAULT 'player_edit'
+    CHECK (origin_type IN ('player_edit', 'xlsx_import', 'milestone')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(investigator_id, revision_no)
 );
@@ -111,6 +113,8 @@ CREATE TABLE IF NOT EXISTS campaign_investigators (
   review_comment TEXT,
   reviewed_by_member_id TEXT REFERENCES session_members(id) ON DELETE SET NULL,
   reviewed_at TEXT,
+  timeline_branch_id TEXT
+    REFERENCES investigator_timeline_branches(id) ON DELETE RESTRICT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (campaign_id, investigator_id)
@@ -145,6 +149,68 @@ CREATE TABLE IF NOT EXISTS investigator_campaign_state (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (campaign_id, investigator_id)
+);
+
+CREATE TABLE IF NOT EXISTS investigator_timeline_branches (
+  id TEXT PRIMARY KEY,
+  investigator_id TEXT NOT NULL REFERENCES investigators(id) ON DELETE CASCADE,
+  label TEXT NOT NULL CHECK (length(trim(label)) BETWEEN 1 AND 120),
+  is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0, 1)),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+  version INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS investigator_campaign_participations (
+  id TEXT PRIMARY KEY,
+  branch_id TEXT NOT NULL
+    REFERENCES investigator_timeline_branches(id) ON DELETE RESTRICT,
+  investigator_id TEXT NOT NULL REFERENCES investigators(id) ON DELETE CASCADE,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES campaign_sessions(id) ON DELETE CASCADE,
+  approved_revision_id TEXT NOT NULL
+    REFERENCES investigator_revisions(id) ON DELETE RESTRICT,
+  legacy_pc_id TEXT REFERENCES player_characters(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'completed')),
+  world_started_at TEXT,
+  world_ended_at TEXT,
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ended_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(session_id, investigator_id)
+);
+
+CREATE TABLE IF NOT EXISTS investigator_permanent_change_proposals (
+  id TEXT PRIMARY KEY,
+  investigator_id TEXT NOT NULL REFERENCES investigators(id) ON DELETE CASCADE,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  branch_id TEXT NOT NULL
+    REFERENCES investigator_timeline_branches(id) ON DELETE RESTRICT,
+  base_revision_id TEXT NOT NULL
+    REFERENCES investigator_revisions(id) ON DELETE RESTRICT,
+  source_event_id TEXT NOT NULL REFERENCES events(id) ON DELETE RESTRICT,
+  kind TEXT NOT NULL CHECK (
+    kind IN (
+      'major_experience', 'scar', 'relationship', 'spell',
+      'characteristic', 'skill'
+    )
+  ),
+  summary TEXT NOT NULL CHECK (length(trim(summary)) BETWEEN 1 AND 1000),
+  change_json TEXT NOT NULL CHECK (json_valid(change_json)),
+  rationale TEXT NOT NULL CHECK (length(trim(rationale)) BETWEEN 1 AND 2000),
+  status TEXT NOT NULL DEFAULT 'proposed'
+    CHECK (status IN ('proposed', 'accepted', 'rejected')),
+  proposed_by_member_id TEXT REFERENCES session_members(id) ON DELETE SET NULL,
+  decided_by_profile_id TEXT REFERENCES player_profiles(id) ON DELETE SET NULL,
+  decision_reason TEXT,
+  decision_hash TEXT,
+  resulting_revision_id TEXT
+    REFERENCES investigator_revisions(id) ON DELETE RESTRICT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  decided_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS npcs (
@@ -946,6 +1012,18 @@ CREATE INDEX IF NOT EXISTS idx_investigators_owner
   ON investigators(owner_profile_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_investigator_revisions_character
   ON investigator_revisions(investigator_id, revision_no);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_investigator_timeline_primary
+  ON investigator_timeline_branches(investigator_id)
+  WHERE is_primary = 1;
+CREATE INDEX IF NOT EXISTS idx_investigator_timeline_branches_owner
+  ON investigator_timeline_branches(investigator_id, status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_investigator_participation_active_branch
+  ON investigator_campaign_participations(branch_id)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_investigator_participation_history
+  ON investigator_campaign_participations(investigator_id, started_at, id);
+CREATE INDEX IF NOT EXISTS idx_investigator_permanent_changes_owner
+  ON investigator_permanent_change_proposals(investigator_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_character_imports_owner
   ON character_imports(owner_profile_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_campaign_investigators_status
