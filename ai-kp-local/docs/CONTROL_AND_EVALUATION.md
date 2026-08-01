@@ -37,6 +37,10 @@ payloads, model errors and KP-only results remain private. Model connection or s
 failures may use a no-world-side-effect fallback, but control conflicts and safety pauses are never
 converted into an auto-approved fallback. A single action classified as a current `world_gap` is
 routed through the existing world-expansion policy and is resolved only after safe materialization.
+If automatic retries are exhausted, a player may requeue only their own terminal `failed` job; the
+retry wakes the worker immediately and still returns the private-field-free projection. Jobs in
+backoff cannot have their attempt counters reset by a player, and policy-blocked `needs_attention`
+jobs remain KP-only.
 
 ## Player handouts
 

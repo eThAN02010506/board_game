@@ -123,22 +123,43 @@ def enqueue_auto_kp_job(
 @router.post("/auto-kp/jobs/{job_id}/retry")
 def retry_auto_kp_job(
     job_id: str,
+    request: Request,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
     job = repo.get_auto_kp_job(job_id)
-    require_campaign_role(identity, job["campaign_id"], ("kp",))
-    return repo.retry_auto_kp_job(job_id)
+    require_campaign_role(identity, job["campaign_id"])
+    if identity.role == "player":
+        job = repo.get_player_auto_kp_job(job_id, identity.member_id)
+        if job["status"] == "needs_attention":
+            raise HTTPException(
+                status_code=403,
+                detail="Policy-blocked Auto KP jobs require KP review",
+            )
+        if job["status"] != "failed":
+            raise HTTPException(
+                status_code=409,
+                detail="Players can retry only failed Auto KP jobs",
+            )
+    retried = repo.retry_auto_kp_job(job_id)
+    worker = getattr(request.app.state, "auto_kp_worker", None)
+    if worker is not None:
+        worker.wake()
+    return retried if identity.role == "kp" else player_auto_kp_job(retried)
 
 
 @router.post("/campaigns/{campaign_id}/auto-kp/jobs/recover")
 def recover_auto_kp_jobs(
     campaign_id: str,
+    request: Request,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
     require_campaign_role(identity, campaign_id, ("kp",))
     recovered = repo.recover_stale_auto_kp_jobs()
+    worker = getattr(request.app.state, "auto_kp_worker", None)
+    if worker is not None:
+        worker.wake()
     return {"recovered": recovered, "jobs": repo.list_auto_kp_jobs(campaign_id)}
 
 

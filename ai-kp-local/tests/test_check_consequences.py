@@ -8,6 +8,7 @@ import httpx
 
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
+from ai_kp.infrastructure.database.schema import connect
 from ai_kp.platform.resolution import HIDDEN_CHECK_PUBLIC_NARRATION
 from tests.support_investigators import coc7_sheet, create_approved_player
 
@@ -402,6 +403,69 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(kp_jobs_response.status_code, 200)
         self.assertTrue(all("payload" in job for job in kp_jobs_response.json()))
+
+        connection = connect(self.settings.db_path)
+        try:
+            connection.execute(
+                "UPDATE auto_kp_jobs SET status = 'needs_attention', "
+                "stage = 'needs_attention' WHERE id = ?",
+                (queued_action["job"]["id"],),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        policy_blocked_retry = await self.client.post(
+            f"/auto-kp/jobs/{queued_action['job']['id']}/retry",
+            headers=self.player_headers,
+        )
+        self.assertEqual(policy_blocked_retry.status_code, 403)
+
+        connection = connect(self.settings.db_path)
+        try:
+            connection.execute(
+                "UPDATE auto_kp_jobs SET status = 'failed', stage = 'failed' WHERE id = ?",
+                (queued_action["job"]["id"],),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        retried_response = await self.client.post(
+            f"/auto-kp/jobs/{queued_action['job']['id']}/retry",
+            headers=self.player_headers,
+        )
+        self.assertEqual(retried_response.status_code, 200, retried_response.text)
+        retried = retried_response.json()
+        self.assertEqual(retried["status"], "queued")
+        self.assertNotIn("payload", retried)
+        self.assertNotIn("last_error", retried)
+
+        duplicate_retry = await self.client.post(
+            f"/auto-kp/jobs/{queued_action['job']['id']}/retry",
+            headers=self.player_headers,
+        )
+        self.assertEqual(duplicate_retry.status_code, 409)
+
+        foreign_job = await self.client.post(
+            f"/campaigns/{self.campaign['id']}/auto-kp/jobs",
+            headers=self.kp_headers,
+            json={
+                "job_type": "world_expansion",
+                "resource_id": "foreign-world-gap",
+                "idempotency_key": "foreign-world-gap-job",
+                "payload": {
+                    "run_id": "not-visible",
+                    "player_intent": "KP private",
+                },
+            },
+        )
+        self.assertEqual(foreign_job.status_code, 200, foreign_job.text)
+        denied_retry = await self.client.post(
+            f"/auto-kp/jobs/{foreign_job.json()['id']}/retry",
+            headers=self.player_headers,
+        )
+        self.assertEqual(denied_retry.status_code, 404)
 
     async def test_override_or_push_makes_an_old_draft_stale_without_side_effects(self) -> None:
         action, _origin, check = await self.prepare_check()

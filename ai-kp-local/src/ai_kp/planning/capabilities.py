@@ -184,7 +184,8 @@ CAPABILITIES: tuple[Capability, ...] = (
             "已实现活动模组的显式场景转换、自由/结构化/休整节奏、来源图实体的"
             "逐团发现状态、追加式审计和不写状态的玩家意图分析；已加入持久安全暂停、"
             "人类 KP 接管/交还、三档自动化强度、自动 KP 后台任务状态机、玩家资料揭示"
-            "及指纹化检定后果回接，尚待真实桌面负载下调优。"
+            "及指纹化检定后果回接。独立席位、弱模型失败、实时同步、后台行动与"
+            "检定后果已经浏览器 replay；尚待多人真人桌面负载下调优。"
         ),
         dependencies=(
             "module_library",
@@ -211,7 +212,8 @@ CAPABILITIES: tuple[Capability, ...] = (
             "严格事实、跨团 NPC 身份与已审核地点上的地图棋子。跨团 NPC 已有确定性"
             "年代/地点/职业/预算门控。反应性支线与锚点桥接已有条件化因果节拍、"
             "图可达性保护和追加式进度审计；平衡/AI KP 可对低副作用环境候选自动"
-            "批准并 materialize，低置信、冲突和支线候选仍暂停给 KP。"
+            "批准并 materialize，玩家行动中的当前 world gap 也会自动进入该链路且"
+            "只在落地后解决；低置信、冲突和支线候选仍暂停给 KP。"
         ),
         dependencies=(
             "scene_director",
@@ -476,8 +478,8 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="kp",
         summary=(
             "除轻量 contract runner 外，产品服务回放会在回滚沙盒中实际调用地图、路线、"
-            "提案、线索和 CoC7 遭遇服务并保存轨迹；尚待完整 golden campaign、模型"
-            "对比和外部依赖故障库。"
+            "提案、线索和 CoC7 遭遇服务并保存轨迹；无 KP 核心流程已覆盖实时浏览器"
+            "replay，尚待完整 golden campaign、模型对比和外部依赖故障库。"
         ),
         dependencies=("proposal_approval", "memory_foundation"),
         acceptance=("同一定义和 runner 版本重放得到相同指纹，秘密可见性失败必须告警。",),

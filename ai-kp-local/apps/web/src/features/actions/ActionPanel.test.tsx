@@ -62,6 +62,7 @@ function renderPanel(
     onSubmitPlayerAction: vi.fn(),
     onAutoKpEnabledChange: vi.fn(),
     onRefreshPlayerActions: vi.fn(),
+    onRetryAutoKpJob: vi.fn(),
     onCreateProposal: vi.fn(),
     onGenerateAiProposal: vi.fn()
   };
@@ -110,16 +111,16 @@ describe("ActionPanel", () => {
   });
 
   it("shows the player's durable Auto KP progress", () => {
-    renderPanel(playerIdentity, false, [
+    const { onRetryAutoKpJob } = renderPanel(playerIdentity, false, [
       {
         id: "job_action",
         campaign_id: "campaign_test",
         run_id: null,
         job_type: "player_action",
         resource_id: "action_submitted",
-        status: "retry_wait",
-        stage: "waiting_retry",
-        attempt_count: 1,
+        status: "failed",
+        stage: "failed",
+        attempt_count: 3,
         max_attempts: 3,
         created_at: "2026-08-01 10:00:00",
         updated_at: "2026-08-01 10:00:01"
@@ -127,8 +128,10 @@ describe("ActionPanel", () => {
     ]);
 
     expect(screen.getByLabelText("自动 KP 任务")).toHaveTextContent(
-      "玩家行动retry_wait · waiting_retry尝试 1/3"
+      "玩家行动failed · failed尝试 3/3"
     );
+    fireEvent.click(screen.getByRole("button", { name: "重新尝试" }));
+    expect(onRetryAutoKpJob).toHaveBeenCalledWith("job_action");
   });
 
   it("lets a KP select only submitted actions and protects AI generation while loading", () => {

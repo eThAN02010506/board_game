@@ -44,5 +44,17 @@ export function useAutoKpJobs(campaignId: string, enabled: boolean) {
     return () => window.clearInterval(timer);
   }, [hasActiveJobs, refresh]);
 
-  return { jobs, refresh };
+  const retry = useCallback(async (jobId: string) => {
+    const retried = await requestJson<AutoKpJob>(
+      `/auto-kp/jobs/${encodeURIComponent(jobId)}/retry`,
+      { method: "POST" }
+    );
+    setJobs((current) => [
+      retried,
+      ...current.filter((job) => job.id !== retried.id)
+    ]);
+    return retried;
+  }, []);
+
+  return { jobs, refresh, retry };
 }

@@ -202,10 +202,11 @@ export default function App() {
   >("player-view");
   const [playerActionTab, setPlayerActionTab] = useState<"actions" | "checks">("actions");
   const [autoKpEnabled, setAutoKpEnabled] = useState(true);
-  const { jobs: autoKpJobs, refresh: refreshAutoKpJobs } = useAutoKpJobs(
-    activeCampaign?.id ?? "",
-    Boolean(authIdentity)
-  );
+  const {
+    jobs: autoKpJobs,
+    refresh: refreshAutoKpJobs,
+    retry: retryAutoKpJob
+  } = useAutoKpJobs(activeCampaign?.id ?? "", Boolean(authIdentity));
   const activeCampaignIdRef = useRef("");
   const activeSessionIdRef = useRef("");
   const activeMapIdRef = useRef("");
@@ -773,6 +774,11 @@ export default function App() {
       showLog("行动已提交，等待 KP 处理。");
     }
     void loadSkillChecks(activeCampaign, true);
+  }
+
+  async function retryFailedAutoKpJob(jobId: string) {
+    const result = await run("重新排入 Auto KP 任务", () => retryAutoKpJob(jobId));
+    if (result) showLog("任务已重新排队，后台将继续处理。");
   }
 
   async function loadSkillChecks(campaign = activeCampaign, silent = false) {
@@ -1678,6 +1684,7 @@ export default function App() {
             onRefresh={() => void loadProposals()}
             onRefreshMaps={() => void refreshRealtimeMaps()}
             onRefreshPlayerActions={() => void loadPlayerActions()}
+            onRetryAutoKpJob={(jobId) => void retryFailedAutoKpJob(jobId)}
             onReject={() => void rejectProposal()}
             onReplay={(checkId) => void replaySkillCheck(checkId)}
             onRerollOpposed={(opposedCheckId) => void rerollOpposedCheck(opposedCheckId)}
@@ -1753,6 +1760,7 @@ export default function App() {
             onRefresh={() => void loadSkillChecks()}
             onRefreshMaps={() => void refreshRealtimeMaps()}
             onRefreshPlayerActions={() => void loadPlayerActions()}
+            onRetryAutoKpJob={(jobId) => void retryFailedAutoKpJob(jobId)}
             onReplay={(checkId) => void replaySkillCheck(checkId)}
             onRerollOpposed={(opposedCheckId) => void rerollOpposedCheck(opposedCheckId)}
             onResolveDigital={(checkId) => void resolveSkillCheck(checkId, "digital")}

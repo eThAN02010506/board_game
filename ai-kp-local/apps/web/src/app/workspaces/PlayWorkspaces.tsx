@@ -70,6 +70,7 @@ type ActionDeskProps = {
   onPlayerActionChange: (value: string) => void;
   onProposalTextChange: (value: string) => void;
   onRefreshPlayerActions: () => void;
+  onRetryAutoKpJob: (jobId: string) => void;
   onSearchMemory: () => void;
   onSelectPlayerAction: (action: PlayerActionRecord) => void;
   onSubmitPlayerAction: () => void;
@@ -314,6 +315,7 @@ function ActionDesk(props: CommonPlayProps & ActionDeskProps) {
         onPlayerActionChange={props.onPlayerActionChange}
         onProposalTextChange={props.onProposalTextChange}
         onRefreshPlayerActions={props.onRefreshPlayerActions}
+        onRetryAutoKpJob={props.onRetryAutoKpJob}
         onSearchMemory={props.onSearchMemory}
         onSelectPlayerAction={props.onSelectPlayerAction}
         onSubmitPlayerAction={props.onSubmitPlayerAction}

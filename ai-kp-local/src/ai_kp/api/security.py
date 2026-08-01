@@ -22,6 +22,7 @@ SENSITIVE_POST_PATHS = (
     ("map-generate", re.compile(r"^/campaigns/[^/]+/maps/generate$")),
     ("map-image-generate", re.compile(r"^/maps/[^/]+/image-assets/generate$")),
     ("kp-turn", re.compile(r"^/kp/turn$")),
+    ("auto-kp-retry", re.compile(r"^/auto-kp/jobs/[^/]+/retry$")),
     ("model-discover", re.compile(r"^/model-settings/discover$")),
     ("image-model-discover", re.compile(r"^/image-model-settings/discover$")),
     ("player-profile-write", re.compile(r"^/player-profiles$")),

@@ -18,6 +18,7 @@ type Props = {
   onSearchMemory: () => void;
   onSubmitPlayerAction: () => void;
   onRefreshPlayerActions: () => void;
+  onRetryAutoKpJob: (jobId: string) => void;
   onCreateProposal: () => void;
   onGenerateAiProposal: () => void;
 };
@@ -75,6 +76,16 @@ export function ActionPanel(props: Props) {
                       <span>{job.status} · {job.stage}</span>
                     </div>
                     <small>尝试 {job.attempt_count}/{job.max_attempts}</small>
+                    {job.status === "failed" && (
+                      <button
+                        className="ghost-button"
+                        disabled={props.loading}
+                        onClick={() => props.onRetryAutoKpJob(job.id)}
+                        type="button"
+                      >
+                        <RefreshCw size={14} />重新尝试
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

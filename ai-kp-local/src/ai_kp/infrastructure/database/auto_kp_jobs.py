@@ -159,6 +159,28 @@ class AutoKpJobRepository(SQLiteRepository):
         ).fetchall()
         return [self._decode_auto_kp_job(row) for row in rows]
 
+    def get_player_auto_kp_job(self, job_id: str, member_id: str) -> dict:
+        row = self.connection.execute(
+            """
+            SELECT DISTINCT j.*
+            FROM auto_kp_jobs j
+            LEFT JOIN player_actions pa
+              ON j.job_type = 'player_action' AND pa.id = j.resource_id
+            LEFT JOIN skill_checks sc
+              ON j.job_type = 'check_consequence' AND sc.id = j.resource_id
+            LEFT JOIN player_actions cpa ON cpa.id = sc.player_action_id
+            LEFT JOIN json_each(j.payload_json, '$.action_ids') batch_action
+              ON j.job_type = 'parallel_actions'
+            LEFT JOIN player_actions ppa ON ppa.id = batch_action.value
+            WHERE j.id = ?
+              AND (pa.member_id = ? OR cpa.member_id = ? OR ppa.member_id = ?)
+            """,
+            (job_id, member_id, member_id, member_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Player Auto KP job not found: {job_id}")
+        return self._decode_auto_kp_job(row)
+
     def cancel_auto_kp_job(self, job_id: str) -> dict:
         job = self.get_auto_kp_job(job_id)
         if job["status"] not in {"queued", "retry_wait"}:
