@@ -1,0 +1,4 @@
+interface:
+  display_name: "NPC 表演"
+  short_description: "Draft NPC reactions without invented facts or secrets."
+  default_prompt: "Use $portray-npc to propose an in-character NPC response within known facts."

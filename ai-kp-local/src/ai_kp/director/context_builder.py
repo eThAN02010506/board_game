@@ -53,6 +53,7 @@ class ContextBuilder:
         visibility_scope: str = "kp",
         output_instructions: str = STRUCTURED_OUTPUT_INSTRUCTIONS,
         additional_sources: tuple[dict[str, Any], ...] = (),
+        skill_instructions: str = "",
     ) -> ContextAssembly:
         if visibility_scope not in {"kp", "player"}:
             raise ValueError("Visibility scope must be kp or player")
@@ -175,10 +176,14 @@ class ContextBuilder:
             accepted_additional.append(copied)
         included[1:1] = accepted_additional
 
+        system_prompt = KP_SYSTEM_PROMPT
+        if skill_instructions.strip():
+            system_prompt = f"{system_prompt}\n\n{skill_instructions.strip()}"
         selected, budget_excluded = self._fit_budget(
             player_action,
             included,
             output_instructions,
+            system_prompt,
         )
         excluded.extend(budget_excluded)
         sections = "\n\n".join(
@@ -196,7 +201,7 @@ class ContextBuilder:
 
 {output_instructions}""".strip()
         messages = [
-            {"role": "system", "content": KP_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
         return ContextAssembly(
@@ -376,9 +381,10 @@ class ContextBuilder:
         player_action: str,
         sources: list[dict],
         output_instructions: str,
+        system_prompt: str,
     ) -> tuple[list[dict], list[dict]]:
         reserved = (
-            estimate_tokens(KP_SYSTEM_PROMPT)
+            estimate_tokens(system_prompt)
             + estimate_tokens(player_action)
             + estimate_tokens(output_instructions)
             + 200

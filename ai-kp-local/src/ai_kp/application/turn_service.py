@@ -187,6 +187,7 @@ class TurnService:
             str(proposal["id"]),
             output.action_ruling.model_dump(mode="json"),
         )
+        self._attach_ai_skill_composition(str(proposal["id"]), result)
         proposal = self.repo.get_turn_proposal(str(proposal["id"]))
         self.repo.create_context_assembly(
             proposal_id=proposal["id"],
@@ -262,6 +263,26 @@ class TurnService:
             actor="system",
             note="goal feasibility and effect ceiling",
             payload=ruling,
+        )
+
+    def _attach_ai_skill_composition(self, proposal_id: str, result: Any) -> None:
+        skill_ids = tuple(getattr(result, "skill_ids", ()))
+        skill_versions = tuple(getattr(result, "skill_versions", ()))
+        if not skill_ids:
+            return
+        if len(skill_ids) != len(skill_versions):
+            raise ValueError("AI skill IDs and versions must have matching lengths")
+        self.repo.add_proposal_action(
+            proposal_id,
+            "ai_skill_composition",
+            actor="system",
+            note="allow-listed proposal-only AI skills",
+            payload={
+                "skills": [
+                    {"skill_id": skill_id, "version": version}
+                    for skill_id, version in zip(skill_ids, skill_versions, strict=True)
+                ]
+            },
         )
 
     async def create_world_expansion_proposal(
@@ -386,6 +407,7 @@ class TurnService:
             analysis=analysis_snapshot,
             candidate=output_candidate.model_dump(mode="json"),
         )
+        self._attach_ai_skill_composition(str(proposal["id"]), result)
         self.repo.create_context_assembly(
             proposal_id=proposal["id"],
             campaign_id=run["campaign_id"],

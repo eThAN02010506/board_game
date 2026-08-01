@@ -143,6 +143,53 @@ class StructuredTurnOutputTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(llm.calls), 2)
                 self.assertIn("新鲜刮痕", result.output.public_narration)
                 self.assertEqual(result.context.messages[-1]["role"], "user")
+                self.assertEqual(
+                    result.skill_ids,
+                    (
+                        "platform.turn_proposal",
+                        "platform.npc_portrayal",
+                        "platform.scene_direction",
+                        "platform.output_safety_review",
+                    ),
+                )
+                system_prompt = llm.calls[0][0][0].content
+                self.assertIn("[AI Skill: platform.turn_proposal@1.0.0", system_prompt)
+                self.assertIn("[AI Skill: platform.npc_portrayal@1.0.0", system_prompt)
+                self.assertIn("[AI Skill: platform.scene_direction@1.0.0", system_prompt)
+                self.assertIn("[AI Skill: platform.output_safety_review@1.0.0", system_prompt)
+
+    async def test_orchestrator_reductively_repairs_repeated_precommitted_effects(
+        self,
+    ) -> None:
+        payload = valid_output()
+        payload["action_ruling"]["resolution"] = "check"
+        payload["proposed_checks"] = [
+            {"skill": "侦查", "difficulty": "regular", "reason": "需要仔细检查"}
+        ]
+        payload["proposed_events"] = [
+            {
+                "event_type": "clue_found",
+                "summary": "检定前不应落地的线索。",
+                "actor_type": "system",
+                "visibility": "table",
+            }
+        ]
+        repeated = json.dumps(payload, ensure_ascii=False)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "test.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("弱模型减法修复")
+                llm = FakeLlm([repeated, repeated])
+
+                result = await KpOrchestrator(connection, llm).handle_player_action(
+                    campaign_id=campaign["id"],
+                    player_action="我检查仓库门。",
+                )
+
+                self.assertTrue(result.repaired)
+                self.assertEqual(len(result.output.proposed_checks), 1)
+                self.assertEqual(result.output.proposed_events, [])
+                self.assertEqual(len(llm.calls), 2)
 
 
 class StructuredApprovalTests(unittest.TestCase):

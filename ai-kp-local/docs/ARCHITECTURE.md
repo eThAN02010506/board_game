@@ -16,7 +16,11 @@ The backend has explicit composition, transport, application, domain, ruleset, a
   system-specific candidates and results.
 - `src/ai_kp/director/skills/` is the explicit registry of proposal-only AI behavior contracts.
   Skills declare source requirements and logical tool access but cannot import persistence,
-  delivery or concrete ruleset code.
+  delivery or concrete ruleset code. Packaged `bundles/<name>/SKILL.md` files are UTF-8, size-
+  bounded, allow-listed and content-hashed; their UI metadata is shipped in the wheel. Player
+  actions compose action understanding, NPC portrayal, scene direction and safety review into one
+  model call. Check consequences and world expansion use smaller compositions. The context budget
+  accounts for every injected bundle, and proposal audit actions record each Skill ID and version.
 - `src/ai_kp/infrastructure/database/` owns SQLite mechanics, schema, ordered migrations, and feature repositories. Its `Repository` facade intentionally supplies one shared transaction boundary to current application services.
 - `src/ai_kp/infrastructure/{knowledge,llm,images,modules,realtime,security}/` owns external and persistence adapters. These layers may depend inward on domain contracts; domain packages do not depend on these adapters.
 - `src/ai_kp/application/realtime/` owns the authenticated connection lifecycle and pure wire-message
@@ -318,13 +322,24 @@ proposal and all affected world state.
    spoiler activation, relevance, item limits, and context budget determine which optional
    sources are included; campaign time, approved character core and current module-run core are
    never silently dropped.
-4. The model produces strict JSON. One repair attempt is allowed when a local model returns malformed output.
+4. The orchestrator resolves only registered proposal-only Skills, validates and hashes their
+   packaged instructions, and composes them into the system prompt. Retrieved content cannot
+   select or install a Skill. The model then produces strict JSON; one repair attempt is allowed
+   when a local model returns malformed output. If a weak model repeats the single known unsafe
+   combination of an unresolved check plus precommitted effects, a reductive repair may only
+   remove those effects; it cannot add fields, change dice, or make an impossible action feasible.
 5. A `turn_proposal` and its `context_assembly` are saved together for inspection. In player-driven
    automation, the server derives and persists a separate player-facing adjudication; model JSON
    is never itself approval.
 6. Player confirmation, human KP approval, or the post-check consequence boundary (depending on
    workflow stage) atomically applies events, curated memories, NPC relationship updates, and
    validated map moves. Any invalid cross-campaign reference rolls the entire approval back.
+
+Skill recommendations remain below deterministic application policy. For example, a model may
+suggest a social check for a compound deception-and-train-jump action; the action adjudication
+service clears its effects and enforces the character-sheet Idea/INT danger-awareness prerequisite
+before a player can confirm anything. Skill prompt quality therefore improves candidates but is
+never the only safety boundary.
 
 For a real local-model test, first query the provider's OpenAI-compatible `/v1/models` endpoint and use an ID returned in `data[].id` as `AI_KP_LLM_MODEL`. A guessed `.gguf` filename is not an API capability check. The provider is considered verified only after model discovery, `/v1/chat/completions`, and a complete validated KP proposal flow all succeed.
 

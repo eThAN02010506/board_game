@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ai_kp.director.skills.bundles import load_ai_skill_bundle
 from ai_kp.director.skills.contracts import AiSkillManifest
 
 _SKILLS = (
@@ -15,6 +16,43 @@ _SKILLS = (
         output_schema_version="kp-turn-output.v1",
         allowed_tools=("context.read", "rules.query", "proposal.create"),
         source_requirements=("campaign_context", "approved_character", "visible_module"),
+        bundle_name="understand-player-action",
+    ),
+    AiSkillManifest(
+        skill_id="platform.npc_portrayal",
+        version="1.0.0",
+        display_name="NPC 表演",
+        category="npc_portrayal",
+        description="根据可见事实提出一致、不泄密的 NPC 对话与反应。",
+        input_schema_version="turn-context.v1",
+        output_schema_version="kp-turn-output.v1",
+        allowed_tools=("context.read", "proposal.create"),
+        source_requirements=("campaign_context", "visible_npc_evidence"),
+        bundle_name="portray-npc",
+    ),
+    AiSkillManifest(
+        skill_id="platform.scene_direction",
+        version="1.0.0",
+        display_name="场景导演",
+        category="scene_direction",
+        description="推进一个受约束场景拍点，保留玩家选择与锚点可达性。",
+        input_schema_version="turn-context.v1",
+        output_schema_version="kp-turn-output.v1",
+        allowed_tools=("context.read", "proposal.create"),
+        source_requirements=("campaign_context", "confirmed_event_state"),
+        bundle_name="direct-scene",
+    ),
+    AiSkillManifest(
+        skill_id="platform.output_safety_review",
+        version="1.0.0",
+        display_name="输出安全复核",
+        category="safety_review",
+        description="在结构校验前移除越权、泄密、时代冲突和预提交效果。",
+        input_schema_version="candidate-draft.v1",
+        output_schema_version="candidate-draft.v1",
+        allowed_tools=("context.read",),
+        source_requirements=("candidate_output", "visibility_policy"),
+        bundle_name="review-output-safety",
     ),
     AiSkillManifest(
         skill_id="platform.check_consequence_narration",
@@ -26,6 +64,7 @@ _SKILLS = (
         output_schema_version="kp-turn-output.v1",
         allowed_tools=("context.read", "proposal.create"),
         source_requirements=("verified_check_result", "campaign_context"),
+        bundle_name="direct-scene",
     ),
     AiSkillManifest(
         skill_id="platform.world_expansion",
@@ -37,6 +76,7 @@ _SKILLS = (
         output_schema_version="world-expansion-output.v1",
         allowed_tools=("context.read", "rules.query", "proposal.create"),
         source_requirements=("scene_analysis", "module_evidence", "world_fact_heads"),
+        bundle_name="expand-world",
     ),
     AiSkillManifest(
         skill_id="platform.session_recap",
@@ -62,7 +102,40 @@ def get_ai_skill(skill_id: str) -> AiSkillManifest:
 
 
 def list_ai_skills() -> list[dict]:
-    return [skill.as_dict() for skill in _SKILLS]
+    results: list[dict] = []
+    for skill in _SKILLS:
+        item = skill.as_dict()
+        if skill.bundle_name:
+            item["bundle_hash"] = load_ai_skill_bundle(skill.bundle_name).content_hash
+        results.append(item)
+    return results
 
 
-__all__ = ["get_ai_skill", "list_ai_skills"]
+def compose_ai_skill_instructions(skills: tuple[AiSkillManifest, ...]) -> str:
+    sections: list[str] = []
+    seen: set[str] = set()
+    for skill in skills:
+        bundle_name = skill.bundle_name
+        if bundle_name is None or bundle_name in seen:
+            continue
+        bundle = load_ai_skill_bundle(bundle_name)
+        seen.add(bundle_name)
+        sections.append(
+            f"[AI Skill: {skill.skill_id}@{skill.version}; "
+            f"sha256={bundle.content_hash}]\n{bundle.instructions}"
+        )
+    return "\n\n".join(sections)
+
+
+def resolve_ai_skills(skill_ids: tuple[str, ...]) -> tuple[AiSkillManifest, ...]:
+    if not skill_ids or len(skill_ids) != len(set(skill_ids)):
+        raise ValueError("AI skill composition requires unique skill IDs")
+    return tuple(get_ai_skill(skill_id) for skill_id in skill_ids)
+
+
+__all__ = [
+    "compose_ai_skill_instructions",
+    "get_ai_skill",
+    "list_ai_skills",
+    "resolve_ai_skills",
+]

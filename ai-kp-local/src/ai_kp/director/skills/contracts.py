@@ -28,6 +28,7 @@ class AiSkillManifest:
     output_schema_version: str
     allowed_tools: tuple[str, ...]
     source_requirements: tuple[str, ...]
+    bundle_name: str | None = None
     ruleset_scope: str | None = None
     authority: Literal["proposal_only"] = "proposal_only"
 
@@ -52,6 +53,8 @@ class AiSkillManifest:
                 raise ValueError(f"AI skill {name} contains duplicates")
         if self.authority != "proposal_only":
             raise ValueError("AI skills cannot own authoritative state")
+        if self.bundle_name is not None and not self.bundle_name.strip():
+            raise ValueError("AI skill bundle_name cannot be blank")
 
     def as_dict(self) -> dict:
         result = asdict(self)

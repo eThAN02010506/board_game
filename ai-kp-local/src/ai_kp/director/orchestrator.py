@@ -14,12 +14,14 @@ from ai_kp.director.check_consequence import (
 )
 from ai_kp.director.context_builder import ContextAssembly, ContextBuilder, estimate_tokens
 from ai_kp.director.errors import CampaignAiCallCancelledError
+from ai_kp.director.output_safety import remove_precommitted_world_effects
 from ai_kp.director.session_recap import (
     SessionRecapOutput,
     build_session_recap_context,
     parse_session_recap_output,
 )
-from ai_kp.director.skills import get_ai_skill
+from ai_kp.director.skills import compose_ai_skill_instructions, resolve_ai_skills
+from ai_kp.director.skills.contracts import AiSkillManifest
 from ai_kp.director.turn_output import KpTurnOutput, StructuredOutputError, parse_kp_turn_output
 from ai_kp.director.world_expansion import (
     WORLD_EXPANSION_OUTPUT_INSTRUCTIONS,
@@ -30,6 +32,20 @@ from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
 CHECK_CONSEQUENCE_CONTEXT_BUDGET = 12000
 OutputT = TypeVar("OutputT")
+PLAYER_ACTION_SKILLS = (
+    "platform.turn_proposal",
+    "platform.npc_portrayal",
+    "platform.scene_direction",
+    "platform.output_safety_review",
+)
+CHECK_CONSEQUENCE_SKILLS = (
+    "platform.check_consequence_narration",
+    "platform.output_safety_review",
+)
+WORLD_EXPANSION_SKILLS = (
+    "platform.world_expansion",
+    "platform.output_safety_review",
+)
 
 
 class AiCallTracker(Protocol):
@@ -43,6 +59,8 @@ class KpTurnResult(Generic[OutputT]):
     repaired: bool = False
     skill_id: str = ""
     skill_version: str = ""
+    skill_ids: tuple[str, ...] = ()
+    skill_versions: tuple[str, ...] = ()
 
 
 class KpOrchestrator:
@@ -66,6 +84,7 @@ class KpOrchestrator:
         profession_hint: str | None = None,
         active_spoiler_tags: tuple[str, ...] = (),
     ) -> KpTurnResult[KpTurnOutput]:
+        skills = resolve_ai_skills(PLAYER_ACTION_SKILLS)
         context = ContextBuilder(self.connection).build(
             campaign_id=campaign_id,
             player_action=player_action,
@@ -75,12 +94,13 @@ class KpOrchestrator:
             profession_hint=profession_hint,
             active_spoiler_tags=active_spoiler_tags,
             visibility_scope="kp",
+            skill_instructions=compose_ai_skill_instructions(skills),
         )
         return await self._complete_structured(
             campaign_id,
             context,
             parse_kp_turn_output,
-            skill_id="platform.turn_proposal",
+            skills=skills,
         )
 
     async def handle_check_consequence(
@@ -93,6 +113,7 @@ class KpOrchestrator:
         location: str | None = None,
         map_id: str | None = None,
     ) -> KpTurnResult[KpTurnOutput]:
+        skills = resolve_ai_skills(CHECK_CONSEQUENCE_SKILLS)
         hidden_batch = check_snapshot.get("has_hidden_checks") is True
         snapshot_source = {
             "kind": "verified_check_batch",
@@ -120,6 +141,7 @@ class KpOrchestrator:
                 hidden_batch=hidden_batch
             ),
             additional_sources=(snapshot_source,),
+            skill_instructions=compose_ai_skill_instructions(skills),
         )
 
         def parse_consequence(raw: str) -> KpTurnOutput:
@@ -132,7 +154,7 @@ class KpOrchestrator:
             campaign_id,
             context,
             parse_consequence,
-            skill_id="platform.check_consequence_narration",
+            skills=skills,
         )
 
     async def handle_world_expansion(
@@ -146,6 +168,7 @@ class KpOrchestrator:
         map_id: str | None = None,
         active_spoiler_tags: tuple[str, ...] = (),
     ) -> KpTurnResult[WorldExpansionOutput]:
+        skills = resolve_ai_skills(WORLD_EXPANSION_SKILLS)
         analysis_source = {
             "kind": "scene_director_analysis",
             "id": str(analysis_snapshot["fingerprint"]),
@@ -168,23 +191,25 @@ class KpOrchestrator:
             visibility_scope="kp",
             output_instructions=WORLD_EXPANSION_OUTPUT_INSTRUCTIONS,
             additional_sources=(analysis_source,),
+            skill_instructions=compose_ai_skill_instructions(skills),
         )
         return await self._complete_structured(
             campaign_id,
             context,
             parse_world_expansion_output,
-            skill_id="platform.world_expansion",
+            skills=skills,
         )
 
     async def handle_session_recap(
         self,
         snapshot: dict,
     ) -> KpTurnResult[SessionRecapOutput]:
+        skills = resolve_ai_skills(("platform.session_recap",))
         return await self._complete_structured(
             str(snapshot["campaign_id"]),
             build_session_recap_context(snapshot),
             parse_session_recap_output,
-            skill_id="platform.session_recap",
+            skills=skills,
         )
 
     async def _complete_structured(
@@ -193,23 +218,20 @@ class KpOrchestrator:
         context: ContextAssembly,
         parser: Callable[[str], OutputT],
         *,
-        skill_id: str,
+        skills: tuple[AiSkillManifest, ...],
     ) -> KpTurnResult[OutputT]:
-        skill = get_ai_skill(skill_id)
         if self.call_registry is None:
             return await self._complete_structured_tracked(
                 context,
                 parser,
-                skill_id=skill.skill_id,
-                skill_version=skill.version,
+                skills=skills,
             )
         try:
             with self.call_registry.track(campaign_id):
                 return await self._complete_structured_tracked(
                     context,
                     parser,
-                    skill_id=skill.skill_id,
-                    skill_version=skill.version,
+                    skills=skills,
                 )
         except asyncio.CancelledError as exc:
             raise CampaignAiCallCancelledError(
@@ -221,9 +243,11 @@ class KpOrchestrator:
         context: ContextAssembly,
         parser: Callable[[str], OutputT],
         *,
-        skill_id: str,
-        skill_version: str,
+        skills: tuple[AiSkillManifest, ...],
     ) -> KpTurnResult[OutputT]:
+        primary = skills[0]
+        skill_ids = tuple(skill.skill_id for skill in skills)
+        skill_versions = tuple(skill.version for skill in skills)
         request_messages = [
             ChatMessage(role=item["role"], content=item["content"]) for item in context.messages
         ]
@@ -233,8 +257,10 @@ class KpOrchestrator:
             return KpTurnResult(
                 output=output,
                 context=context,
-                skill_id=skill_id,
-                skill_version=skill_version,
+                skill_id=primary.skill_id,
+                skill_version=primary.version,
+                skill_ids=skill_ids,
+                skill_versions=skill_versions,
             )
         except StructuredOutputError as first_error:
             repair_instruction = (
@@ -248,7 +274,13 @@ class KpOrchestrator:
                 ChatMessage(role="user", content=repair_instruction),
             ]
             repaired_raw = await self.llm.complete(repair_messages, temperature=0.1)
-            output = parser(repaired_raw)
+            try:
+                output = parser(repaired_raw)
+            except StructuredOutputError:
+                reduced_raw = remove_precommitted_world_effects(repaired_raw)
+                if reduced_raw == repaired_raw:
+                    raise
+                output = parser(reduced_raw)
             audited_messages = [
                 {"role": item.role, "content": item.content} for item in repair_messages
             ]
@@ -261,6 +293,8 @@ class KpOrchestrator:
                 output=output,
                 context=audited_context,
                 repaired=True,
-                skill_id=skill_id,
-                skill_version=skill_version,
+                skill_id=primary.skill_id,
+                skill_version=primary.version,
+                skill_ids=skill_ids,
+                skill_versions=skill_versions,
             )

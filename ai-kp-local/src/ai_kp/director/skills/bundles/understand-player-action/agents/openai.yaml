@@ -1,0 +1,4 @@
+interface:
+  display_name: "行动理解"
+  short_description: "Bound player intent to reviewable action proposals."
+  default_prompt: "Use $understand-player-action to classify this player action before proposing resolution."

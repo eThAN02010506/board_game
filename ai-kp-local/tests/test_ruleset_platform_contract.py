@@ -111,6 +111,9 @@ def test_ai_skills_are_explicit_proposal_only_contracts() -> None:
 
     assert {item["skill_id"] for item in skills} == {
         "platform.turn_proposal",
+        "platform.npc_portrayal",
+        "platform.scene_direction",
+        "platform.output_safety_review",
         "platform.check_consequence_narration",
         "platform.world_expansion",
         "platform.session_recap",

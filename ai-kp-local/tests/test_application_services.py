@@ -512,6 +512,21 @@ class AutoTurnServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.status, "awaiting_confirmation")
                 self.assertEqual(result.proposal["status"], "draft")
                 self.assertEqual(repo.get_player_action(action["id"])["status"], "reviewed")
+                skill_audit = next(
+                    item
+                    for item in result.proposal["actions"]
+                    if item["action_type"] == "ai_skill_composition"
+                )
+                self.assertEqual(
+                    skill_audit["payload"]["skills"],
+                    [
+                        {"skill_id": "platform.turn_proposal", "version": "1.0.0"},
+                        {
+                            "skill_id": "platform.output_safety_review",
+                            "version": "1.0.0",
+                        },
+                    ],
+                )
                 adjudication, proposal, checks, applied = ActionAdjudicationService(
                     repo
                 ).confirm(
@@ -600,6 +615,13 @@ class FakeTurnDirector:
                 token_estimate=0,
                 visibility_scope="kp",
             ),
+            skill_id="platform.turn_proposal",
+            skill_version="1.0.0",
+            skill_ids=(
+                "platform.turn_proposal",
+                "platform.output_safety_review",
+            ),
+            skill_versions=("1.0.0", "1.0.0"),
         )
 
 

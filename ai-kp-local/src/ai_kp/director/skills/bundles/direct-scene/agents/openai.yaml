@@ -1,0 +1,4 @@
+interface:
+  display_name: "场景导演"
+  short_description: "Advance one scene beat while preserving player agency."
+  default_prompt: "Use $direct-scene to propose the next bounded scene beat for this action."

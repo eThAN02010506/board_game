@@ -1,0 +1,4 @@
+interface:
+  display_name: "受约束世界补全"
+  short_description: "Draft world candidates without changing Canon or state."
+  default_prompt: "Use $expand-world to draft a bounded world-expansion candidate."

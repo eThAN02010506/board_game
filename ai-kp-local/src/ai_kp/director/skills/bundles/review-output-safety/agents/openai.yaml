@@ -1,0 +1,4 @@
+interface:
+  display_name: "输出安全复核"
+  short_description: "Review AI candidates for secrecy and authority violations."
+  default_prompt: "Use $review-output-safety to review this AI KP candidate before validation."
