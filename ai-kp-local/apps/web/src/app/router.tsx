@@ -32,6 +32,27 @@ export const workspaceRoutes = [
 
 export type PageId = (typeof workspaceRoutes)[number]["id"];
 export type WorkspaceRoute = (typeof workspaceRoutes)[number];
+export type WorkspaceRole = "kp" | "player" | null | undefined;
+
+const playerAllowedPages = new Set<PageId>([
+  "play",
+  "campaigns",
+  "investigators",
+  "maps",
+  "handouts"
+]);
+
+export function routeByPage(page: PageId): WorkspaceRoute {
+  return workspaceRoutes.find((item) => item.id === page) ?? workspaceRoutes[0];
+}
+
+export function isPageAllowedForRole(page: PageId, role: WorkspaceRole): boolean {
+  return role !== "player" || playerAllowedPages.has(page);
+}
+
+export function resolveWorkspaceRoute(page: PageId, role: WorkspaceRole): WorkspaceRoute {
+  return routeByPage(isPageAllowedForRole(page, role) ? page : "play");
+}
 
 export function pageFromPath(pathname: string): PageId {
   return workspaceRoutes.find((item) => item.path === pathname)?.id ?? "play";
@@ -47,12 +68,12 @@ export function useWorkspaceRoute() {
   }, []);
 
   const route = useMemo(
-    () => workspaceRoutes.find((item) => item.id === activePage) ?? workspaceRoutes[0],
+    () => routeByPage(activePage),
     [activePage]
   );
 
   function navigate(next: PageId) {
-    const destination = workspaceRoutes.find((item) => item.id === next) ?? workspaceRoutes[0];
+    const destination = routeByPage(next);
     if (window.location.pathname !== destination.path) {
       window.history.pushState({}, "", destination.path);
     }

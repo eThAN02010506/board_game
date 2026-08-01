@@ -51,7 +51,7 @@ import { useWorkspaceRealtime } from "../realtime/provider";
 import { AppLayout } from "./layout/AppLayout";
 import { useAsyncTaskLog } from "./hooks/useAsyncTaskLog";
 import { KpWorkspace, PlayerWorkspace } from "./workspaces/PlayWorkspaces";
-import { useWorkspaceRoute, workspaceRoutes, type PageId } from "./router";
+import { resolveWorkspaceRoute, useWorkspaceRoute, type PageId } from "./router";
 import {
   listStoredCampaignTokens,
   readActiveMapId,
@@ -107,14 +107,6 @@ const SimulationWorkbench = lazy(() =>
     default: module.SimulationWorkbench
   }))
 );
-
-const playerAllowedPages = new Set<PageId>([
-  "play",
-  "campaigns",
-  "investigators",
-  "maps",
-  "handouts"
-]);
 
 function stringifyForLog(value: unknown) {
   const secretFields = new Set([
@@ -1459,12 +1451,8 @@ export default function App() {
 
   const activePc = pcs.find((pc) => pc.id === authIdentity?.pc_id) ?? null;
   const otherPcs = pcs.filter((pc) => pc.id !== authIdentity?.pc_id);
-  const renderedNav: PageId =
-    authIdentity?.role === "player" && !playerAllowedPages.has(activeNav)
-      ? "play"
-      : activeNav;
-  const renderedPage =
-    workspaceRoutes.find((item) => item.id === renderedNav) ?? currentPage;
+  const renderedPage = resolveWorkspaceRoute(activeNav, authIdentity?.role);
+  const renderedNav = renderedPage.id;
 
   return (
     <AppLayout
