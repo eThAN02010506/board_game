@@ -49,7 +49,7 @@ import { ProposalPanel } from "../features/proposals/ProposalPanel";
 import { SessionPanel } from "../features/sessions/SessionPanel";
 import { useWorkspaceRealtime } from "../realtime/provider";
 import { AppLayout } from "./layout/AppLayout";
-import { useWorkspaceRoute } from "./router";
+import { useWorkspaceRoute, workspaceRoutes, type PageId } from "./router";
 import {
   listStoredCampaignTokens,
   readActiveMapId,
@@ -105,6 +105,14 @@ const SimulationWorkbench = lazy(() =>
     default: module.SimulationWorkbench
   }))
 );
+
+const playerAllowedPages = new Set<PageId>([
+  "play",
+  "campaigns",
+  "investigators",
+  "maps",
+  "handouts"
+]);
 
 function stringifyForLog(value: unknown) {
   const secretFields = new Set([
@@ -1493,12 +1501,18 @@ export default function App() {
 
   const activePc = pcs.find((pc) => pc.id === authIdentity?.pc_id) ?? null;
   const otherPcs = pcs.filter((pc) => pc.id !== authIdentity?.pc_id);
+  const renderedNav: PageId =
+    authIdentity?.role === "player" && !playerAllowedPages.has(activeNav)
+      ? "play"
+      : activeNav;
+  const renderedPage =
+    workspaceRoutes.find((item) => item.id === renderedNav) ?? currentPage;
 
   return (
     <AppLayout
-      activePage={activeNav}
+      activePage={renderedNav}
       campaignTitle={activeCampaign?.title ?? "AI KP Local"}
-      currentRoute={currentPage}
+      currentRoute={renderedPage}
       identity={authIdentity}
       loading={loading}
       onNavigate={navigateWorkspace}
@@ -1507,13 +1521,13 @@ export default function App() {
       realtimeStatus={realtimeStatus}
     >
 
-        {activeNav === "investigators" && (
+        {renderedNav === "investigators" && (
           <Suspense fallback={<section className="page-card">正在载入调查员工作台……</section>}>
             <InvestigatorPage campaign={activeCampaign} identity={authIdentity} />
           </Suspense>
         )}
 
-        {activeNav === "rules" && (
+        {renderedNav === "rules" && (
           <Suspense fallback={<section className="page-card">正在载入规则知识……</section>}>
             <RulebookPage
               identity={authIdentity}
@@ -1522,7 +1536,7 @@ export default function App() {
           </Suspense>
         )}
 
-        {activeNav === "modules" && (
+        {renderedNav === "modules" && (
           <Suspense fallback={<section className="page-card">正在载入 KP 本库……</section>}>
             <ModuleLibraryPage
               campaign={activeCampaign}
@@ -1532,19 +1546,19 @@ export default function App() {
           </Suspense>
         )}
 
-        {activeNav === "models" && (
+        {renderedNav === "models" && (
           <Suspense fallback={<section className="page-card">正在载入模型设置……</section>}>
             <ModelSettingsPage />
           </Suspense>
         )}
 
-        {activeNav === "npcs" && (
+        {renderedNav === "npcs" && (
           <Suspense fallback={<section className="page-card">正在载入 NPC 工作台……</section>}>
             <NpcWorkspace campaign={activeCampaign} identity={authIdentity} />
           </Suspense>
         )}
 
-        {activeNav === "campaigns" && <div className="page-grid campaign-page-grid">
+        {renderedNav === "campaigns" && <div className="page-grid campaign-page-grid">
           <CampaignPanel
             activeCampaignId={activeCampaign?.id}
             adminToken={adminToken}
@@ -1605,7 +1619,7 @@ export default function App() {
           </section>
         </div>}
 
-        {activeNav === "maps" && <div className={`page-grid map-page-grid ${authIdentity?.role ?? "guest"}`}>
+        {renderedNav === "maps" && <div className={`page-grid map-page-grid ${authIdentity?.role ?? "guest"}`}>
           {authIdentity?.role === "kp" && (
             <MapGeneratorPanel
               campaign={activeCampaign}
@@ -1666,8 +1680,24 @@ export default function App() {
           </section>
         </div>}
 
-        {activeNav === "play" && authIdentity && (
+        {renderedNav === "play" && authIdentity && (
           <div className={`play-page ${authIdentity.role === "kp" ? "kp-layout" : "player-layout"}`}>
+            <section className="play-hero-card">
+              <div>
+                <p className="eyebrow">{authIdentity.role === "kp" ? "Keeper cockpit" : "Player table"}</p>
+                <h2>{authIdentity.role === "kp" ? "导演控制室" : "你的行动桌面"}</h2>
+                <p>
+                  {authIdentity.role === "kp"
+                    ? "统一查看玩家行动、地图、检定、审批和自动 KP 队列；适合掌控节奏与风险。"
+                    : "专注描述行动、查看角色与地图、完成检定；不会暴露 KP 草稿或后台控制。"}
+                </p>
+              </div>
+              <div className="play-hero-metrics" aria-label="当前桌面状态">
+                <span><small>角色</small><strong>{activePc?.name ?? "未绑定"}</strong></span>
+                <span><small>地图</small><strong>{activeMap?.title ?? "未打开"}</strong></span>
+                <span><small>{authIdentity.role === "kp" ? "待审行动" : "待掷检定"}</small><strong>{authIdentity.role === "kp" ? playerActions.filter((item) => item.status === "submitted").length : skillChecks.filter((item) => item.status === "requested").length}</strong></span>
+              </div>
+            </section>
             <aside className={`play-character-card ${characterExpanded ? "expanded" : ""}`}>
             <div className="panel-heading">
               <div><p className="eyebrow">当前调查员</p><h2>{activePc?.name ?? "尚未绑定角色"}</h2></div>
@@ -1870,36 +1900,36 @@ export default function App() {
           </div>
         )}
 
-        {activeNav === "play" && !authIdentity && (
+        {renderedNav === "play" && !authIdentity && (
           <section className="page-card permission-hint">请先在“团与权限”页加入会话，再进入游玩台。</section>
         )}
 
-        {activeNav === "memory" && (
+        {renderedNav === "memory" && (
           <Suspense fallback={<section className="page-card">正在载入角色记忆……</section>}>
             <MemoryWorkspace campaign={activeCampaign} identity={authIdentity} pcs={pcs} />
           </Suspense>
         )}
 
-        {activeNav === "facts" && (
+        {renderedNav === "facts" && (
           <Suspense fallback={<section className="page-card">正在载入世界事实……</section>}>
             <FactWorkspace campaign={activeCampaign} identity={authIdentity} pcs={pcs} />
           </Suspense>
         )}
 
-        {activeNav === "handouts" && (
+        {renderedNav === "handouts" && (
           <Suspense fallback={<section className="page-card">正在载入玩家手册……</section>}>
             <HandoutWorkspace campaign={activeCampaign} identity={authIdentity} />
           </Suspense>
         )}
 
-        {activeNav === "evaluations" && (
+        {renderedNav === "evaluations" && (
           <Suspense fallback={<section className="page-card">正在载入模拟团评测……</section>}>
             <SimulationWorkbench campaign={activeCampaign} identity={authIdentity} />
           </Suspense>
         )}
 
         <PlanningPanel
-          activeNav={activeNav}
+          activeNav={renderedNav}
           capabilities={capabilities}
           error={capabilitiesError}
           loading={capabilitiesLoading}

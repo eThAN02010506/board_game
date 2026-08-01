@@ -34,6 +34,17 @@ export function AppLayout({
 }: Props) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const initialRoute = useRef(true);
+  const role = identity?.role ?? "guest";
+  const visibleRoutes = workspaceRoutes.filter((item) => {
+    if (role !== "player") return true;
+    return ["play", "campaigns", "investigators", "maps", "handouts"].includes(item.id);
+  });
+  const workspaceLabel =
+    role === "kp"
+      ? "KP 导演台"
+      : role === "player"
+        ? "玩家游玩台"
+        : "本地叙事工作台";
 
   useEffect(() => {
     if (initialRoute.current) {
@@ -44,7 +55,7 @@ export function AppLayout({
   }, [activePage]);
 
   return (
-    <main className={`app-shell ${activePage === "investigators" ? "investigator-shell" : ""}`}>
+    <main className={`app-shell role-${role} ${activePage === "investigators" ? "investigator-shell" : ""}`}>
       <a className="skip-link" href="#main-workspace">
         跳到主内容
       </a>
@@ -55,11 +66,11 @@ export function AppLayout({
           </span>
           <span className="brand-copy">
             <strong>AI KP Local</strong>
-            <small>本地叙事工作台</small>
+            <small>{workspaceLabel}</small>
           </span>
         </div>
         <nav aria-label="工作台页面">
-          {workspaceRoutes.map((item) => {
+          {visibleRoutes.map((item) => {
             const Icon = item.icon;
             return (
               <a
@@ -93,7 +104,7 @@ export function AppLayout({
       <section className="workspace" id="main-workspace" tabIndex={-1}>
         <header className="topbar">
           <div>
-            <p className="eyebrow">{currentRoute.label}</p>
+            <p className="eyebrow">{workspaceLabel} · {currentRoute.label}</p>
             <h1 ref={headingRef} tabIndex={-1}>
               {campaignTitle}
             </h1>
