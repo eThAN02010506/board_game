@@ -49,6 +49,7 @@ import { ProposalPanel } from "../features/proposals/ProposalPanel";
 import { SessionPanel } from "../features/sessions/SessionPanel";
 import { useWorkspaceRealtime } from "../realtime/provider";
 import { AppLayout } from "./layout/AppLayout";
+import { useAsyncTaskLog } from "./hooks/useAsyncTaskLog";
 import { KpWorkspace, PlayerWorkspace } from "./workspaces/PlayWorkspaces";
 import { useWorkspaceRoute, workspaceRoutes, type PageId } from "./router";
 import {
@@ -202,8 +203,6 @@ export default function App() {
   const [selectedPlayerActionId, setSelectedPlayerActionId] = useState("");
   const [visibleJoinCode, setVisibleJoinCode] = useState("");
   const [selectedTokenId, setSelectedTokenId] = useState("");
-  const [log, setLog] = useState("准备就绪。先连接后端，或直接创建一个测试团。");
-  const [loading, setLoading] = useState(false);
   const [characterExpanded, setCharacterExpanded] = useState(false);
   const [kpActionTab, setKpActionTab] = useState<
     "player-view" | "checks" | "director" | "table-log"
@@ -216,8 +215,7 @@ export default function App() {
   const campaignSelectionVersion = useRef(0);
   const campaignListRequestVersion = useRef(0);
   const mapRequestVersion = useRef(0);
-  const logRequestVersion = useRef(0);
-  const pendingRequestCount = useRef(0);
+  const reportRealtimeRefreshFailureRef = useRef<(label: string) => void>(() => undefined);
 
   const [campaignTitle, setCampaignTitle] = useState("雾港 1928");
   const [campaignTime, setCampaignTime] = useState("1928-10-03 19:30");
@@ -282,10 +280,12 @@ export default function App() {
     );
   }
 
-  function showLog(message: string) {
-    logRequestVersion.current += 1;
-    setLog(message);
-  }
+  const { loading, log, perform, run, showLog } = useAsyncTaskLog({
+    captureScope: captureRequestScope,
+    isCurrentScope: isCurrentRequestScope,
+    reportSilentFailure: (label) => reportRealtimeRefreshFailureRef.current(label),
+    stringify: stringifyForLog
+  });
 
   function isAutoTurnResult(value: unknown): value is AutoTurnResult {
     return Boolean(
@@ -316,50 +316,6 @@ export default function App() {
       setPlayerActionTab("checks");
     }
     showLog(result.message || "自动 KP 已推进。");
-  }
-
-  async function run<T>(
-    label: string,
-    action: () => Promise<T>,
-    onError?: (error: unknown) => void
-  ): Promise<T | undefined> {
-    const scope = captureRequestScope();
-    const logRequest = ++logRequestVersion.current;
-    pendingRequestCount.current += 1;
-    setLoading(true);
-    setLog(`${label}...`);
-    try {
-      const result = await action();
-      if (!isCurrentRequestScope(scope)) return undefined;
-      if (logRequestVersion.current === logRequest) setLog(stringifyForLog(result));
-      return result;
-    } catch (error) {
-      if (!isCurrentRequestScope(scope)) return undefined;
-      onError?.(error);
-      if (logRequestVersion.current === logRequest) {
-        setLog(error instanceof Error ? error.message : String(error));
-      }
-      return undefined;
-    } finally {
-      pendingRequestCount.current = Math.max(0, pendingRequestCount.current - 1);
-      setLoading(pendingRequestCount.current > 0);
-    }
-  }
-
-  async function perform<T>(
-    label: string,
-    action: () => Promise<T>,
-    silent = false
-  ): Promise<T | undefined> {
-    if (!silent) return run(label, action);
-    const scope = captureRequestScope();
-    try {
-      const result = await action();
-      return isCurrentRequestScope(scope) ? result : undefined;
-    } catch {
-      if (isCurrentRequestScope(scope)) reportRealtimeRefreshFailure(label);
-      return undefined;
-    }
   }
 
   function rememberActiveMap(campaignId: string, mapId: string) {
@@ -1494,6 +1450,7 @@ export default function App() {
       expireSession: expireCurrentSession
     }
   });
+  reportRealtimeRefreshFailureRef.current = reportRealtimeRefreshFailure;
 
   useEffect(() => {
     void loadCampaigns();
