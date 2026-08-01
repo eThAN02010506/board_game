@@ -3,7 +3,7 @@ import { type ReactNode, useEffect, useRef } from "react";
 
 import type { AuthIdentity } from "../../api/types";
 import type { PageId, WorkspaceRoute } from "../router";
-import { workspaceRoutes } from "../router";
+import { visibleWorkspaceRoutes } from "../router";
 
 type RealtimeStatus = "connecting" | "live" | "retrying" | "offline";
 
@@ -35,10 +35,7 @@ export function AppLayout({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const initialRoute = useRef(true);
   const role = identity?.role ?? "guest";
-  const visibleRoutes = workspaceRoutes.filter((item) => {
-    if (role !== "player") return true;
-    return ["play", "campaigns", "investigators", "maps", "handouts"].includes(item.id);
-  });
+  const visibleRoutes = visibleWorkspaceRoutes(identity?.role);
   const workspaceLabel =
     role === "kp"
       ? "KP 导演台"

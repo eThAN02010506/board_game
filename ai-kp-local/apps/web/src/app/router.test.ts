@@ -4,7 +4,8 @@ import {
   isPageAllowedForRole,
   pageFromPath,
   resolveWorkspaceRoute,
-  routeByPage
+  routeByPage,
+  visibleWorkspaceRoutes
 } from "./router";
 
 describe("workspace routing", () => {
@@ -26,11 +27,23 @@ describe("workspace routing", () => {
 
   it("redirects players away from KP-only workspaces", () => {
     expect(isPageAllowedForRole("models", "player")).toBe(false);
+    expect(routeByPage("models").access).toBe("kp");
     expect(resolveWorkspaceRoute("models", "player").id).toBe("play");
   });
 
   it("allows players to use table-safe workspaces", () => {
     expect(isPageAllowedForRole("maps", "player")).toBe(true);
+    expect(routeByPage("maps").access).toBe("shared");
     expect(resolveWorkspaceRoute("maps", "player").id).toBe("maps");
+  });
+
+  it("derives player navigation from route access metadata", () => {
+    expect(visibleWorkspaceRoutes("player").map((route) => route.id)).toEqual([
+      "play",
+      "campaigns",
+      "investigators",
+      "maps",
+      "handouts"
+    ]);
   });
 });
