@@ -84,7 +84,7 @@ test("a seated player completes an Auto KP turn when the model is unavailable", 
     { revision_id: investigator.current_revision_id },
     authenticatedPlayerHeaders
   );
-  await postJson(request,
+  const approval = await postJson<{ legacy_pc_id: string }>(request,
     `/campaigns/${campaign.id}/investigators/${investigator.id}/review`,
     { action: "approved", comment: "浏览器无 KP 验收" },
     kpHeaders
@@ -135,4 +135,50 @@ test("a seated player completes an Auto KP turn when the model is unavailable", 
   await expect(jobs).toBeVisible();
   await expect(jobs).toContainText("succeeded", { timeout: 20_000 });
   await expect(page.getByText("你的行动桌面")).toBeVisible();
+
+  const checkedAction = await postJson<{ id: string }>(
+    request,
+    `/campaigns/${campaign.id}/actions`,
+    {
+      action_text: "我仔细检查钟楼门锁。",
+      client_action_id: `browser-check-${suffix}`
+    },
+    authenticatedPlayerHeaders
+  );
+  const checkProposal = await postJson<{ id: string }>(
+    request,
+    `/campaigns/${campaign.id}/proposals`,
+    {
+      player_action_id: checkedAction.id,
+      player_action: "我仔细检查钟楼门锁。",
+      public_narration: "请进行侦查检定。",
+      pc_id: approval.legacy_pc_id,
+      proposed_checks: [{
+        skill: "侦查",
+        difficulty: "regular",
+        reason: "检查门锁",
+        pc_id: approval.legacy_pc_id,
+        hidden: false
+      }]
+    },
+    kpHeaders
+  );
+  await postJson(
+    request,
+    `/kp/proposals/${checkProposal.id}/approve`,
+    { note: "浏览器检定验收" },
+    kpHeaders
+  );
+
+  await page.getByRole("tab", { name: "检定" }).click();
+  const rollButton = page.getByRole("button", { name: "数字骰" });
+  await expect(rollButton).toBeVisible();
+  await rollButton.click();
+  await expect(page.getByRole("button", { name: "重放校验" })).toBeVisible();
+  await expect.poll(async () => {
+    const response = await request.get(`/api/player-actions/${checkedAction.id}`, {
+      headers: authenticatedPlayerHeaders
+    });
+    return (await response.json() as { status: string }).status;
+  }, { timeout: 20_000 }).toBe("resolved");
 });
