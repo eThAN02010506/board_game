@@ -38,6 +38,7 @@ from ai_kp.api.security import (
     SensitiveOperationRateLimitMiddleware,
 )
 from ai_kp.bootstrap.settings import Settings, get_settings
+from ai_kp.infrastructure.auto_kp_worker import AutoKpWorker
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.schema import connect, init_db
 from ai_kp.infrastructure.images.model_configuration import (
@@ -55,11 +56,13 @@ async def _lifespan(app: FastAPI):
     """Own shared HTTP resources, the import worker, and local model process."""
 
     app.state.module_import_worker.start()
+    app.state.auto_kp_worker.start()
     try:
         async with httpx.AsyncClient() as http_client:
             app.state.http_client = http_client
             yield
     finally:
+        await asyncio.to_thread(app.state.auto_kp_worker.stop)
         await asyncio.to_thread(app.state.module_import_worker.stop)
         app.state.local_model_runtime.stop()
 
@@ -97,6 +100,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resolved_settings.db_path.parent / "model-runtime.log"
     )
     app.state.campaign_ai_calls = CampaignAiCallRegistry()
+    app.state.auto_kp_worker = AutoKpWorker(
+        resolved_settings,
+        call_registry=app.state.campaign_ai_calls,
+    )
     app.state.module_import_worker = ModuleImportWorker(
         resolved_settings.db_path,
         resolved_settings.module_asset_root,

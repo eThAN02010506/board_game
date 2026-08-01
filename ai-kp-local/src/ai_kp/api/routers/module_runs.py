@@ -87,6 +87,7 @@ def list_auto_kp_jobs(
 def enqueue_auto_kp_job(
     campaign_id: str,
     payload: AutoKpJobCreate,
+    request: Request,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
@@ -95,7 +96,7 @@ def enqueue_auto_kp_job(
         run = repo.get_campaign_module_run(payload.run_id)
         if run["campaign_id"] != campaign_id:
             raise HTTPException(status_code=404, detail="Module run not found")
-    return repo.enqueue_auto_kp_job(
+    job = repo.enqueue_auto_kp_job(
         campaign_id=campaign_id,
         run_id=payload.run_id,
         job_type=payload.job_type,
@@ -104,6 +105,10 @@ def enqueue_auto_kp_job(
         payload=payload.payload,
         max_attempts=payload.max_attempts,
     )
+    worker = getattr(request.app.state, "auto_kp_worker", None)
+    if worker is not None:
+        worker.wake()
+    return job
 
 
 @router.post("/auto-kp/jobs/{job_id}/retry")

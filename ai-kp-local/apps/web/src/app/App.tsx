@@ -49,6 +49,7 @@ import { ProposalPanel } from "../features/proposals/ProposalPanel";
 import { SessionPanel } from "../features/sessions/SessionPanel";
 import { useWorkspaceRealtime } from "../realtime/provider";
 import { AppLayout } from "./layout/AppLayout";
+import { KpWorkspace, PlayerWorkspace } from "./workspaces/PlayWorkspaces";
 import { useWorkspaceRoute, workspaceRoutes, type PageId } from "./router";
 import {
   listStoredCampaignTokens,
@@ -1680,224 +1681,154 @@ export default function App() {
           </section>
         </div>}
 
-        {renderedNav === "play" && authIdentity && (
-          <div className={`play-page ${authIdentity.role === "kp" ? "kp-layout" : "player-layout"}`}>
-            <section className="play-hero-card">
-              <div>
-                <p className="eyebrow">{authIdentity.role === "kp" ? "Keeper cockpit" : "Player table"}</p>
-                <h2>{authIdentity.role === "kp" ? "导演控制室" : "你的行动桌面"}</h2>
-                <p>
-                  {authIdentity.role === "kp"
-                    ? "统一查看玩家行动、地图、检定、审批和自动 KP 队列；适合掌控节奏与风险。"
-                    : "专注描述行动、查看角色与地图、完成检定；不会暴露 KP 草稿或后台控制。"}
-                </p>
-              </div>
-              <div className="play-hero-metrics" aria-label="当前桌面状态">
-                <span><small>角色</small><strong>{activePc?.name ?? "未绑定"}</strong></span>
-                <span><small>地图</small><strong>{activeMap?.title ?? "未打开"}</strong></span>
-                <span><small>{authIdentity.role === "kp" ? "待审行动" : "待掷检定"}</small><strong>{authIdentity.role === "kp" ? playerActions.filter((item) => item.status === "submitted").length : skillChecks.filter((item) => item.status === "requested").length}</strong></span>
-              </div>
-            </section>
-            <aside className={`play-character-card ${characterExpanded ? "expanded" : ""}`}>
-            <div className="panel-heading">
-              <div><p className="eyebrow">当前调查员</p><h2>{activePc?.name ?? "尚未绑定角色"}</h2></div>
-              <button className="ghost-button" onClick={() => setCharacterExpanded((value) => !value)} type="button">
-                {characterExpanded ? "收起" : "展开完整卡"}
-              </button>
-            </div>
-            {activePc ? (
-              <>
-                <div className="mini-sheet-grid">
-                  {Object.entries(activePc.sheet ?? {}).slice(0, characterExpanded ? 24 : 8).map(([key, value]) => (
-                    <span key={key}><small>{key}</small><strong>{typeof value === "object" ? "…" : String(value)}</strong></span>
-                  ))}
-                </div>
-                {characterExpanded && <pre>{stringifyForLog(activePc.sheet ?? {})}</pre>}
-              </>
-            ) : <p className="permission-hint">先在“团与权限”页加入会话并绑定已批准角色。</p>}
-            <div className="party-summary">
-              <div className="party-summary-heading">
-                <strong>{authIdentity.role === "kp" ? "所有玩家" : "队友信息"}</strong>
-                <small>{authIdentity.role === "kp" ? "公开摘要" : "精简信息"}</small>
-              </div>
-              {otherPcs.length ? otherPcs.map((pc) => {
-                const location = activeMap?.tokens?.find(
-                  (token) => token.actor_type === "pc" && token.actor_id === pc.id
-                )?.location_name;
-                const summary = publicPcSummary(pc);
-                const attributes = summary.attributes ?? {};
-                return (
-                  <article className="party-member-mini" key={pc.id}>
-                    <div><strong>{pc.name}</strong><span>{location ?? "位置未知"}</span></div>
-                    {authIdentity.role === "kp" && (
-                      <small>
-                        {summary.cash !== undefined ? `现金 ${summary.cash}` : "现金未公开"}
-                        {Object.keys(attributes).length ? ` · ${Object.entries(attributes).slice(0, 3).map(([key, value]) => `${key.toUpperCase()} ${value}`).join(" / ")}` : " · 属性未公开"}
-                      </small>
-                    )}
-                  </article>
-                );
-              }) : <small>目前没有其他已加入的调查员。</small>}
-            </div>
-            {authIdentity.role === "kp" && <TokenPanel
-              activeMap={activeMap}
-              identity={authIdentity}
-              movableTokens={movableTokens}
-              moveTarget={moveTarget}
-              onMoveTargetChange={setMoveTarget}
-              onMoveToken={moveToken}
-              onPlaceToken={placeToken}
-              onSelectedTokenIdChange={setSelectedTokenId}
-              onTokenActorIdChange={setTokenActorId}
-              onTokenLabelChange={setTokenLabel}
-              onTokenLocationChange={setTokenLocation}
-              pcs={pcs}
-              selectedToken={selectedToken}
-              selectedTokenId={selectedTokenId}
-              tokenActorId={tokenActorId}
-              tokenLabel={tokenLabel}
-              tokenLocation={tokenLocation}
-            />}
-            </aside>
-
-            <div className="play-map-column">
-            <MapStage
-              activeMap={activeMap}
-              hasIdentity={Boolean(authIdentity)}
-              loading={loading}
-              maps={maps}
-              onOpenMap={(mapId) => void openMap(mapId)}
-              onRefresh={() => void refreshRealtimeMaps()}
-              onSetPublished={(published) => void setMapPublished(published)}
-              role={authIdentity?.role}
-              showReviewControls={false}
-            />
-            <RoutePlanPanel map={activeMap} identity={authIdentity} />
-            </div>
-
-            <div className="play-action-column">
-            <div className="action-tabs" role="tablist" aria-label={authIdentity.role === "kp" ? "KP 导演控制台" : "玩家游玩台"}>
-              {authIdentity.role === "kp" ? (
-                <>
-                  {(["player-view", "checks", "director", "table-log"] as const).map((tab) => (
-                    <button
-                      aria-selected={kpActionTab === tab}
-                      className={`tab-btn ${kpActionTab === tab ? "active" : ""}`}
-                      key={tab}
-                      onClick={() => setKpActionTab(tab)}
-                      role="tab"
-                      type="button"
-                    >
-                      {{ "player-view": "玩家视角", checks: "检定", director: "导演", "table-log": "桌面记录" }[tab]}
-                    </button>
-                  ))}
-                </>
-              ) : (
-                <>
-                  {(["actions", "checks"] as const).map((tab) => (
-                    <button
-                      aria-selected={playerActionTab === tab}
-                      className={`tab-btn ${playerActionTab === tab ? "active" : ""}`}
-                      key={tab}
-                      onClick={() => setPlayerActionTab(tab)}
-                      role="tab"
-                      type="button"
-                    >
-                      {tab === "actions" ? "行动" : "检定"}
-                    </button>
-                  ))}
-                </>
-              )}
-            </div>
-
-              <div className="action-tab-content">
-                {((authIdentity.role === "kp" && kpActionTab === "player-view") ||
-                  (authIdentity.role !== "kp" && playerActionTab === "actions")) && (
-                  <>
-                    <GameplayWorkbench campaign={activeCampaign} identity={authIdentity} />
-                    <ActionPanel
-                  autoKpEnabled={autoKpEnabled}
-                  identity={authIdentity}
-                  loading={loading}
-                  onAutoKpEnabledChange={setAutoKpEnabled}
-                  onCreateProposal={() => void createProposal()}
-                  onGenerateAiProposal={() => void generateAiProposal()}
-                  onPlayerActionChange={setPlayerAction}
-                  onProposalTextChange={setProposalText}
-                  onRefreshPlayerActions={() => void loadPlayerActions()}
-                  onSearchMemory={() => void searchMemory()}
-                  onSelectPlayerAction={(action) => {
-                    setSelectedPlayerActionId(action.id);
-                    setPlayerAction(action.action_text);
-                  }}
-                  onSubmitPlayerAction={() => void submitPlayerAction()}
-                  playerAction={playerAction}
-                  playerActions={playerActions}
-                  proposalText={proposalText}
-                  selectedPlayerActionId={selectedPlayerActionId}
-                    />
-                  </>
-                )}
-
-                {((authIdentity.role === "kp" && kpActionTab === "checks") ||
-                  (authIdentity.role !== "kp" && playerActionTab === "checks")) && <CheckPanel
+        {renderedNav === "play" && authIdentity?.role === "kp" && (
+          <KpWorkspace
+            activeCampaign={activeCampaign}
+            activeMap={activeMap}
+            activePc={activePc}
+            activeProposal={activeProposal}
+            authIdentity={authIdentity}
+            autoKpEnabled={autoKpEnabled}
+            campaignTime={campaignTime}
+            characterExpanded={characterExpanded}
             checks={skillChecks}
-            opposedChecks={opposedChecks}
-            identity={authIdentity}
+            contactInvestigators={contactInvestigators}
+            kpActionTab={kpActionTab}
             loading={loading}
+            log={log}
+            maps={maps}
             members={sessionMembers}
+            movableTokens={movableTokens}
+            moveTarget={moveTarget}
+            npcReappearanceCandidates={npcReappearanceCandidates}
+            onApprove={() => void approveProposal()}
+            onAutoKpEnabledChange={setAutoKpEnabled}
+            onCancel={(checkId, reason) => void decideSkillCheck(checkId, "cancel", reason)}
+            onConfirmWorldExpansion={(input) => void confirmWorldExpansionContact(input)}
+            onCreate={(input) => void createSkillCheck(input)}
+            onCreateOpposed={(input) => void createOpposedCheck(input)}
+            onCreateProposal={() => void createProposal()}
+            onGenerateAiProposal={() => void generateAiProposal()}
+            onGenerateConsequence={(checkId) => void generateCheckConsequence(checkId)}
+            onInspectContext={() => void inspectProposalContext()}
+            onKpActionTabChange={setKpActionTab}
+            onMoveTargetChange={setMoveTarget}
+            onMoveToken={moveToken}
+            onOpenMap={(mapId) => void openMap(mapId)}
+            onOverride={(checkId, successLevel, passed, reason) => void overrideSkillCheck(checkId, successLevel, passed, reason)}
+            onOverrideTextChange={setOverrideText}
+            onPlaceToken={placeToken}
+            onPlayerActionChange={setPlayerAction}
+            onProposalTextChange={setProposalText}
+            onPush={(checkId, reason) => void decideSkillCheck(checkId, "push", reason)}
+            onRefresh={() => void loadProposals()}
+            onRefreshMaps={() => void refreshRealtimeMaps()}
+            onRefreshPlayerActions={() => void loadPlayerActions()}
+            onReject={() => void rejectProposal()}
+            onReplay={(checkId) => void replaySkillCheck(checkId)}
+            onRerollOpposed={(opposedCheckId) => void rerollOpposedCheck(opposedCheckId)}
+            onResolveDigital={(checkId) => void resolveSkillCheck(checkId, "digital")}
+            onResolveOpposed={(opposedCheckId) => void resolveOpposedCheck(opposedCheckId)}
+            onResolvePhysical={(checkId, onesDigit, tensDigits) => void resolveSkillCheck(checkId, "physical", onesDigit, tensDigits)}
+            onSearchMemory={() => void searchMemory()}
+            onSelectPlayerAction={(action) => {
+              setSelectedPlayerActionId(action.id);
+              setPlayerAction(action.action_text);
+            }}
+            onSelectProposal={(proposalId) => {
+              setActiveProposalId(proposalId);
+              setOverrideText("");
+              setProposalContext(null);
+            }}
+            onSelectedTokenIdChange={setSelectedTokenId}
+            onSetCharacterExpanded={setCharacterExpanded}
+            onSetMapPublished={(published) => void setMapPublished(published)}
+            onSubmitPlayerAction={() => void submitPlayerAction()}
+            onTokenActorIdChange={setTokenActorId}
+            onTokenLabelChange={setTokenLabel}
+            onTokenLocationChange={setTokenLocation}
+            opposedChecks={opposedChecks}
+            otherPcs={otherPcs}
+            overrideText={overrideText}
+            pcs={pcs}
+            playerAction={playerAction}
+            playerActions={playerActions}
+            proposalContext={proposalContext}
+            proposals={proposals}
+            proposalText={proposalText}
+            selectedPlayerActionId={selectedPlayerActionId}
+            selectedToken={selectedToken}
+            selectedTokenId={selectedTokenId}
+            tokenActorId={tokenActorId}
+            tokenLabel={tokenLabel}
+            tokenLocation={tokenLocation}
+          />
+        )}
+
+        {renderedNav === "play" && authIdentity?.role === "player" && (
+          <PlayerWorkspace
+            activeCampaign={activeCampaign}
+            activeMap={activeMap}
+            activePc={activePc}
+            authIdentity={authIdentity}
+            autoKpEnabled={autoKpEnabled}
+            characterExpanded={characterExpanded}
+            checks={skillChecks}
+            loading={loading}
+            maps={maps}
+            members={sessionMembers}
+            movableTokens={movableTokens}
+            moveTarget={moveTarget}
+            onAutoKpEnabledChange={setAutoKpEnabled}
             onCancel={(checkId, reason) => void decideSkillCheck(checkId, "cancel", reason)}
             onCreate={(input) => void createSkillCheck(input)}
             onCreateOpposed={(input) => void createOpposedCheck(input)}
+            onCreateProposal={() => void createProposal()}
+            onGenerateAiProposal={() => void generateAiProposal()}
             onGenerateConsequence={(checkId) => void generateCheckConsequence(checkId)}
+            onMoveTargetChange={setMoveTarget}
+            onMoveToken={moveToken}
+            onOpenMap={(mapId) => void openMap(mapId)}
             onOverride={(checkId, successLevel, passed, reason) => void overrideSkillCheck(checkId, successLevel, passed, reason)}
+            onPlaceToken={placeToken}
+            onPlayerActionChange={setPlayerAction}
+            onPlayerActionTabChange={setPlayerActionTab}
+            onProposalTextChange={setProposalText}
             onPush={(checkId, reason) => void decideSkillCheck(checkId, "push", reason)}
             onRefresh={() => void loadSkillChecks()}
+            onRefreshMaps={() => void refreshRealtimeMaps()}
+            onRefreshPlayerActions={() => void loadPlayerActions()}
             onReplay={(checkId) => void replaySkillCheck(checkId)}
-            onResolveDigital={(checkId) => void resolveSkillCheck(checkId, "digital")}
-            onResolvePhysical={(checkId, onesDigit, tensDigits) => void resolveSkillCheck(checkId, "physical", onesDigit, tensDigits)}
-            onResolveOpposed={(opposedCheckId) => void resolveOpposedCheck(opposedCheckId)}
             onRerollOpposed={(opposedCheckId) => void rerollOpposedCheck(opposedCheckId)}
-                />}
-
-                {authIdentity.role === "kp" && kpActionTab === "director" && (
-                  <ProposalPanel
-              activeMap={activeMap}
-              activeProposal={activeProposal}
-              campaignTime={campaignTime}
-              contactInvestigators={contactInvestigators}
-              loading={loading}
-              onApprove={() => void approveProposal()}
-              onConfirmWorldExpansion={(input) =>
-                void confirmWorldExpansionContact(input)
-              }
-              onInspectContext={() => void inspectProposalContext()}
-              npcReappearanceCandidates={npcReappearanceCandidates}
-              onOverrideTextChange={setOverrideText}
-              onRefresh={() => void loadProposals()}
-              onReject={() => void rejectProposal()}
-              onSelectProposal={(proposalId) => {
-                setActiveProposalId(proposalId);
-                setOverrideText("");
-                setProposalContext(null);
-              }}
-              overrideText={overrideText}
-              proposalContext={proposalContext}
-              proposals={proposals}
-                  />
-                )}
-                {authIdentity.role === "kp" && kpActionTab === "table-log" && (
-                  <section className="response-panel table-log-panel">
-                    <div className="panel-heading">
-                      <h2>桌面记录</h2>
-                      <AlertCircle size={18} />
-                    </div>
-                    <pre>{log}</pre>
-                  </section>
-                )}
-              </div>
-            </div>
-          </div>
+            onResolveDigital={(checkId) => void resolveSkillCheck(checkId, "digital")}
+            onResolveOpposed={(opposedCheckId) => void resolveOpposedCheck(opposedCheckId)}
+            onResolvePhysical={(checkId, onesDigit, tensDigits) => void resolveSkillCheck(checkId, "physical", onesDigit, tensDigits)}
+            onSearchMemory={() => void searchMemory()}
+            onSelectPlayerAction={(action) => {
+              setSelectedPlayerActionId(action.id);
+              setPlayerAction(action.action_text);
+            }}
+            onSelectedTokenIdChange={setSelectedTokenId}
+            onSetCharacterExpanded={setCharacterExpanded}
+            onSetMapPublished={(published) => void setMapPublished(published)}
+            onSubmitPlayerAction={() => void submitPlayerAction()}
+            onTokenActorIdChange={setTokenActorId}
+            onTokenLabelChange={setTokenLabel}
+            onTokenLocationChange={setTokenLocation}
+            opposedChecks={opposedChecks}
+            otherPcs={otherPcs}
+            pcs={pcs}
+            playerAction={playerAction}
+            playerActions={playerActions}
+            playerActionTab={playerActionTab}
+            proposalText={proposalText}
+            selectedPlayerActionId={selectedPlayerActionId}
+            selectedToken={selectedToken}
+            selectedTokenId={selectedTokenId}
+            tokenActorId={tokenActorId}
+            tokenLabel={tokenLabel}
+            tokenLocation={tokenLocation}
+          />
         )}
 
         {renderedNav === "play" && !authIdentity && (
