@@ -265,9 +265,20 @@ aesthetic acceptance remains an explicit KP decision. See
 
 1. A player submits action text and an optional controlled token/map. The service derives PC and location from the authenticated membership and visible token state. A per-member `client_action_id` makes browser retries idempotent.
 2. The action is stored as `submitted`; only that member and the KP can read it.
-3. When the KP creates a manual proposal or `/kp/turn` from that queue item, it is atomically linked and becomes `reviewed`. One submitted action cannot be claimed twice.
-4. Approving the linked draft atomically applies the validated world changes and marks the action `resolved`.
-5. Rejecting the linked draft applies no world changes and marks the action `rejected`.
+3. A manual KP flow may claim the item directly. An automated flow creates a linked draft plus a
+   persisted `player_action_adjudication` in exactly one visible mode: direct resolution, skill
+   check, or roleplay/clarification. The append-only adjudication event log records skill changes,
+   confirmation, supersession and actor identity.
+4. The owning player must confirm the ruling, choose one of the validated character-sheet options,
+   or revise the action. Revision supersedes the old ruling and submits a new action; page reloads
+   recover pending rulings from SQLite instead of relying on worker response payloads.
+5. Confirmation uses optimistic version checks. A skill ruling creates the deterministic check;
+   a direct ruling atomically applies validated effects. For a parallel proposal, every owning
+   player must confirm before the shared draft can commit.
+6. Weak-model, malformed-output, impossible-action and era-conflict paths fail closed as a concrete
+   clarification. Server-side prechecks remove any model-authored effects before dangerous or
+   deceptive prerequisite rolls.
+7. Rejecting or superseding a linked draft applies no world changes.
 
 The player-action response does not embed the linked proposal, KP notes, secret context, or final prompt.
 
@@ -308,8 +319,12 @@ proposal and all affected world state.
    sources are included; campaign time, approved character core and current module-run core are
    never silently dropped.
 4. The model produces strict JSON. One repair attempt is allowed when a local model returns malformed output.
-5. A `turn_proposal` and its `context_assembly` are saved together for inspection.
-6. Human KP approval atomically applies events, curated memories, NPC relationship updates, and validated map moves. Any invalid cross-campaign reference rolls the entire approval back.
+5. A `turn_proposal` and its `context_assembly` are saved together for inspection. In player-driven
+   automation, the server derives and persists a separate player-facing adjudication; model JSON
+   is never itself approval.
+6. Player confirmation, human KP approval, or the post-check consequence boundary (depending on
+   workflow stage) atomically applies events, curated memories, NPC relationship updates, and
+   validated map moves. Any invalid cross-campaign reference rolls the entire approval back.
 
 For a real local-model test, first query the provider's OpenAI-compatible `/v1/models` endpoint and use an ID returned in `data[].id` as `AI_KP_LLM_MODEL`. A guessed `.gguf` filename is not an API capability check. The provider is considered verified only after model discovery, `/v1/chat/completions`, and a complete validated KP proposal flow all succeed.
 

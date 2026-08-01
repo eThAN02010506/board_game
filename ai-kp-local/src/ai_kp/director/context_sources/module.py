@@ -138,7 +138,7 @@ class ModuleContextProvider:
             return
         module_placeholders = ",".join("?" for _ in scope.module_ids)
         visibility_placeholders = ",".join("?" for _ in visibility)
-        query_tokens = tokenize(player_action)
+        query_tokens = self._action_query_tokens(player_action)
         selected_candidate_sources = self._candidate_sources(
             scope,
             query_tokens,
@@ -191,7 +191,7 @@ class ModuleContextProvider:
             """,
             (*scope.module_ids, *visibility),
         ).fetchall()
-        query_tokens = tokenize(player_action)
+        query_tokens = self._action_query_tokens(player_action)
         current_scene = str(scope.current_scene_key or "")
         ranked: list[dict] = []
         for row in rows:
@@ -225,6 +225,17 @@ class ModuleContextProvider:
         for source in ranked[4:]:
             source["excluded_reason"] = "module_chunk_limit"
             excluded.append(self._without_content(source))
+
+    @staticmethod
+    def _action_query_tokens(player_action: str) -> set[str]:
+        """Add narrow rules cues for risky and social intents before ranking."""
+        normalized = player_action.casefold()
+        cues = ""
+        if any(term in normalized for term in ("跳车", "跳下列车", "jump off")):
+            cues += " 灵感 智力 INT 跳跃 伤害 风险"
+        if any(term in normalized for term in ("亲属", "冒充", "欺骗", "说谎", "lost relative")):
+            cues += " 话术 说服 魅惑 心理学 欺骗 亲属"
+        return tokenize(player_action + cues)
 
     def _candidate_sources(
         self,

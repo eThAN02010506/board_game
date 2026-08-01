@@ -192,6 +192,13 @@ STRUCTURED_OUTPUT_INSTRUCTIONS = """只返回一个 JSON 对象，不要 Markdow
 不存在的交流或恐惧能力、跨越未连接地点或改写 module_canon。目标不可能时必须使用
 feasibility=impossible、resolution=no_roll，解释原因并给出可选的目标重述；不得为了
 “给玩家机会”虚构一次无意义检定。
+社交行动必须区分“角色说了什么”与“世界事实是否为真”：冒充亲属、索要钥匙等通常是
+话术/说服/魅惑与目标心理学或立场的裁定，成功至多令目标暂时相信或让步，不能把亲属关系
+写成 canonical_fact。对白或具体说辞不足时，使用 impossible/no_roll 并在 alternative 中提出
+一个具体 RP/澄清问题。玩家选择的技能必须来自其角色卡；不要发明“感知”等不存在技能。
+从行驶列车跳下等固有危险行动可以尝试，但 maximum_effect 不得承诺安全；应先以灵感/INT
+确认角色是否理解风险，再由后续行动处理跳跃/DEX与伤害。历史时代不存在的物品或服务不能
+靠检定生成。
 只有已经在当前场景中成立、并且值得作为长期真相区分检索的内容才进入 proposed_facts；
 传闻必须标为 rumor，角色个人认知必须标为 character_belief，推测必须标为 ai_hypothesis。
 如果 proposed_checks 非空，则 proposed_events、proposed_memories、proposed_npc_updates、

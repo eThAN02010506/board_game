@@ -53,10 +53,13 @@ class StarletteRealtimeChannel:
         return json.loads(raw_message)
 
     async def send_json(self, payload: dict[str, Any]) -> None:
-        await asyncio.wait_for(
-            self.websocket.send_json(payload),
-            timeout=self.send_timeout,
-        )
+        try:
+            await asyncio.wait_for(
+                self.websocket.send_json(payload),
+                timeout=self.send_timeout,
+            )
+        except WebSocketDisconnect as error:
+            raise RealtimeDisconnected from error
 
     async def close(self, code: int, reason: str) -> None:
         await self.websocket.close(code=code, reason=reason)

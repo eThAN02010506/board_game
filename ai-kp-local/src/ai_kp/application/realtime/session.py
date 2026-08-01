@@ -195,7 +195,17 @@ class RealtimeSession:
             await self.channel.send_json(response)
 
     async def _cancel_receive(self) -> None:
-        if self._receive_task is not None and not self._receive_task.done():
-            self._receive_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._receive_task
+        task = self._receive_task
+        self._receive_task = None
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+        with suppress(
+            asyncio.CancelledError,
+            RealtimeDisconnected,
+            FrameTooLargeError,
+            ValueError,
+            RuntimeError,
+        ):
+            await task

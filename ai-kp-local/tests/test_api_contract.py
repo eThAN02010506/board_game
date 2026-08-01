@@ -225,6 +225,10 @@ EXPECTED_HTTP_ROUTES = {
     ("GET", "/campaigns/{campaign_id}/simulation-cases"),
     ("POST", "/simulation-cases/{case_id}/runs"),
     ("POST", "/kp/turn"),
+    ("GET", "/player-actions/{action_id}/adjudication"),
+    ("GET", "/campaigns/{campaign_id}/action-adjudications/pending"),
+    ("POST", "/player-actions/{action_id}/adjudication/confirm"),
+    ("POST", "/player-actions/{action_id}/adjudication/revise"),
 }
 
 

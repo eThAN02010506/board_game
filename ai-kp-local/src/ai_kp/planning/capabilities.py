@@ -55,7 +55,10 @@ CAPABILITIES: tuple[Capability, ...] = (
         phase="MVP",
         audience="kp",
         summary="结构化草稿、上下文快照、批准、拒绝和原子落库已可用。",
-        acceptance=("草稿未批准前不改变正式世界状态。",),
+        acceptance=(
+            "草稿未批准前不改变正式世界状态。",
+            "AI KP 的直接结算、技能检定和 RP/澄清裁定在玩家确认前不执行。",
+        ),
     ),
     Capability(
         id="memory_foundation",
@@ -212,8 +215,9 @@ CAPABILITIES: tuple[Capability, ...] = (
             "严格事实、跨团 NPC 身份与已审核地点上的地图棋子。跨团 NPC 已有确定性"
             "年代/地点/职业/预算门控。反应性支线与锚点桥接已有条件化因果节拍、"
             "图可达性保护和追加式进度审计；平衡/AI KP 可对低副作用环境候选自动"
-            "批准并 materialize，玩家行动中的当前 world gap 也会自动进入该链路且"
-            "只在落地后解决；低置信、冲突和支线候选仍暂停给 KP。"
+            "生成 materialize 方案；玩家行动中的当前 world gap 会自动进入该链路，"
+            "但必须由玩家确认后才原子落地并解决行动；低置信、冲突和支线候选改为"
+            "要求玩家补充或修改行动，不会在弱模型降级时默认放行。"
         ),
         dependencies=(
             "scene_director",

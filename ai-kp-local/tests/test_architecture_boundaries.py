@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from ai_kp.api import main as compatibility_main
 from ai_kp.application.world_service import WorldService
 from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.database.action_adjudications import ActionAdjudicationRepository
 from ai_kp.infrastructure.database.auto_kp_jobs import AutoKpJobRepository
 from ai_kp.infrastructure.database.character_timelines import CharacterTimelineRepository
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
@@ -456,6 +457,7 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
 def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     assert Repository.__bases__ == (
         WorldRepository,
+        ActionAdjudicationRepository,
         AutoKpJobRepository,
         EvaluationRepository,
         FactRepository,
@@ -533,7 +535,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 49
+    assert LATEST_SCHEMA_VERSION == 50
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -584,6 +586,7 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (47, "add_check_random_evidence"),
         (48, "add_module_run_automation_levels"),
         (49, "add_auto_kp_jobs"),
+        (50, "add_action_adjudications"),
     ]
 
 

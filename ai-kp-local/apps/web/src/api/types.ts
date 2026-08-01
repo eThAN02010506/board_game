@@ -161,6 +161,11 @@ export type AutoKpJob = {
   last_error?: string | null;
   created_at: string;
   updated_at: string;
+  result?: Partial<AutoTurnResult> & {
+    stage?: string;
+    actions?: PlayerActionRecord[];
+    adjudications?: ActionAdjudication[];
+  };
 };
 
 export type ModuleRun = {
@@ -1131,11 +1136,45 @@ export type PlayerActionRecord = {
   display_name?: string;
 };
 
+export type ActionSkillOption = {
+  skill_name: string;
+  skill_key: string;
+  target: number;
+  difficulty: "regular" | "hard" | "extreme" | "opposed";
+  reason: string;
+  hidden: boolean;
+};
+
+export type ActionAdjudication = {
+  id: string;
+  action_id: string;
+  proposal_id: string;
+  mode: "direct_resolution" | "skill_check" | "roleplay_or_clarification";
+  status: "pending" | "confirmed" | "superseded";
+  version: number;
+  reason: string;
+  prompt: string;
+  skill_options: ActionSkillOption[];
+  selected_skill: string | null;
+  source_model: string;
+  source_error: string | null;
+  ruling: {
+    goal?: string;
+    method?: string;
+    target?: string;
+    feasibility?: "possible" | "partial" | "impossible";
+    resolution?: "automatic" | "check" | "opposed" | "no_roll";
+    maximum_effect?: string;
+    alternative?: string;
+  };
+};
+
 export type AutoTurnResult = {
-  status: "queued" | "completed" | "awaiting_roll" | "needs_attention" | "failed";
+  status: "queued" | "completed" | "awaiting_roll" | "awaiting_confirmation" | "needs_attention" | "failed";
   player_action: PlayerActionRecord;
   proposal: TurnProposal | null;
   checks: SkillCheck[];
+  adjudication?: ActionAdjudication | null;
   job?: AutoKpJob;
   message: string;
 };

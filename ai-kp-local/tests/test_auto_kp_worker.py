@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from ai_kp.application.action_adjudication_service import ActionAdjudicationService
 from ai_kp.application.auto_kp_queue_service import AutoKpQueueService
 from ai_kp.application.module_run_service import (
     AutomationLevelCommand,
@@ -197,7 +198,18 @@ def test_auto_kp_worker_processes_claimed_player_action_job(
 
         saved = repo.get_auto_kp_job(claimed["id"])
         assert saved["status"] == "succeeded"
-        assert saved["result"]["player_action"]["status"] == "resolved"
+        assert saved["result"]["status"] == "awaiting_confirmation"
+        assert saved["result"]["player_action"]["status"] == "reviewed"
+        ruling = saved["result"]["adjudication"]
+        _, proposal, checks, applied = ActionAdjudicationService(repo).confirm(
+            action["id"],
+            expected_version=ruling["version"],
+            selected_skill=ruling["selected_skill"],
+            identity=player_identity,
+        )
+        assert applied is True
+        assert proposal["status"] == "approved"
+        assert checks == []
         assert repo.get_player_action(action["id"])["status"] == "resolved"
         event = connection.execute(
             "SELECT summary FROM events WHERE campaign_id = ?",
@@ -290,6 +302,17 @@ def test_auto_kp_worker_routes_world_gap_and_resolves_player_action(
         saved = repo.get_auto_kp_job(job["id"])
         assert saved["status"] == "succeeded"
         assert saved["stage"] == "world_expansion"
+        assert saved["result"]["status"] == "awaiting_confirmation"
+        assert repo.get_player_action(action["id"])["status"] == "reviewed"
+        ruling = saved["result"]["adjudication"]
+        _, proposal, _, applied = ActionAdjudicationService(repo).confirm(
+            action["id"],
+            expected_version=ruling["version"],
+            selected_skill=None,
+            identity=player_identity,
+        )
+        assert applied is True
+        assert proposal["status"] == "approved"
         assert repo.get_player_action(action["id"])["status"] == "resolved"
         facts = repo.list_fact_heads(campaign["id"])
         assert [(item.fact.subject, item.fact.predicate) for item in facts] == [

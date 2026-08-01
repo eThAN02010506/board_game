@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AuthIdentity, AutoKpJob, PlayerActionRecord } from "../../api/types";
+import type { ActionAdjudication, AuthIdentity, AutoKpJob, PlayerActionRecord } from "../../api/types";
 import { ActionPanel } from "./ActionPanel";
 
 const kpIdentity: AuthIdentity = {
@@ -52,7 +52,8 @@ const actions: PlayerActionRecord[] = [
 function renderPanel(
   identity: AuthIdentity | null,
   loading = false,
-  autoKpJobs: AutoKpJob[] = []
+  autoKpJobs: AutoKpJob[] = [],
+  adjudication: ActionAdjudication | null = null
 ) {
   const callbacks = {
     onPlayerActionChange: vi.fn(),
@@ -64,7 +65,9 @@ function renderPanel(
     onRefreshPlayerActions: vi.fn(),
     onRetryAutoKpJob: vi.fn(),
     onCreateProposal: vi.fn(),
-    onGenerateAiProposal: vi.fn()
+    onGenerateAiProposal: vi.fn(),
+    onConfirmAdjudication: vi.fn(),
+    onReviseAdjudication: vi.fn()
   };
 
   render(
@@ -77,6 +80,7 @@ function renderPanel(
       selectedPlayerActionId="action_submitted"
       autoKpEnabled
       autoKpJobs={autoKpJobs}
+      adjudication={adjudication}
       {...callbacks}
     />
   );
@@ -110,6 +114,53 @@ describe("ActionPanel", () => {
     expect(onAutoKpEnabledChange).toHaveBeenCalledWith(false);
   });
 
+  it("shows the AI mode and lets the player confirm or revise the skill", () => {
+    const adjudication: ActionAdjudication = {
+      id: "adjudication_test",
+      action_id: "action_submitted",
+      proposal_id: "proposal_test",
+      mode: "skill_check",
+      status: "pending",
+      version: 1,
+      reason: "需要先判断是否意识到跳车风险。",
+      prompt: "",
+      skill_options: [
+        {
+          skill_name: "INT",
+          skill_key: "int",
+          target: 70,
+          difficulty: "regular",
+          reason: "成功只代表意识到风险。",
+          hidden: false
+        }
+      ],
+      selected_skill: "INT",
+      source_model: "test-model",
+      source_error: null,
+      ruling: {
+        goal: "理解跳车风险",
+        method: "灵感/INT",
+        target: "玩家角色",
+        maximum_effect: "只意识到风险，不保证安全。"
+      }
+    };
+    const { onConfirmAdjudication, onReviseAdjudication } = renderPanel(
+      playerIdentity,
+      false,
+      [],
+      adjudication
+    );
+
+    expect(screen.getByText("技能检定")).toBeInTheDocument();
+    expect(screen.getByText("AI 初步裁定 · 尚未执行")).toBeInTheDocument();
+    expect(screen.getByLabelText("选择本次判定技能")).toHaveValue("INT");
+    expect(screen.getByText("只意识到风险，不保证安全。")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认此裁定" }));
+    fireEvent.click(screen.getByRole("button", { name: "修改行动并重新裁定" }));
+    expect(onConfirmAdjudication).toHaveBeenCalledWith("INT");
+    expect(onReviseAdjudication).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the player's durable Auto KP progress", () => {
     const { onRetryAutoKpJob } = renderPanel(playerIdentity, false, [
       {
@@ -132,6 +183,28 @@ describe("ActionPanel", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "重新尝试" }));
     expect(onRetryAutoKpJob).toHaveBeenCalledWith("job_action");
+  });
+
+  it("accepts dialogue or a described approach when the ruling needs roleplay", () => {
+    renderPanel(playerIdentity, false, [], {
+      id: "adjudication_rp",
+      action_id: "action_submitted",
+      proposal_id: "proposal_rp",
+      mode: "roleplay_or_clarification",
+      status: "pending",
+      version: 1,
+      reason: "需要说明如何取信于列车长。",
+      prompt: "请补充说辞。",
+      skill_options: [],
+      selected_skill: null,
+      source_model: "test-model",
+      source_error: null,
+      ruling: {}
+    });
+
+    expect(screen.getByText(/可在上方直接输入角色台词/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "确认此裁定" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "修改行动并重新裁定" })).toBeVisible();
   });
 
   it("lets a KP select only submitted actions and protects AI generation while loading", () => {

@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from ai_kp.application.action_adjudication_service import ActionAdjudicationService
 from ai_kp.application.auto_turn_service import AutoTurnService
 from ai_kp.application.errors import ConflictError, KpSessionEndedError
 from ai_kp.application.map_service import (
@@ -306,6 +307,70 @@ class ParallelActionSettlementServiceTests(unittest.IsolatedAsyncioTestCase):
                     [item["action_type"] for item in actions],
                 )
 
+    async def test_parallel_player_confirmation_requires_every_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "parallel-consent.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("Parallel consent")
+                sessions = SessionService(repo)
+                kp = sessions.create(campaign["id"])
+                first = sessions.join(kp["join_code"], display_name="Ada")
+                second = sessions.join(kp["join_code"], display_name="Bert")
+                kp_identity = repo.authenticate_access_token(kp["access_token"])
+                first_identity = repo.authenticate_access_token(first["access_token"])
+                second_identity = repo.authenticate_access_token(second["access_token"])
+                assert kp_identity and first_identity and second_identity
+                turns = TurnService(repo)
+                first_action = turns.submit_player_action(
+                    first_identity,
+                    action_text="I watch the alley.",
+                    client_action_id="parallel-consent-001",
+                )
+                second_action = turns.submit_player_action(
+                    second_identity,
+                    action_text="I check the door.",
+                    client_action_id="parallel-consent-002",
+                )
+                result = await ParallelActionSettlementService(repo).settle(
+                    campaign["id"],
+                    kp_identity,
+                    ParallelActionSettlementCommand(
+                        action_ids=(first_action["id"], second_action["id"]),
+                        auto_approve=False,
+                        player_confirmation=True,
+                    ),
+                    FakeTurnDirector("Both actions unfold together."),
+                    source_model="fake-parallel",
+                )
+                self.assertEqual(result.status, "awaiting_confirmation")
+                self.assertEqual(len(result.adjudications), 2)
+
+                _, draft, _, applied = ActionAdjudicationService(repo).confirm(
+                    first_action["id"],
+                    expected_version=result.adjudications[0]["version"],
+                    selected_skill=None,
+                    identity=first_identity,
+                )
+                self.assertFalse(applied)
+                self.assertEqual(draft["status"], "draft")
+                self.assertEqual(repo.get_player_action(first_action["id"])["status"], "reviewed")
+
+                _, approved, _, applied = ActionAdjudicationService(repo).confirm(
+                    second_action["id"],
+                    expected_version=result.adjudications[1]["version"],
+                    selected_skill=None,
+                    identity=second_identity,
+                )
+                self.assertTrue(applied)
+                self.assertEqual(approved["status"], "approved")
+                self.assertEqual(
+                    [
+                        repo.get_player_action(first_action["id"])["status"],
+                        repo.get_player_action(second_action["id"])["status"],
+                    ],
+                    ["resolved", "resolved"],
+                )
+
 
 class AutoTurnServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_auto_turn_does_not_bypass_safety_pause_with_fallback(self) -> None:
@@ -444,8 +509,21 @@ class AutoTurnServiceTests(unittest.IsolatedAsyncioTestCase):
                     source_model="fake-auto",
                 )
 
-                self.assertEqual(result.status, "completed")
-                self.assertEqual(result.proposal["status"], "approved")
+                self.assertEqual(result.status, "awaiting_confirmation")
+                self.assertEqual(result.proposal["status"], "draft")
+                self.assertEqual(repo.get_player_action(action["id"])["status"], "reviewed")
+                adjudication, proposal, checks, applied = ActionAdjudicationService(
+                    repo
+                ).confirm(
+                    action["id"],
+                    expected_version=result.adjudication["version"],
+                    selected_skill=None,
+                    identity=player_identity,
+                )
+                self.assertTrue(applied)
+                self.assertEqual(adjudication["status"], "confirmed")
+                self.assertEqual(proposal["status"], "approved")
+                self.assertEqual(checks, [])
                 self.assertEqual(repo.get_player_action(action["id"])["status"], "resolved")
                 event = connection.execute(
                     "SELECT summary FROM events WHERE campaign_id = ?",
@@ -477,9 +555,13 @@ class AutoTurnServiceTests(unittest.IsolatedAsyncioTestCase):
                     source_model="weak-fake",
                 )
 
-                self.assertEqual(result.status, "completed")
+                self.assertEqual(result.status, "awaiting_confirmation")
                 self.assertEqual(result.proposal["source_model"], "auto-kp-fallback")
-                self.assertEqual(repo.get_player_action(action["id"])["status"], "resolved")
+                self.assertEqual(
+                    result.adjudication["mode"], "roleplay_or_clarification"
+                )
+                self.assertIsNotNone(result.adjudication["source_error"])
+                self.assertEqual(repo.get_player_action(action["id"])["status"], "reviewed")
 
 
 class FakeTurnDirector:

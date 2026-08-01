@@ -753,6 +753,48 @@ class SkillCheckRepository(SQLiteRepository):
             }
         return None
 
+    def resolve_skill_target(
+        self, campaign_id: str, pc_id: str | None, skill_name: str
+    ) -> dict[str, Any] | None:
+        """Expose character-sheet validation without leaking resolution internals."""
+        return self._resolve_check_target(campaign_id, pc_id, skill_name)
+
+    def list_character_skill_targets(
+        self, campaign_id: str, pc_id: str | None
+    ) -> list[dict[str, Any]]:
+        if not pc_id:
+            return []
+        row = self.connection.execute(
+            """
+            SELECT ir.canonical_json FROM campaign_investigators ci
+            JOIN investigator_revisions ir ON ir.id = ci.approved_revision_id
+            WHERE ci.campaign_id = ? AND ci.legacy_pc_id = ? AND ci.status = 'approved'
+            """,
+            (campaign_id, pc_id),
+        ).fetchone()
+        if row is None:
+            return []
+        canonical = decode_json_field(row["canonical_json"], {})
+        result = [
+            {
+                "skill_name": str(item.get("display_name") or item.get("skill_key")),
+                "skill_key": str(item.get("skill_key") or item.get("display_name")),
+                "target": int(item.get("current_value") or 0),
+            }
+            for item in canonical.get("skills") or []
+            if item.get("display_name") or item.get("skill_key")
+        ]
+        result.extend(
+            {
+                "skill_name": str(key).upper(),
+                "skill_key": str(key),
+                "target": int(value),
+            }
+            for key, value in (canonical.get("characteristics") or {}).items()
+            if isinstance(value, (int, float))
+        )
+        return result
+
     def _add_check_action(
         self,
         check_id: str,

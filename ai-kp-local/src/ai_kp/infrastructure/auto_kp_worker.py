@@ -7,17 +7,15 @@ import sqlite3
 from threading import Event, RLock, Thread
 from typing import Any
 
-from ai_kp.application.auto_turn_service import (
-    RECOVERABLE_AUTO_TURN_ERRORS,
-    AutoTurnService,
-)
+from ai_kp.application.action_adjudication_service import ActionAdjudicationService
+from ai_kp.application.auto_turn_service import AutoTurnService
 from ai_kp.application.auto_world_expansion_service import AutoWorldExpansionService
 from ai_kp.application.module_run_service import ModuleRunService
 from ai_kp.application.parallel_action_settlement_service import (
     ParallelActionSettlementCommand,
     ParallelActionSettlementService,
 )
-from ai_kp.application.turn_service import WorldExpansionCommand
+from ai_kp.application.turn_service import TurnService, WorldExpansionCommand
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.director.orchestrator import KpOrchestrator
 from ai_kp.infrastructure.database.repositories import Repository
@@ -198,47 +196,16 @@ async def _dispatch_auto_kp_job(
         run = repo.get_active_campaign_module_run(str(action["campaign_id"]))
         if run is not None:
             analysis = ModuleRunService(repo).analyze(
-                str(run["id"]),
-                str(action["action_text"]),
+                str(run["id"]), str(action["action_text"])
             )
             if analysis["decision"] == "world_gap":
-                try:
-                    world = await AutoWorldExpansionService(
-                        repo
-                    ).create_and_maybe_materialize(
-                        WorldExpansionCommand(
-                            run_id=str(run["id"]),
-                            player_intent=str(action["action_text"]),
-                            pc_id=action.get("pc_id"),
-                            map_id=action.get("map_id"),
-                        ),
-                        _kp_identity_for_session(
-                            repo,
-                            str(action["campaign_id"]),
-                            str(action["session_id"]),
-                        ),
-                        director,
-                        source_model=settings.llm_model,
-                    )
-                except RECOVERABLE_AUTO_TURN_ERRORS:
-                    repo.connection.rollback()
-                else:
-                    if world.status == "materialized" and world.proposal is not None:
-                        repo.link_player_action_to_proposal(
-                            str(action["id"]),
-                            str(world.proposal["id"]),
-                            str(action["campaign_id"]),
-                        )
-                        repo.resolve_player_action_for_proposal(
-                            str(world.proposal["id"]),
-                            "resolved",
-                        )
-                    return {
-                        "status": world.status,
-                        "stage": "world_expansion",
-                        "player_action": repo.get_player_action(str(action["id"])),
-                        **world.as_dict(),
-                    }
+                return await _adjudicate_player_world_gap(
+                    repo,
+                    action,
+                    run_id=str(run["id"]),
+                    director=director,
+                    source_model=settings.llm_model,
+                )
         result = await AutoTurnService(repo).advance_player_action(
             str(job["resource_id"]),
             director=director,
@@ -266,7 +233,8 @@ async def _dispatch_auto_kp_job(
             identity,
             ParallelActionSettlementCommand(
                 action_ids=action_ids,
-                auto_approve=bool(payload.get("auto_approve", True)),
+                auto_approve=False,
+                player_confirmation=True,
             ),
             director,
             source_model=settings.llm_model,
@@ -291,6 +259,73 @@ async def _dispatch_auto_kp_job(
         )
         return {"status": result.status, "stage": "world_expansion", **result.as_dict()}
     raise ValueError(f"Unsupported Auto KP job type: {job_type}")
+
+
+async def _adjudicate_player_world_gap(
+    repo: Repository,
+    action: dict,
+    *,
+    run_id: str,
+    director: KpOrchestrator,
+    source_model: str,
+) -> dict[str, Any]:
+    """Create a candidate without materializing it before player confirmation."""
+    proposal = await TurnService(repo).create_world_expansion_proposal(
+        WorldExpansionCommand(
+            run_id=run_id,
+            player_intent=str(action["action_text"]),
+            pc_id=action.get("pc_id"),
+            map_id=action.get("map_id"),
+        ),
+        _kp_identity_for_session(
+            repo, str(action["campaign_id"]), str(action["session_id"])
+        ),
+        director,
+        source_model=source_model,
+    )
+    policy = AutoWorldExpansionService(repo).policy_decision(proposal)
+    candidate = proposal["world_expansion"]["candidate"]
+    repo.add_proposal_action(
+        str(proposal["id"]),
+        "action_ruling",
+        actor="system",
+        note="player-confirmed world expansion boundary",
+        payload={
+            "goal": str(action["action_text"])[:500],
+            "method": "受约束世界补全",
+            "target": str(candidate.get("subject") or "当前场景")[:300],
+            "feasibility": "possible" if policy["allowed"] else "impossible",
+            "resolution": "automatic" if policy["allowed"] else "no_roll",
+            "reason": (
+                "候选通过低副作用世界补全策略，仍需玩家确认。"
+                if policy["allowed"]
+                else "世界补全策略阻止自动落地："
+                + ", ".join(policy["blockers"])
+            ),
+            "maximum_effect": str(candidate.get("proposal") or "不写入状态")[:1000],
+            "alternative": "补充目标或改为当前已存在场景内的行动。",
+        },
+    )
+    proposal = repo.get_turn_proposal(str(proposal["id"]))
+    repo.link_player_action_to_proposal(
+        str(action["id"]), str(proposal["id"]), str(action["campaign_id"])
+    )
+    adjudication = ActionAdjudicationService(repo).create(
+        action,
+        proposal,
+        source_model=source_model,
+        source_error=None if policy["allowed"] else "世界补全超出自动落地策略",
+    )
+    return {
+        "status": "awaiting_confirmation",
+        "stage": "world_expansion",
+        "player_action": repo.get_player_action(str(action["id"])),
+        "proposal": proposal,
+        "checks": [],
+        "adjudication": adjudication,
+        "policy": policy,
+        "message": "世界补全候选已生成；确认前不会写入世界状态。",
+    }
 
 
 def _director(

@@ -12,6 +12,7 @@ import {
 } from "../api/client";
 import type {
   AuthIdentity,
+  ActionAdjudication,
   AutoTurnResult,
   Campaign,
   CampaignInvestigator,
@@ -193,6 +194,7 @@ export default function App() {
     NpcReappearanceCandidate[]
   >([]);
   const [playerActions, setPlayerActions] = useState<PlayerActionRecord[]>([]);
+  const [actionAdjudication, setActionAdjudication] = useState<ActionAdjudication | null>(null);
   const [selectedPlayerActionId, setSelectedPlayerActionId] = useState("");
   const [visibleJoinCode, setVisibleJoinCode] = useState("");
   const [selectedTokenId, setSelectedTokenId] = useState("");
@@ -207,6 +209,42 @@ export default function App() {
     refresh: refreshAutoKpJobs,
     retry: retryAutoKpJob
   } = useAutoKpJobs(activeCampaign?.id ?? "", Boolean(authIdentity));
+  const handledAdjudicationIds = useRef(new Set<string>());
+  useEffect(() => {
+    const latestResult = autoKpJobs.find(
+      (job) => job.status === "succeeded" && job.result?.adjudication?.status === "pending"
+    )?.result;
+    const direct = latestResult?.adjudication;
+    const parallelResult = autoKpJobs.find(
+      (job) => job.status === "succeeded" && job.result?.adjudications?.length
+    )?.result;
+    const ownedParallelAction = parallelResult?.actions?.find(
+      (action) => action.member_id === authIdentity?.member_id
+    );
+    const parallel = parallelResult?.adjudications?.find(
+      (item) => item.action_id === ownedParallelAction?.id && item.status === "pending"
+    );
+    const latest = direct ?? parallel;
+    if (latest && !handledAdjudicationIds.current.has(latest.id)) {
+      setActionAdjudication(latest);
+    }
+  }, [autoKpJobs, authIdentity?.member_id]);
+  useEffect(() => {
+    const campaignId = activeCampaign?.id;
+    if (!campaignId || authIdentity?.role !== "player") return;
+    let active = true;
+    void requestJson<ActionAdjudication[]>(
+      `/campaigns/${campaignId}/action-adjudications/pending`
+    ).then((items) => {
+      const latest = items.find(
+        (item) => !handledAdjudicationIds.current.has(item.id)
+      );
+      if (active && latest) setActionAdjudication(latest);
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [activeCampaign?.id, authIdentity?.member_id, authIdentity?.role, autoKpJobs]);
   const activeCampaignIdRef = useRef("");
   const activeSessionIdRef = useRef("");
   const activeMapIdRef = useRef("");
@@ -313,6 +351,7 @@ export default function App() {
       ]);
       setPlayerActionTab("checks");
     }
+    if (result.adjudication) setActionAdjudication(result.adjudication);
     if (result.job) void refreshAutoKpJobs();
     showLog(result.message || "自动 KP 已推进。");
   }
@@ -359,6 +398,8 @@ export default function App() {
     setNpcReappearanceCandidates([]);
     setTokenActorId("");
     setPlayerActions([]);
+    setActionAdjudication(null);
+    handledAdjudicationIds.current.clear();
     setSelectedPlayerActionId("");
     setVisibleJoinCode("");
     setPlayerAction("");
@@ -774,6 +815,51 @@ export default function App() {
       showLog("行动已提交，等待 KP 处理。");
     }
     void loadSkillChecks(activeCampaign, true);
+  }
+
+  async function confirmActionAdjudication(selectedSkill: string | null) {
+    if (!actionAdjudication) return;
+    const campaignId = activeCampaign?.id ?? "";
+    const handledId = actionAdjudication.id;
+    const result = await run("确认 AI 裁定", () =>
+      requestJson<AutoTurnResult>(
+        `/player-actions/${actionAdjudication.action_id}/adjudication/confirm`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expected_version: actionAdjudication.version,
+            selected_skill: selectedSkill
+          })
+        }
+      )
+    );
+    if (!result) return;
+    handledAdjudicationIds.current.add(handledId);
+    mergeAutoTurnResult(result, campaignId);
+    setActionAdjudication(null);
+  }
+
+  async function reviseActionAdjudication() {
+    if (!actionAdjudication) return;
+    const campaignId = activeCampaign?.id ?? "";
+    const handledId = actionAdjudication.id;
+    const result = await run("修改行动并重新裁定", () =>
+      requestJson<AutoTurnResult>(
+        `/player-actions/${actionAdjudication.action_id}/adjudication/revise`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expected_version: actionAdjudication.version,
+            action_text: playerAction,
+            background: true
+          })
+        }
+      )
+    );
+    if (!result) return;
+    handledAdjudicationIds.current.add(handledId);
+    setActionAdjudication(null);
+    mergeAutoTurnResult(result, campaignId);
   }
 
   async function retryFailedAutoKpJob(jobId: string) {
@@ -1642,6 +1728,7 @@ export default function App() {
 
         {renderedNav === "play" && authIdentity?.role === "kp" && (
           <KpWorkspace
+            adjudication={null}
             activeCampaign={activeCampaign}
             activeMap={activeMap}
             activePc={activePc}
@@ -1668,6 +1755,7 @@ export default function App() {
             onCreate={(input) => void createSkillCheck(input)}
             onCreateOpposed={(input) => void createOpposedCheck(input)}
             onCreateProposal={() => void createProposal()}
+            onConfirmAdjudication={(skill) => void confirmActionAdjudication(skill)}
             onGenerateAiProposal={() => void generateAiProposal()}
             onGenerateConsequence={(checkId) => void generateCheckConsequence(checkId)}
             onInspectContext={() => void inspectProposalContext()}
@@ -1685,6 +1773,7 @@ export default function App() {
             onRefreshMaps={() => void refreshRealtimeMaps()}
             onRefreshPlayerActions={() => void loadPlayerActions()}
             onRetryAutoKpJob={(jobId) => void retryFailedAutoKpJob(jobId)}
+            onReviseAdjudication={() => void reviseActionAdjudication()}
             onReject={() => void rejectProposal()}
             onReplay={(checkId) => void replaySkillCheck(checkId)}
             onRerollOpposed={(opposedCheckId) => void rerollOpposedCheck(opposedCheckId)}
@@ -1728,6 +1817,7 @@ export default function App() {
 
         {renderedNav === "play" && authIdentity?.role === "player" && (
           <PlayerWorkspace
+            adjudication={actionAdjudication}
             activeCampaign={activeCampaign}
             activeMap={activeMap}
             activePc={activePc}
@@ -1746,6 +1836,7 @@ export default function App() {
             onCreate={(input) => void createSkillCheck(input)}
             onCreateOpposed={(input) => void createOpposedCheck(input)}
             onCreateProposal={() => void createProposal()}
+            onConfirmAdjudication={(skill) => void confirmActionAdjudication(skill)}
             onGenerateAiProposal={() => void generateAiProposal()}
             onGenerateConsequence={(checkId) => void generateCheckConsequence(checkId)}
             onMoveTargetChange={setMoveTarget}
@@ -1761,6 +1852,7 @@ export default function App() {
             onRefreshMaps={() => void refreshRealtimeMaps()}
             onRefreshPlayerActions={() => void loadPlayerActions()}
             onRetryAutoKpJob={(jobId) => void retryFailedAutoKpJob(jobId)}
+            onReviseAdjudication={() => void reviseActionAdjudication()}
             onReplay={(checkId) => void replaySkillCheck(checkId)}
             onRerollOpposed={(opposedCheckId) => void rerollOpposedCheck(opposedCheckId)}
             onResolveDigital={(checkId) => void resolveSkillCheck(checkId, "digital")}

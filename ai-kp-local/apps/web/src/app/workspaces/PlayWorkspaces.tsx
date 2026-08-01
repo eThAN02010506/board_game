@@ -3,6 +3,7 @@ import type { Dispatch, FormEventHandler, SetStateAction } from "react";
 
 import type {
   AuthIdentity,
+  ActionAdjudication,
   AutoKpJob,
   Campaign,
   CampaignInvestigator,
@@ -62,6 +63,7 @@ type CommonPlayProps = {
 };
 
 type ActionDeskProps = {
+  adjudication: ActionAdjudication | null;
   autoKpEnabled: boolean;
   autoKpJobs: AutoKpJob[];
   onAutoKpEnabledChange: (value: boolean) => void;
@@ -74,6 +76,8 @@ type ActionDeskProps = {
   onSearchMemory: () => void;
   onSelectPlayerAction: (action: PlayerActionRecord) => void;
   onSubmitPlayerAction: () => void;
+  onConfirmAdjudication: (selectedSkill: string | null) => void;
+  onReviseAdjudication: () => void;
   playerAction: string;
   playerActions: PlayerActionRecord[];
   proposalText: string;
@@ -305,17 +309,20 @@ function ActionDesk(props: CommonPlayProps & ActionDeskProps) {
     <>
       <GameplayWorkbench campaign={props.activeCampaign} identity={props.authIdentity} />
       <ActionPanel
+        adjudication={props.adjudication}
         autoKpEnabled={props.autoKpEnabled}
         autoKpJobs={props.autoKpJobs}
         identity={props.authIdentity}
         loading={props.loading}
         onAutoKpEnabledChange={props.onAutoKpEnabledChange}
         onCreateProposal={props.onCreateProposal}
+        onConfirmAdjudication={props.onConfirmAdjudication}
         onGenerateAiProposal={props.onGenerateAiProposal}
         onPlayerActionChange={props.onPlayerActionChange}
         onProposalTextChange={props.onProposalTextChange}
         onRefreshPlayerActions={props.onRefreshPlayerActions}
         onRetryAutoKpJob={props.onRetryAutoKpJob}
+        onReviseAdjudication={props.onReviseAdjudication}
         onSearchMemory={props.onSearchMemory}
         onSelectPlayerAction={props.onSelectPlayerAction}
         onSubmitPlayerAction={props.onSubmitPlayerAction}

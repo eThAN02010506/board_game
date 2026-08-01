@@ -11,6 +11,8 @@ from ai_kp.api.auto_kp import player_auto_kp_job
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.llm import create_kp_orchestrator
 from ai_kp.api.schemas import (
+    ActionAdjudicationConfirm,
+    ActionAdjudicationRevise,
     KpTurnRequest,
     ParallelActionSettlementRequest,
     PlayerActionCreate,
@@ -18,6 +20,7 @@ from ai_kp.api.schemas import (
     TurnProposalCreate,
 )
 from ai_kp.api.world_expansion_schemas import WorldExpansionEncounterRequest
+from ai_kp.application.action_adjudication_service import ActionAdjudicationService
 from ai_kp.application.auto_kp_queue_service import AutoKpQueueService
 from ai_kp.application.auto_turn_service import AutoTurnService
 from ai_kp.application.check_consequence_service import (
@@ -136,6 +139,89 @@ def get_player_action(
     if identity.role == "player" and action["member_id"] != identity.member_id:
         raise HTTPException(status_code=403, detail="Players can only inspect their own actions")
     return action
+
+
+@router.get("/player-actions/{action_id}/adjudication")
+def get_action_adjudication(
+    action_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    action = repo.get_player_action(action_id)
+    require_campaign_role(identity, str(action["campaign_id"]))
+    if identity.role == "player" and action["member_id"] != identity.member_id:
+        raise HTTPException(status_code=403, detail="Players can only inspect their own rulings")
+    return repo.get_action_adjudication(action_id)
+
+
+@router.get("/campaigns/{campaign_id}/action-adjudications/pending")
+def list_pending_action_adjudications(
+    campaign_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    require_campaign_role(identity, campaign_id, ("player",))
+    return repo.list_member_pending_adjudications(campaign_id, identity.member_id)
+
+
+@router.post("/player-actions/{action_id}/adjudication/confirm")
+def confirm_action_adjudication(
+    action_id: str,
+    payload: ActionAdjudicationConfirm,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    adjudication, proposal, checks, applied = ActionAdjudicationService(repo).confirm(
+        action_id,
+        expected_version=payload.expected_version,
+        selected_skill=payload.selected_skill,
+        identity=identity,
+    )
+    return {
+        "status": "awaiting_roll" if checks else "completed" if applied else "awaiting_confirmation",
+        "player_action": repo.get_player_action(action_id),
+        "proposal": proposal,
+        "checks": checks,
+        "adjudication": adjudication,
+        "message": (
+            "裁定已确认，请完成检定。"
+            if checks
+            else "裁定已确认并执行。"
+            if applied
+            else "你的裁定已确认，等待其他并行动作玩家确认。"
+        ),
+    }
+
+
+@router.post("/player-actions/{action_id}/adjudication/revise")
+def revise_action_adjudication(
+    action_id: str,
+    payload: ActionAdjudicationRevise,
+    request: Request,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    action = ActionAdjudicationService(repo).revise(
+        action_id,
+        expected_version=payload.expected_version,
+        action_text=payload.action_text,
+        identity=identity,
+    )
+    if not payload.background:
+        return action
+    job = AutoKpQueueService(repo).enqueue_player_action(str(action["id"]))
+    worker = getattr(request.app.state, "auto_kp_worker", None)
+    if worker is not None:
+        worker.wake()
+    return {
+        "status": "queued",
+        "player_action": action,
+        "proposal": None,
+        "checks": [],
+        "adjudication": None,
+        "job": player_auto_kp_job(job),
+        "message": "修改后的行动已提交 AI KP 重新裁定。",
+    }
 
 
 @router.get("/campaigns/{campaign_id}/proposals")

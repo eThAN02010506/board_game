@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ai_kp.application.action_adjudication_service import ActionAdjudicationService
 from ai_kp.application.auto_turn_service import RECOVERABLE_AUTO_TURN_ERRORS
 from ai_kp.application.ports.director import KpDirector
 from ai_kp.application.ports.repositories import TurnStore
@@ -13,6 +14,7 @@ from ai_kp.platform.sessions.models import AuthenticatedMember
 
 ParallelSettlementStatus = Literal[
     "approved",
+    "awaiting_confirmation",
     "needs_attention",
     "failed",
 ]
@@ -22,6 +24,7 @@ ParallelSettlementStatus = Literal[
 class ParallelActionSettlementCommand:
     action_ids: tuple[str, ...]
     auto_approve: bool = True
+    player_confirmation: bool = False
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,7 @@ class ParallelActionSettlementResult:
     proposal: dict | None
     actions: list[dict]
     message: str
+    adjudications: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -37,6 +41,7 @@ class ParallelActionSettlementResult:
             "proposal": self.proposal,
             "actions": self.actions,
             "message": self.message,
+            "adjudications": self.adjudications,
         }
 
 
@@ -86,11 +91,11 @@ class ParallelActionSettlementService:
                         "goal": "统一处理多人并行动作",
                         "method": "保守聚合裁定",
                         "target": "当前场景",
-                        "feasibility": "possible",
-                        "resolution": "automatic",
-                        "reason": "模型不可用或输出不稳定时，使用无副作用合并叙事。",
-                        "maximum_effect": "只公开叙述，不写入隐藏事实或角色状态。",
-                        "alternative": "等待人类 KP 分别裁定每个行动。",
+                        "feasibility": "impossible",
+                        "resolution": "no_roll",
+                        "reason": "模型不可用或输出不稳定，不能安全地合并执行多人行动。",
+                        "maximum_effect": "不执行行动，不写入世界事实或角色状态。",
+                        "alternative": "请各玩家补充目标、手段或对白后重新裁定。",
                     },
                     source_model="auto-kp-fallback",
                 ),
@@ -104,6 +109,25 @@ class ParallelActionSettlementService:
             payload={"action_ids": [item["id"] for item in actions]},
         )
         proposal = self.repo.get_turn_proposal(str(proposal["id"]))
+        if command.player_confirmation:
+            fallback = proposal.get("source_model") == "auto-kp-fallback"
+            adjudications = [
+                ActionAdjudicationService(self.repo).create(
+                    action,
+                    proposal,
+                    source_model="auto-kp-fallback" if fallback else source_model,
+                    source_error="多人裁定未通过模型校验" if fallback else None,
+                    enforce_precheck=False,
+                )
+                for action in actions
+            ]
+            return ParallelActionSettlementResult(
+                status="awaiting_confirmation",
+                proposal=proposal,
+                actions=self._refresh_actions(actions),
+                adjudications=adjudications,
+                message="多人并行动作已统一裁定，等待各玩家分别确认。",
+            )
         if not command.auto_approve or self._automation_level(campaign_id) == "conservative":
             return ParallelActionSettlementResult(
                 status="needs_attention",

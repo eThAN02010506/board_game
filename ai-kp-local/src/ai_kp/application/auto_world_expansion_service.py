@@ -101,7 +101,7 @@ class AutoWorldExpansionService:
                 message="世界补全已落地；本次请求复用已有 materialization。",
             )
 
-        policy = self._policy_decision(proposal)
+        policy = self.policy_decision(proposal)
         self._record_policy(proposal, identity, policy)
         if not policy["allowed"]:
             return AutoWorldExpansionResult(
@@ -152,7 +152,7 @@ class AutoWorldExpansionService:
             message="世界补全已按自动化策略批准并落地。",
         )
 
-    def _policy_decision(self, proposal: dict) -> dict[str, Any]:
+    def policy_decision(self, proposal: dict) -> dict[str, Any]:
         expansion = proposal["world_expansion"]
         run = self.repo.get_campaign_module_run(str(expansion["module_run_id"]))
         level = self._automation_level(run)

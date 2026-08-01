@@ -5,6 +5,7 @@ import sqlite3
 
 from ai_kp.core.ids import new_id
 from ai_kp.director.turn_output import (
+    ActionRuling,
     CheckCandidate,
     EventCandidate,
     FactCandidate,
@@ -102,6 +103,55 @@ class TurnRepository(SQLiteRepository):
         result = self._decode_proposal(row)
         result["actions"] = self.list_proposal_actions(proposal_id)
         return self._decorate_proposal(result, result["actions"])
+
+    def replace_draft_proposed_checks(
+        self, proposal_id: str, proposed_checks: list[dict]
+    ) -> dict:
+        checks = dump_candidates(proposed_checks, CheckCandidate)
+        updated = self.connection.execute(
+            """
+            UPDATE turn_proposals SET proposed_checks_json = ?
+            WHERE id = ? AND status = 'draft'
+            """,
+            (json.dumps(checks, ensure_ascii=False), proposal_id),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("Only a draft proposal can change its proposed checks")
+        return self.get_turn_proposal(proposal_id)
+
+    def replace_draft_with_precheck(
+        self,
+        proposal_id: str,
+        proposed_checks: list[dict],
+        *,
+        public_narration: str,
+        action_ruling: dict,
+    ) -> dict:
+        checks = dump_candidates(proposed_checks, CheckCandidate)
+        ruling = ActionRuling.model_validate(action_ruling).model_dump(mode="json")
+        updated = self.connection.execute(
+            """
+            UPDATE turn_proposals
+            SET public_narration = ?, proposed_checks_json = ?,
+                proposed_events_json = '[]', proposed_memories_json = '[]',
+                proposed_npc_updates_json = '[]', proposed_map_moves_json = '[]',
+                proposed_facts_json = '[]'
+            WHERE id = ? AND status = 'draft'
+            """,
+            (public_narration, json.dumps(checks, ensure_ascii=False), proposal_id),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("Only a draft proposal can be replaced by a precheck")
+        ruling_update = self.connection.execute(
+            """
+            UPDATE proposal_actions SET payload_json = ?
+            WHERE proposal_id = ? AND action_type = ?
+            """,
+            (json.dumps(ruling, ensure_ascii=False), proposal_id, ACTION_RULING_ACTION_TYPE),
+        )
+        if ruling_update.rowcount != 1:
+            raise ValueError("A precheck proposal requires exactly one action ruling")
+        return self.get_turn_proposal(proposal_id)
 
     def list_turn_proposals(self, campaign_id: str, status: str | None = None) -> list[dict]:
         if status:

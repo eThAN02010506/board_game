@@ -54,6 +54,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0047_check_random_evidence,
     v0048_automation_levels,
     v0049_auto_kp_jobs,
+    v0050_action_adjudications,
 )
 
 
@@ -299,6 +300,11 @@ MIGRATIONS = (
         v0049_auto_kp_jobs.VERSION,
         v0049_auto_kp_jobs.NAME,
         v0049_auto_kp_jobs.migrate,
+    ),
+    Migration(
+        v0050_action_adjudications.VERSION,
+        v0050_action_adjudications.NAME,
+        v0050_action_adjudications.migrate,
     ),
 )
 

@@ -34,7 +34,7 @@ function investigatorSheet(name: string) {
   };
 }
 
-test("a seated player completes an Auto KP turn when the model is unavailable", async ({
+test("a seated player safely reviews Auto KP when the model is unavailable", async ({
   page,
   request
 }) => {
@@ -134,6 +134,10 @@ test("a seated player completes an Auto KP turn when the model is unavailable", 
   const jobs = page.getByLabel("自动 KP 任务");
   await expect(jobs).toBeVisible();
   await expect(jobs).toContainText("succeeded", { timeout: 20_000 });
+  await expect(page.getByText("需要 RP / 补充说明")).toBeVisible();
+  await expect(page.getByText("AI 初步裁定 · 尚未执行")).toBeVisible();
+  await expect(page.getByRole("button", { name: "确认此裁定" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "修改行动并重新裁定" })).toBeVisible();
   await expect(page.getByText("你的行动桌面")).toBeVisible();
 
   const checkedAction = await postJson<{ id: string }>(

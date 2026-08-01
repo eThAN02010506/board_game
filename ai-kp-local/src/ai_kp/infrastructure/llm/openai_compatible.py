@@ -63,6 +63,10 @@ class OpenAICompatibleClient:
         }
         if is_gpt_oss:
             payload["top_p"] = 1.0
+            # llama.cpp's generic schema grammar can reject otherwise useful
+            # gpt-oss output before it reaches our repair pass. JSON-object
+            # mode keeps syntax constrained while Pydantic owns semantics.
+            payload["response_format"] = {"type": "json_object"}
         if self.chat_template_kwargs:
             payload["chat_template_kwargs"] = self.chat_template_kwargs
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}

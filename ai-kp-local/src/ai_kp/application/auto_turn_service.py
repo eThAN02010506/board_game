@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from ai_kp.application.action_adjudication_service import ActionAdjudicationService
 from ai_kp.application.check_consequence_service import (
     CheckConsequenceService,
     GenerateCheckConsequenceCommand,
@@ -21,6 +22,7 @@ from ai_kp.platform.sessions.models import AuthenticatedMember
 AutoTurnStatus = Literal[
     "completed",
     "awaiting_roll",
+    "awaiting_confirmation",
     "needs_attention",
     "failed",
 ]
@@ -38,6 +40,7 @@ class AutoTurnResult:
     player_action: dict
     proposal: dict | None = None
     checks: list[dict] = ()
+    adjudication: dict | None = None
     message: str = ""
 
     def as_dict(self) -> dict[str, Any]:
@@ -46,6 +49,7 @@ class AutoTurnResult:
             "player_action": self.player_action,
             "proposal": self.proposal,
             "checks": list(self.checks),
+            "adjudication": self.adjudication,
             "message": self.message,
         }
 
@@ -73,6 +77,7 @@ class AutoTurnService:
                 message="当前为保守模式：行动已提交，等待人类 KP 审批。",
             )
         identity = self._system_kp_identity(action)
+        source_error: str | None = None
         try:
             proposal = await self.turns.create_ai_proposal(
                 KpTurnCommand(
@@ -90,6 +95,7 @@ class AutoTurnService:
             )
         except RECOVERABLE_AUTO_TURN_ERRORS as exc:
             proposal = self._fallback_proposal(action, identity, reason=str(exc))
+            source_error = str(exc)
 
         if proposal.get("proposal_kind") != "standard":
             return AutoTurnResult(
@@ -98,29 +104,18 @@ class AutoTurnService:
                 proposal=proposal,
                 message="自动 KP 生成了需要人工确认的特殊草稿。",
             )
-        try:
-            approved = self.turns.approve(
-                str(proposal["id"]),
-                str(action["campaign_id"]),
-                identity,
-                note="auto-kp approved",
-            )
-        except RECOVERABLE_AUTO_TURN_ERRORS as exc:
-            return AutoTurnResult(
-                status="failed",
-                player_action=self.repo.get_player_action(action_id),
-                proposal=proposal,
-                message=f"自动批准失败：{exc}",
-            )
-        checks = self.repo.list_skill_checks_for_action(action_id)
-        status: AutoTurnStatus = "awaiting_roll" if checks else "completed"
-        message = "需要玩家完成检定。" if checks else "自动 KP 已完成这一轮行动。"
+        adjudication = ActionAdjudicationService(self.repo).create(
+            action,
+            proposal,
+            source_model=source_model if source_error is None else "auto-kp-fallback",
+            source_error=source_error,
+        )
         return AutoTurnResult(
-            status=status,
+            status="awaiting_confirmation",
             player_action=self.repo.get_player_action(action_id),
-            proposal=approved,
-            checks=checks,
-            message=message,
+            proposal=self.repo.get_turn_proposal(str(proposal["id"])),
+            adjudication=adjudication,
+            message="AI KP 已给出初步裁定；请确认、改选技能或补充行动。",
         )
 
     async def advance_after_check(
@@ -240,10 +235,7 @@ class AutoTurnService:
         reason: str,
     ) -> dict:
         text = str(action["action_text"]).strip()
-        narration = (
-            "你谨慎地推进这个行动；当前场景没有立刻暴露新的阻碍。"
-            " 若需要更具体的线索或危险，可以继续描述下一步。"
-        )
+        narration = "AI KP 暂时无法可靠裁定这个行动，尚未执行任何结果。"
         return self.turns.create_manual_proposal(
             str(action["campaign_id"]),
             identity,
@@ -255,13 +247,13 @@ class AutoTurnService:
                 kp_notes=f"自动 KP 降级裁定：{reason[:1000]}",
                 action_ruling={
                     "goal": text[:500] or "继续行动",
-                    "method": "谨慎推进",
+                    "method": "等待玩家补充",
                     "target": "当前场景",
-                    "feasibility": "possible",
-                    "resolution": "automatic",
-                    "reason": "模型不可用或输出不稳定时，使用无世界副作用的保守裁定。",
-                    "maximum_effect": "仅产生公开叙事，不写入隐藏事实或角色状态。",
-                    "alternative": "等待人类 KP 复核可获得更丰富结果。",
+                    "feasibility": "impossible",
+                    "resolution": "no_roll",
+                    "reason": "模型不可用或输出未通过校验，不能安全地假定行动可行。",
+                    "maximum_effect": "不执行行动，不写入世界事实或角色状态。",
+                    "alternative": "补充目标、手段或角色对白，然后请 AI 重新裁定。",
                 },
                 source_model="auto-kp-fallback",
             ),

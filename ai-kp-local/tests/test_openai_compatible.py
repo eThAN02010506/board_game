@@ -51,6 +51,7 @@ def test_gpt_oss_uses_low_harmony_reasoning_effort_by_default() -> None:
     }
     assert payloads[0]["temperature"] == 1.0
     assert payloads[0]["top_p"] == 1.0
+    assert payloads[0]["response_format"] == {"type": "json_object"}
 
 
 def test_non_gpt_oss_provider_does_not_receive_llamacpp_template_hints() -> None:

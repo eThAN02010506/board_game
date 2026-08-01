@@ -294,6 +294,21 @@ class PlayerActionCreate(BaseModel):
     background: bool = False
 
 
+class ActionAdjudicationConfirm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    selected_skill: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class ActionAdjudicationRevise(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    action_text: str = Field(min_length=1, max_length=4000)
+    background: bool = True
+
+
 class ParallelActionSettlementRequest(BaseModel):
     action_ids: list[str] = Field(min_length=2, max_length=12)
     auto_approve: bool = True
