@@ -258,6 +258,24 @@ export function fetchInstalledAiSkills(): Promise<AiSkillManifest[]> {
   return requestJson<AiSkillManifest[]>("/ai-skills");
 }
 
+export function settleParallelPlayerActions(
+  campaignId: string,
+  payload: { action_ids: string[]; auto_approve?: boolean }
+): Promise<{
+  status: "approved" | "needs_attention" | "failed";
+  proposal: TurnProposal | null;
+  actions: unknown[];
+  message: string;
+}> {
+  return requestJson(
+    `/campaigns/${encodeURIComponent(campaignId)}/actions/settle`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
 export function listWorldFacts(
   campaignId: string,
   options: {
@@ -410,15 +428,47 @@ export function updateDirectorControl(
   );
 }
 
-export function generateWorldExpansionProposal(
+export function updateAutomationLevel(
   runId: string,
   payload: {
-    player_intent: string;
-    pc_id?: string | null;
-    map_id?: string | null;
+    expected_version: number;
+    level: NonNullable<ModuleRun["automation_level"]>;
+    reason: string;
   }
-): Promise<TurnProposal> {
-  return requestJson<TurnProposal>(
+): Promise<ModuleRun> {
+  return requestJson<ModuleRun>(
+    `/module-runs/${encodeURIComponent(runId)}/automation`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+type WorldExpansionProposalPayload = {
+  player_intent: string;
+  pc_id?: string | null;
+  map_id?: string | null;
+};
+
+type AutoWorldExpansionResult = {
+  status: "materialized" | "needs_attention" | "failed";
+  proposal: TurnProposal | null;
+  materialization: unknown;
+  policy: unknown;
+  message: string;
+};
+
+export function generateWorldExpansionProposal(
+  runId: string,
+  payload: WorldExpansionProposalPayload & { auto_materialize: true }
+): Promise<AutoWorldExpansionResult>;
+export function generateWorldExpansionProposal(
+  runId: string,
+  payload: WorldExpansionProposalPayload & { auto_materialize?: false }
+): Promise<TurnProposal>;
+export function generateWorldExpansionProposal(
+  runId: string,
+  payload: WorldExpansionProposalPayload & { auto_materialize?: boolean }
+): Promise<TurnProposal | AutoWorldExpansionResult> {
+  return requestJson<TurnProposal | AutoWorldExpansionResult>(
     `/module-runs/${encodeURIComponent(runId)}/director/world-expansion-proposals`,
     {
       method: "POST",

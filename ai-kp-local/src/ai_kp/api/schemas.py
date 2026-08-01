@@ -183,6 +183,7 @@ class SkillCheckResolve(BaseModel):
     input_method: Literal["digital", "physical"] = "digital"
     ones_digit: int | None = Field(default=None, ge=0, le=9)
     tens_digits: list[int] = Field(default_factory=list, max_length=3)
+    auto_advance: bool = False
 
 
 class Coc7EncounterParticipant(BaseModel):
@@ -288,6 +289,26 @@ class PlayerActionCreate(BaseModel):
     token_id: str | None = None
     map_id: str | None = None
     client_action_id: str | None = Field(default=None, min_length=8, max_length=100)
+    auto_advance: bool = False
+
+
+class ParallelActionSettlementRequest(BaseModel):
+    action_ids: list[str] = Field(min_length=2, max_length=12)
+    auto_approve: bool = True
+
+
+class AutoKpJobCreate(BaseModel):
+    job_type: Literal[
+        "player_action",
+        "parallel_actions",
+        "world_expansion",
+        "check_consequence",
+    ]
+    resource_id: str = Field(min_length=1, max_length=200)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    run_id: str | None = Field(default=None, max_length=200)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    max_attempts: int = Field(default=3, ge=1, le=10)
 
 
 class PcCreate(BaseModel):
@@ -441,6 +462,14 @@ class DirectorControlUpdate(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class AutomationLevelUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+    level: Literal["conservative", "balanced", "ai_kp"]
+    reason: str = Field(min_length=1, max_length=2000)
+
+
 class HandoutCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -518,6 +547,7 @@ class WorldExpansionProposalRequest(BaseModel):
     player_intent: str = Field(min_length=1, max_length=1000)
     pc_id: str | None = Field(default=None, max_length=160)
     map_id: str | None = Field(default=None, max_length=160)
+    auto_materialize: bool = False
 
 
 class ModuleReachabilityCheck(BaseModel):

@@ -9,8 +9,10 @@ type Props = {
   proposalText: string;
   playerActions: PlayerActionRecord[];
   selectedPlayerActionId: string;
+  autoKpEnabled: boolean;
   onPlayerActionChange: (value: string) => void;
   onProposalTextChange: (value: string) => void;
+  onAutoKpEnabledChange: (value: boolean) => void;
   onSelectPlayerAction: (action: PlayerActionRecord) => void;
   onSearchMemory: () => void;
   onSubmitPlayerAction: () => void;
@@ -43,15 +45,25 @@ export function ActionPanel(props: Props) {
         检索记忆
       </button>
       {props.identity?.role === "player" && (
-        <button
-          className="primary-button"
-          disabled={props.loading}
-          onClick={props.onSubmitPlayerAction}
-          type="button"
-        >
-          <Send size={16} />
-          提交给 KP
-        </button>
+        <>
+          <label className="checkbox-row">
+            <input
+              checked={props.autoKpEnabled}
+              onChange={(event) => props.onAutoKpEnabledChange(event.target.checked)}
+              type="checkbox"
+            />
+            AI KP 自动推进
+          </label>
+          <button
+            className="primary-button"
+            disabled={props.loading}
+            onClick={props.onSubmitPlayerAction}
+            type="button"
+          >
+            <Send size={16} />
+            {props.autoKpEnabled ? "提交并自动推进" : "提交给 KP"}
+          </button>
+        </>
       )}
       {props.identity?.role === "kp" && (
         <>

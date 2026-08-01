@@ -3251,6 +3251,15 @@ h2 {
   align-items: start;
 }
 
+.play-page.kp-layout {
+  grid-template-columns: minmax(280px, 0.8fr) minmax(560px, 1.8fr) minmax(360px, 1fr);
+  gap: 16px;
+}
+
+.play-page.player-layout {
+  grid-template-columns: minmax(260px, 0.7fr) minmax(520px, 1.6fr) minmax(320px, 0.9fr);
+}
+
 .play-character-card {
   position: sticky;
   top: 18px;
@@ -3305,6 +3314,69 @@ h2 {
 .play-action-column .proposal-panel,
 .play-action-column .response-panel {
   grid-column: auto;
+}
+
+.action-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+}
+
+.tab-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.tab-btn:hover {
+  border-color: var(--line);
+  background: var(--paper-soft);
+  color: var(--ink);
+}
+
+.tab-btn.active {
+  border-color: color-mix(in srgb, var(--ember-700) 36%, var(--line));
+  background: color-mix(in srgb, var(--ember-600) 13%, var(--paper));
+  color: var(--ember-700);
+}
+
+.kp-layout .tab-btn.active {
+  border-color: color-mix(in srgb, var(--gold-500) 52%, var(--line));
+  background: color-mix(in srgb, var(--gold-500) 15%, var(--paper));
+  color: #76531d;
+}
+
+.action-tab-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.table-log-panel pre {
+  max-height: calc(100vh - 210px);
+  overflow: auto;
+}
+
+@media (max-width: 1280px) {
+  .play-page.kp-layout,
+  .play-page.player-layout {
+    grid-template-columns: minmax(230px, 0.75fr) minmax(420px, 1.4fr) minmax(300px, 0.9fr);
+  }
 }
 
 .gameplay-workbench {
@@ -4680,6 +4752,12 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
+}
+
+.automation-level-actions button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--text);
 }
 
 .handout-workspace,

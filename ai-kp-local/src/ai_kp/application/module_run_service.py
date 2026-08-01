@@ -42,6 +42,13 @@ class DirectorControlCommand:
     reason: str
 
 
+@dataclass(frozen=True)
+class AutomationLevelCommand:
+    expected_version: int
+    level: str
+    reason: str
+
+
 class ModuleRunService:
     def __init__(self, repo: ModuleRunStore):
         self.repo = repo
@@ -237,6 +244,24 @@ class ModuleRunService:
                 run_id,
                 expected_version=command.expected_version,
                 mode=command.mode,
+                reason=command.reason,
+                member_id=member_id,
+            )
+        except ValueError as exc:
+            self._raise_input_or_conflict(exc)
+
+    def set_automation_level(
+        self,
+        run_id: str,
+        command: AutomationLevelCommand,
+        *,
+        member_id: str,
+    ) -> dict:
+        try:
+            return self.repo.set_module_run_automation_level(
+                run_id,
+                expected_version=command.expected_version,
+                level=command.level,
                 reason=command.reason,
                 member_id=member_id,
             )

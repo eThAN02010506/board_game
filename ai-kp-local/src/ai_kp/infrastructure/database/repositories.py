@@ -2,6 +2,7 @@
 
 import sqlite3
 
+from ai_kp.infrastructure.database.auto_kp_jobs import AutoKpJobRepository
 from ai_kp.infrastructure.database.character_timelines import CharacterTimelineRepository
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
 from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
@@ -41,6 +42,7 @@ __all__ = ["Repository", "decode_json_field", "row_to_dict"]
 
 class Repository(
     WorldRepository,
+    AutoKpJobRepository,
     EvaluationRepository,
     FactRepository,
     HandoutRepository,

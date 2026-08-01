@@ -52,6 +52,8 @@ from ai_kp.infrastructure.database.migrations import (
     v0045_check_visibility,
     v0046_campaign_ruleset_pins,
     v0047_check_random_evidence,
+    v0048_automation_levels,
+    v0049_auto_kp_jobs,
 )
 
 
@@ -287,6 +289,16 @@ MIGRATIONS = (
         v0047_check_random_evidence.VERSION,
         v0047_check_random_evidence.NAME,
         v0047_check_random_evidence.migrate,
+    ),
+    Migration(
+        v0048_automation_levels.VERSION,
+        v0048_automation_levels.NAME,
+        v0048_automation_levels.migrate,
+    ),
+    Migration(
+        v0049_auto_kp_jobs.VERSION,
+        v0049_auto_kp_jobs.NAME,
+        v0049_auto_kp_jobs.migrate,
     ),
 )
 

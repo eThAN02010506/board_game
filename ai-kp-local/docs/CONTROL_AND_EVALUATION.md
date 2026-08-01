@@ -16,6 +16,18 @@ Transitions require the current module-run version and a reason. They append
 `module_run_control_events`; a per-run monotonic sequence preserves exact audit order even when
 multiple transitions share one timestamp. Restart does not silently return control to AI.
 
+Each run also exposes a separate automation strength:
+
+- `conservative` keeps player actions and check consequences in the human-KP approval lane;
+- `balanced` lets routine action and check-consequence proposals be generated and approved
+  automatically while higher-risk expansion still needs explicit policy checks;
+- `ai_kp` is the intended no-KP lane for fully automated progression, including later world
+  materialization and background work.
+
+Automation strength changes are KP-only, version-checked and audited in
+`module_run_automation_events`. The control mode remains the hard safety gate: if the run is
+`human_kp` or `safety_paused`, raising automation strength does not reopen model-backed progression.
+
 ## Player handouts
 
 `campaign_handouts` stores draft, revealed or withdrawn handouts. KP may pin and link a handout to

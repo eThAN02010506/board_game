@@ -56,6 +56,7 @@ function renderPanel(identity: AuthIdentity | null, loading = false) {
     onSelectPlayerAction: vi.fn(),
     onSearchMemory: vi.fn(),
     onSubmitPlayerAction: vi.fn(),
+    onAutoKpEnabledChange: vi.fn(),
     onRefreshPlayerActions: vi.fn(),
     onCreateProposal: vi.fn(),
     onGenerateAiProposal: vi.fn()
@@ -69,6 +70,7 @@ function renderPanel(identity: AuthIdentity | null, loading = false) {
       playerActions={actions}
       proposalText=""
       selectedPlayerActionId="action_submitted"
+      autoKpEnabled
       {...callbacks}
     />
   );
@@ -85,13 +87,21 @@ describe("ActionPanel", () => {
       target: { value: "查看门锁是否有撬动痕迹" }
     });
     fireEvent.click(screen.getByRole("button", { name: "检索记忆" }));
-    fireEvent.click(screen.getByRole("button", { name: "提交给 KP" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交并自动推进" }));
 
     expect(onPlayerActionChange).toHaveBeenCalledWith("查看门锁是否有撬动痕迹");
     expect(onSearchMemory).toHaveBeenCalledTimes(1);
     expect(onSubmitPlayerAction).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("玩家行动队列")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "调用本地 AI" })).not.toBeInTheDocument();
+  });
+
+  it("lets a player turn off automatic KP advancement", () => {
+    const { onAutoKpEnabledChange } = renderPanel(playerIdentity);
+
+    fireEvent.click(screen.getByLabelText("AI KP 自动推进"));
+
+    expect(onAutoKpEnabledChange).toHaveBeenCalledWith(false);
   });
 
   it("lets a KP select only submitted actions and protects AI generation while loading", () => {

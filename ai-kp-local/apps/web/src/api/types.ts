@@ -146,6 +146,7 @@ export type ModuleRecord = {
 export type ModuleRunStatus = "active" | "paused" | "completed";
 export type ModulePlayPace = "freeform" | "structured" | "downtime";
 export type ModuleRuntimeEntityStatus = "hidden" | "available" | "discovered" | "resolved";
+export type ModuleAutomationLevel = "conservative" | "balanced" | "ai_kp";
 
 export type ModuleRun = {
   id: string;
@@ -156,6 +157,8 @@ export type ModuleRun = {
   status: ModuleRunStatus;
   director_control_mode?: "ai_assist" | "safety_paused" | "human_kp";
   director_control_reason?: string | null;
+  automation_level?: ModuleAutomationLevel;
+  automation_reason?: string | null;
   current_scene_key: string | null;
   current_scene_title: string | null;
   play_pace: ModulePlayPace;
@@ -217,10 +220,28 @@ export type ModuleRunDirectorState = {
   entity_states: ModuleRunEntityState[];
   scene_events: ModuleRunSceneEvent[];
   entity_state_events: ModuleRunEntityStateEvent[];
+  auto_kp_jobs?: Array<{
+    id: string;
+    job_type: string;
+    resource_id: string;
+    status: "queued" | "running" | "retry_wait" | "succeeded" | "failed" | "needs_attention" | "cancelled";
+    stage: string;
+    attempt_count: number;
+    max_attempts: number;
+    last_error?: string | null;
+    updated_at: string;
+  }>;
   control_events?: Array<{
     id: string;
     from_mode: ModuleRun["director_control_mode"];
     to_mode: ModuleRun["director_control_mode"];
+    reason: string;
+    created_at: string;
+  }>;
+  automation_events?: Array<{
+    id: string;
+    from_level: ModuleAutomationLevel;
+    to_level: ModuleAutomationLevel;
     reason: string;
     created_at: string;
   }>;
@@ -1103,6 +1124,14 @@ export type PlayerActionRecord = {
   status: string;
   proposal_id: string | null;
   display_name?: string;
+};
+
+export type AutoTurnResult = {
+  status: "completed" | "awaiting_roll" | "needs_attention" | "failed";
+  player_action: PlayerActionRecord;
+  proposal: TurnProposal | null;
+  checks: SkillCheck[];
+  message: string;
 };
 
 export type SavedMap = {

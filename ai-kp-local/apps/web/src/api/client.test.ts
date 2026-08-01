@@ -15,8 +15,10 @@ import {
   listRuleReviewCandidates,
   requestJson,
   reviewRuleCandidate,
+  settleParallelPlayerActions,
   startModuleRun,
   transitionModuleRunScene,
+  updateAutomationLevel,
   updateModuleRunEntityState,
   updateModuleRun
 } from "./client";
@@ -102,6 +104,11 @@ describe("API client", () => {
       status: "discovered"
     });
     await analyzeModuleRunIntent("run/1", "检查照片");
+    await updateAutomationLevel("run/1", {
+      expected_version: 9,
+      level: "balanced",
+      reason: "降低人工审批频率"
+    });
     await generateWorldExpansionProposal("run/1", {
       player_intent: "寻找警察局"
     });
@@ -154,16 +161,27 @@ describe("API client", () => {
       body: JSON.stringify({ player_intent: "检查照片" })
     });
     expect(fetchMock.mock.calls[8]?.[0]).toBe(
-      "/api/module-runs/run%2F1/director/world-expansion-proposals"
+      "/api/module-runs/run%2F1/automation"
     );
     expect(fetchMock.mock.calls[8]?.[1]).toMatchObject({
       method: "POST",
-      body: JSON.stringify({ player_intent: "寻找警察局" })
+      body: JSON.stringify({
+        expected_version: 9,
+        level: "balanced",
+        reason: "降低人工审批频率"
+      })
     });
     expect(fetchMock.mock.calls[9]?.[0]).toBe(
-      "/api/kp/proposals/proposal%2F1/world-expansion-encounters"
+      "/api/module-runs/run%2F1/director/world-expansion-proposals"
     );
     expect(fetchMock.mock.calls[9]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ player_intent: "寻找警察局" })
+    });
+    expect(fetchMock.mock.calls[10]?.[0]).toBe(
+      "/api/kp/proposals/proposal%2F1/world-expansion-encounters"
+    );
+    expect(fetchMock.mock.calls[10]?.[1]).toMatchObject({
       method: "POST"
     });
   });
@@ -203,6 +221,31 @@ describe("API client", () => {
           inputs: { damage: 6 },
           expected_output: { major_wound: true }
         }]
+      })
+    });
+  });
+
+  it("uses the parallel action settlement endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ status: "approved" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await settleParallelPlayerActions("camp/1", {
+      action_ids: ["action/1", "action/2"],
+      auto_approve: true
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/campaigns/camp%2F1/actions/settle"
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        action_ids: ["action/1", "action/2"],
+        auto_approve: true
       })
     });
   });

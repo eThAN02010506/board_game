@@ -224,6 +224,7 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
         *,
         ones: int,
         tens: int,
+        auto_advance: bool = False,
         headers: dict[str, str] | None = None,
     ) -> dict:
         response = await self.client.post(
@@ -233,6 +234,7 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
                 "input_method": "physical",
                 "ones_digit": ones,
                 "tens_digits": [tens],
+                "auto_advance": auto_advance,
             },
         )
         self.assertEqual(response.status_code, 200, response.text)
@@ -329,6 +331,27 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(orphan_check.status_code, 409, orphan_check.text)
+
+    async def test_player_roll_can_auto_generate_and_approve_consequence(self) -> None:
+        _action, _origin, check = await self.prepare_check()
+        fake_llm = FakeConsequenceLlm()
+
+        with patch(
+            "ai_kp.api.main.OpenAICompatibleClient",
+            return_value=fake_llm,
+        ):
+            result = await self.resolve_check(
+                check["id"],
+                ones=4,
+                tens=2,
+                auto_advance=True,
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["player_action"]["status"], "resolved")
+        self.assertEqual(result["proposal"]["status"], "approved")
+        self.assertEqual(result["proposal"]["proposal_kind"], "check_consequence")
+        self.assertEqual(fake_llm.calls, 1)
 
     async def test_override_or_push_makes_an_old_draft_stale_without_side_effects(self) -> None:
         action, _origin, check = await self.prepare_check()

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ai_kp.application.auto_world_expansion_service import AutoWorldExpansionService
 from ai_kp.application.errors import ConflictError
 from ai_kp.application.fact_service import AssertWorldFactCommand, FactService
 from ai_kp.application.session_service import SessionService
@@ -24,8 +25,15 @@ from ai_kp.platform.modules.ingestion import ModuleChunk
 
 
 class FakeWorldExpansionDirector:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        confidence: str = "medium",
+        conflicts: list[str] | None = None,
+    ) -> None:
         self.calls = 0
+        self.confidence = confidence
+        self.conflicts = conflicts or []
 
     async def handle_world_expansion(self, **values):
         self.calls += 1
@@ -38,9 +46,9 @@ class FakeWorldExpansionDirector:
                     "subject": "小镇警务设施",
                     "proposal": "设置一间由治安官与兼职书记员使用的小型办公室。",
                     "rationale": "符合 1920 年代小型聚落的规模和当前调查需求。",
-                    "confidence": "medium",
+                    "confidence": self.confidence,
                     "assumptions": ["小镇位于采用治安官制度的辖区"],
-                    "conflicts": [],
+                    "conflicts": self.conflicts,
                     "alternatives": [
                         {
                             "title": "邻镇辖区",
@@ -286,6 +294,112 @@ def test_world_gap_creates_one_source_bound_draft_and_reuses_it(
         )
         assert approved["status"] == "approved"
         assert approved["proposal_kind"] == "world_expansion"
+    finally:
+        connection.close()
+
+
+def test_balanced_world_gap_can_auto_materialize_environment_candidate(
+    tmp_path: Path,
+) -> None:
+    connection, repo, campaign, identity, run = setup_world_gap(tmp_path)
+    try:
+        repo.set_module_run_automation_level(
+            run["id"],
+            expected_version=run["version"],
+            level="balanced",
+            reason="允许低副作用环境补全自动落地。",
+            member_id=identity.member_id,
+        )
+        result = asyncio.run(
+            AutoWorldExpansionService(repo).create_and_maybe_materialize(
+                WorldExpansionCommand(
+                    run_id=run["id"],
+                    player_intent="我去寻找镇上的警察局",
+                ),
+                identity,
+                FakeWorldExpansionDirector(),
+                source_model="fake-local-model",
+            )
+        )
+
+        assert result.status == "materialized"
+        assert result.materialization is not None
+        assert result.proposal is not None
+        assert result.proposal["status"] == "approved"
+        assert result.policy is not None
+        assert result.policy["allowed"] is True
+        heads = repo.list_fact_heads(campaign["id"])
+        assert [(item.fact.subject, item.fact.predicate) for item in heads] == [
+            ("小镇警务设施", "存在或成立")
+        ]
+        actions = repo.list_proposal_actions(result.proposal["id"])
+        assert "auto_world_expansion_policy" in [
+            item["action_type"] for item in actions
+        ]
+        assert "world_expansion_materialized" in [
+            item["action_type"] for item in actions
+        ]
+    finally:
+        connection.close()
+
+
+def test_conservative_world_gap_stays_reviewable_without_materialization(
+    tmp_path: Path,
+) -> None:
+    connection, repo, _campaign, identity, run = setup_world_gap(tmp_path)
+    try:
+        result = asyncio.run(
+            AutoWorldExpansionService(repo).create_and_maybe_materialize(
+                WorldExpansionCommand(
+                    run_id=run["id"],
+                    player_intent="我去寻找镇上的警察局",
+                ),
+                identity,
+                FakeWorldExpansionDirector(),
+                source_model="fake-local-model",
+            )
+        )
+
+        assert result.status == "needs_attention"
+        assert result.proposal is not None
+        assert result.proposal["status"] == "draft"
+        assert result.materialization is None
+        assert result.policy is not None
+        assert result.policy["blockers"] == ["automation_level:conservative"]
+    finally:
+        connection.close()
+
+
+def test_ai_kp_world_gap_does_not_materialize_low_confidence_candidate(
+    tmp_path: Path,
+) -> None:
+    connection, repo, _campaign, identity, run = setup_world_gap(tmp_path)
+    try:
+        repo.set_module_run_automation_level(
+            run["id"],
+            expected_version=run["version"],
+            level="ai_kp",
+            reason="测试低置信安全阀。",
+            member_id=identity.member_id,
+        )
+        result = asyncio.run(
+            AutoWorldExpansionService(repo).create_and_maybe_materialize(
+                WorldExpansionCommand(
+                    run_id=run["id"],
+                    player_intent="我去寻找镇上的警察局",
+                ),
+                identity,
+                FakeWorldExpansionDirector(confidence="low"),
+                source_model="fake-local-model",
+            )
+        )
+
+        assert result.status == "needs_attention"
+        assert result.proposal is not None
+        assert result.proposal["status"] == "draft"
+        assert result.policy is not None
+        assert result.policy["blockers"] == ["low_confidence"]
+        assert repo.get_world_expansion_materialization(result.proposal["id"]) is None
     finally:
         connection.close()
 

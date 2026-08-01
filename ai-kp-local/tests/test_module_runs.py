@@ -10,6 +10,7 @@ from ai_kp.application.errors import ConflictError
 from ai_kp.application.module_graph_service import ModuleGraphService
 from ai_kp.application.module_knowledge_service import ModuleKnowledgeService
 from ai_kp.application.module_run_service import (
+    AutomationLevelCommand,
     DirectorControlCommand,
     ModuleRunService,
 )
@@ -207,6 +208,66 @@ def test_director_control_handoff_is_audited_and_blocks_ai_analysis(
         connection.close()
 
 
+def test_automation_level_changes_are_versioned_and_audited(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "automation-level.sqlite3")
+    try:
+        init_db(connection)
+        repo = Repository(connection)
+        campaign = repo.create_campaign("自动化强度")
+        kp = repo.create_campaign_session(
+            campaign["id"], kp_display_name="人工 KP"
+        )["member"]
+        module = _module(repo, campaign["id"], "自动化模组")
+        run = repo.start_campaign_module_run(
+            campaign_id=campaign["id"],
+            module_id=module["id"],
+            current_scene_key="scene-1",
+            active_spoiler_tags=[],
+            state={},
+            started_by_member_id=kp["id"],
+        )
+        service = ModuleRunService(repo)
+
+        balanced = service.set_automation_level(
+            run["id"],
+            AutomationLevelCommand(
+                expected_version=run["version"],
+                level="balanced",
+                reason="普通行动可交给 AI 自动审批",
+            ),
+            member_id=kp["id"],
+        )
+
+        assert balanced["automation_level"] == "balanced"
+        assert balanced["version"] == run["version"] + 1
+        with pytest.raises(ConflictError, match="refresh"):
+            service.set_automation_level(
+                run["id"],
+                AutomationLevelCommand(
+                    expected_version=run["version"],
+                    level="ai_kp",
+                    reason="过期页面试图切换强度",
+                ),
+                member_id=kp["id"],
+            )
+        ai_kp = service.set_automation_level(
+            run["id"],
+            AutomationLevelCommand(
+                expected_version=balanced["version"],
+                level="ai_kp",
+                reason="进入完整 AI KP 模式",
+            ),
+            member_id=kp["id"],
+        )
+        assert ai_kp["automation_level"] == "ai_kp"
+        assert [
+            (item["from_level"], item["to_level"])
+            for item in repo.list_module_run_automation_events(run["id"])
+        ] == [("conservative", "balanced"), ("balanced", "ai_kp")]
+    finally:
+        connection.close()
+
+
 def test_scene_director_tracks_scene_clues_and_read_only_gap_analysis(
     tmp_path: Path,
 ) -> None:
@@ -374,6 +435,51 @@ def test_scene_director_tracks_scene_clues_and_read_only_gap_analysis(
         )
         assert repo.get_campaign_module_run(run["id"])["version"] == before_version
         assert canon["reachability"]["evaluated"] is True
+    finally:
+        connection.close()
+
+
+def test_auto_kp_jobs_are_durable_claimable_and_retryable(tmp_path: Path) -> None:
+    connection = connect(tmp_path / "auto-kp-jobs.sqlite3")
+    init_db(connection)
+    repo = Repository(connection)
+    try:
+        campaign = repo.create_campaign("Auto KP jobs")
+        job = repo.enqueue_auto_kp_job(
+            campaign_id=campaign["id"],
+            job_type="player_action",
+            resource_id="action_1",
+            idempotency_key="auto-action-0001",
+            payload={"action_id": "action_1"},
+        )
+        repeated = repo.enqueue_auto_kp_job(
+            campaign_id=campaign["id"],
+            job_type="player_action",
+            resource_id="action_1",
+            idempotency_key="auto-action-0001",
+        )
+        assert repeated["id"] == job["id"]
+        claimed = repo.claim_next_auto_kp_job(worker_id="worker-1")
+        assert claimed is not None
+        assert claimed["status"] == "running"
+        assert claimed["attempt_count"] == 1
+        waiting = repo.fail_auto_kp_job(
+            claimed["id"],
+            expected_attempt=claimed["attempt_count"],
+            error="model timeout",
+        )
+        assert waiting["status"] == "retry_wait"
+        retried = repo.retry_auto_kp_job(waiting["id"])
+        assert retried["status"] == "queued"
+        claimed_again = repo.claim_next_auto_kp_job(worker_id="worker-2")
+        assert claimed_again is not None
+        done = repo.complete_auto_kp_job(
+            claimed_again["id"],
+            expected_attempt=claimed_again["attempt_count"],
+            result={"status": "completed"},
+        )
+        assert done["status"] == "succeeded"
+        assert done["result"] == {"status": "completed"}
     finally:
         connection.close()
 

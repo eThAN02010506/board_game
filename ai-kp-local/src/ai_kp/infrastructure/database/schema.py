@@ -308,6 +308,9 @@ CREATE TABLE IF NOT EXISTS campaign_module_runs (
   active_spoiler_tags_json TEXT NOT NULL DEFAULT '[]',
   state_json TEXT NOT NULL DEFAULT '{}',
   version INTEGER NOT NULL DEFAULT 0,
+  automation_level TEXT NOT NULL DEFAULT 'conservative'
+    CHECK (automation_level IN ('conservative', 'balanced', 'ai_kp')),
+  automation_reason TEXT,
   started_by_member_id TEXT REFERENCES session_members(id) ON DELETE SET NULL,
   started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -787,6 +790,30 @@ CREATE TABLE IF NOT EXISTS player_actions (
   resolved_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS auto_kp_jobs (
+  id TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES campaign_module_runs(id) ON DELETE SET NULL,
+  job_type TEXT NOT NULL
+    CHECK (job_type IN ('player_action', 'parallel_actions', 'world_expansion', 'check_consequence')),
+  resource_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'running', 'retry_wait', 'succeeded', 'failed', 'needs_attention', 'cancelled')),
+  stage TEXT NOT NULL DEFAULT 'queued',
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  next_run_at TEXT,
+  locked_by TEXT,
+  locked_at TEXT,
+  last_error TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  result_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(campaign_id, idempotency_key)
+);
+
 CREATE TABLE IF NOT EXISTS realtime_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_key TEXT NOT NULL UNIQUE,
@@ -1040,6 +1067,10 @@ CREATE INDEX IF NOT EXISTS idx_session_members_campaign ON session_members(campa
 CREATE INDEX IF NOT EXISTS idx_player_actions_session ON player_actions(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_player_actions_campaign_status
   ON player_actions(campaign_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_auto_kp_jobs_campaign_status
+  ON auto_kp_jobs(campaign_id, status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_auto_kp_jobs_runnable
+  ON auto_kp_jobs(status, next_run_at, created_at);
 CREATE INDEX IF NOT EXISTS idx_realtime_events_session_cursor
   ON realtime_events(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_realtime_events_member_cursor

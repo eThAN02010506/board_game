@@ -17,11 +17,13 @@ import {
   getModuleRunDirectorState,
   isApiError,
   transitionModuleRunScene,
+  updateAutomationLevel,
   updateDirectorControl,
   updateModuleRunEntityState
 } from "../../api/client";
 import type {
   DirectorAnalysis,
+  ModuleAutomationLevel,
   ModulePlayPace,
   ModuleRun,
   ModuleRunDirectorState,
@@ -39,6 +41,12 @@ const paceOptions: Array<[ModulePlayPace, string, string]> = [
   ["freeform", "自由推进", "调查、对话、旅行等弹性时间"],
   ["structured", "结构化行动", "冲突或逐人行动，顺序很重要"],
   ["downtime", "休整", "按小时或天汇总活动"]
+];
+
+const automationOptions: Array<[ModuleAutomationLevel, string, string]> = [
+  ["conservative", "保守", "AI 只生成草稿，等待人类 KP 审批"],
+  ["balanced", "平衡", "普通回合与检定后果可自动审批，高影响内容暂停"],
+  ["ai_kp", "AI KP", "通过确定性校验的流程可自动审核并落库"]
 ];
 
 const entityStatusLabels: Record<ModuleRuntimeEntityStatus, string> = {
@@ -71,6 +79,7 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
   const [worldTime, setWorldTime] = useState(run.scene_started_world_time ?? "");
   const [transitionNote, setTransitionNote] = useState("");
   const [controlReason, setControlReason] = useState("KP 主动切换导演控制权");
+  const [automationReason, setAutomationReason] = useState("KP 调整自动化强度");
   const [entityDrafts, setEntityDrafts] = useState<
     Record<string, ModuleRuntimeEntityStatus>
   >({});
@@ -79,6 +88,7 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
   const requestEpoch = useRef(0);
   const activeRun = directorState?.run ?? run;
   const controlMode = activeRun.director_control_mode ?? "ai_assist";
+  const automationLevel = activeRun.automation_level ?? "conservative";
 
   async function changeControl(mode: "ai_assist" | "safety_paused" | "human_kp") {
     setBusy(true);
@@ -91,6 +101,25 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
       onRunChanged(updated);
       await loadState(updated.id, true);
       setMessage(mode === "ai_assist" ? "控制权已交还 AI 辅助。" : mode === "human_kp" ? "人类 KP 已完全接管。" : "AI 已安全暂停。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeAutomationLevel(level: ModuleAutomationLevel) {
+    setBusy(true);
+    try {
+      const updated = await updateAutomationLevel(activeRun.id, {
+        expected_version: activeRun.version,
+        level,
+        reason: automationReason
+      });
+      onRunChanged(updated);
+      await loadState(updated.id, true);
+      const label = automationOptions.find((item) => item[0] === level)?.[1] ?? level;
+      setMessage(`自动化强度已切换为：${label}。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -283,6 +312,44 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
             <button disabled={busy || controlMode === "ai_assist"} onClick={() => void changeControl("ai_assist")} type="button">交还 AI 辅助</button>
           </div>
           <small>当前：{controlMode === "ai_assist" ? "AI 可辅助" : controlMode === "human_kp" ? "人类 KP 完全接管" : "AI 安全暂停"}{activeRun.director_control_reason ? ` · ${activeRun.director_control_reason}` : ""}。适用于回合、检定后果、世界补全和团后摘要。</small>
+        </section>
+        <section className="director-control-card" aria-label="自动化强度">
+          <div className="director-card-title"><ShieldAlert size={17} /><div><strong>自动化强度</strong><small>只改变审批频率，不改变权限、规则和事实边界</small></div></div>
+          <label>切换理由<input maxLength={2000} value={automationReason} onChange={(event) => setAutomationReason(event.target.value)} /></label>
+          <div className="director-control-actions automation-level-actions">
+            {automationOptions.map(([level, label, description]) => (
+              <button
+                aria-pressed={automationLevel === level}
+                disabled={busy || automationLevel === level}
+                key={level}
+                onClick={() => void changeAutomationLevel(level)}
+                title={description}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <small>当前：{automationOptions.find((item) => item[0] === automationLevel)?.[1] ?? automationLevel}{activeRun.automation_reason ? ` · ${activeRun.automation_reason}` : ""}。</small>
+        </section>
+        <section className="director-control-card" aria-label="自动 KP 状态机">
+          <div className="director-card-title"><ShieldAlert size={17} /><div><strong>自动 KP 状态机</strong><small>后台队列、恢复与重试状态</small></div></div>
+          {directorState?.auto_kp_jobs?.length ? (
+            <ul className="module-job-list">
+              {directorState.auto_kp_jobs.slice(0, 6).map((job) => (
+                <li className={`module-job ${job.status}`} key={job.id}>
+                  <div>
+                    <strong>{job.job_type}</strong>
+                    <span>{job.status} · {job.stage}</span>
+                  </div>
+                  <small>attempt {job.attempt_count}/{job.max_attempts} · {job.resource_id}</small>
+                  {job.last_error ? <p>{job.last_error}</p> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <small>暂无后台自动 KP 任务。开启 AI KP 或批量/世界补全自动流程后会显示队列状态。</small>
+          )}
         </section>
         <form className="scene-transition-card" onSubmit={(event) => void transitionScene(event)}>
           <div className="director-card-title">

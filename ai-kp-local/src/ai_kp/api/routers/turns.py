@@ -11,16 +11,22 @@ from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.llm import create_kp_orchestrator
 from ai_kp.api.schemas import (
     KpTurnRequest,
+    ParallelActionSettlementRequest,
     PlayerActionCreate,
     ProposalDecision,
     TurnProposalCreate,
 )
 from ai_kp.api.world_expansion_schemas import WorldExpansionEncounterRequest
+from ai_kp.application.auto_turn_service import AutoTurnService
 from ai_kp.application.check_consequence_service import (
     CheckConsequenceService,
     GenerateCheckConsequenceCommand,
 )
 from ai_kp.application.errors import KpSessionEndedError
+from ai_kp.application.parallel_action_settlement_service import (
+    ParallelActionSettlementCommand,
+    ParallelActionSettlementService,
+)
 from ai_kp.application.turn_service import KpTurnCommand, ManualProposalCommand, TurnService
 from ai_kp.application.world_expansion_materialization_service import (
     EncounterFact,
@@ -38,11 +44,13 @@ router = APIRouter()
 
 
 @router.post("/campaigns/{campaign_id}/actions")
-def submit_player_action(
+async def submit_player_action(
     campaign_id: str,
     payload: PlayerActionCreate,
+    request: Request,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_app_settings),
 ) -> dict:
     require_campaign_role(identity, campaign_id, ("player",))
     require_approved_pc_binding(
@@ -51,13 +59,44 @@ def submit_player_action(
         identity.pc_id,
         owner_profile_id=identity.player_profile_id,
     )
-    return TurnService(repo).submit_player_action(
+    action = TurnService(repo).submit_player_action(
         identity,
         action_text=payload.action_text,
         map_id=payload.map_id,
         token_id=payload.token_id,
         client_action_id=payload.client_action_id,
     )
+    if not payload.auto_advance:
+        return action
+    result = await AutoTurnService(repo).advance_player_action(
+        str(action["id"]),
+        director=create_kp_orchestrator(repo, settings, request),
+        source_model=settings.llm_model,
+    )
+    return result.as_dict()
+
+
+@router.post("/campaigns/{campaign_id}/actions/settle")
+async def settle_parallel_player_actions(
+    campaign_id: str,
+    payload: ParallelActionSettlementRequest,
+    request: Request,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_app_settings),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp",))
+    result = await ParallelActionSettlementService(repo).settle(
+        campaign_id,
+        identity,
+        ParallelActionSettlementCommand(
+            action_ids=tuple(payload.action_ids),
+            auto_approve=payload.auto_approve,
+        ),
+        create_kp_orchestrator(repo, settings, request),
+        source_model=settings.llm_model,
+    )
+    return result.as_dict()
 
 
 @router.get("/campaigns/{campaign_id}/actions")

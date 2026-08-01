@@ -269,6 +269,74 @@ class ModuleRunRepository(SQLiteRepository):
         ).fetchall()
         return [row_to_dict(row) for row in rows]
 
+    def set_module_run_automation_level(
+        self,
+        run_id: str,
+        *,
+        expected_version: int,
+        level: str,
+        reason: str,
+        member_id: str,
+    ) -> dict:
+        self.begin_immediate()
+        run = self.get_campaign_module_run(run_id)
+        self._require_expected_version(run, expected_version)
+        if level not in {"conservative", "balanced", "ai_kp"}:
+            raise ValueError("Unsupported automation level")
+        normalized_reason = self._require_text(reason, "Automation level reason", 2000)
+        prior = str(run.get("automation_level") or "conservative")
+        if prior == level:
+            return run
+        event_seq = int(
+            self.connection.execute(
+                """
+                SELECT COALESCE(MAX(event_seq), 0) + 1
+                FROM module_run_automation_events
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()[0]
+        )
+        self.connection.execute(
+            """
+            INSERT INTO module_run_automation_events
+              (id, run_id, event_seq, from_level, to_level, reason,
+               changed_by_member_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("automation"),
+                run_id,
+                event_seq,
+                prior,
+                level,
+                normalized_reason,
+                member_id,
+            ),
+        )
+        cursor = self.connection.execute(
+            """
+            UPDATE campaign_module_runs
+            SET automation_level = ?, automation_reason = ?,
+                version = version + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND version = ?
+            """,
+            (level, normalized_reason, run_id, expected_version),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError("Module run changed; refresh it before applying this update")
+        return self.get_campaign_module_run(run_id)
+
+    def list_module_run_automation_events(self, run_id: str) -> list[dict]:
+        rows = self.connection.execute(
+            """
+            SELECT * FROM module_run_automation_events
+            WHERE run_id = ? ORDER BY event_seq
+            """,
+            (run_id,),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
     def transition_module_run_scene(
         self,
         run_id: str,

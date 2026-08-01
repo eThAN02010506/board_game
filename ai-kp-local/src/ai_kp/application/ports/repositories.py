@@ -352,6 +352,18 @@ class ModuleRunStore(Protocol):
 
     def list_module_run_control_events(self, run_id: str) -> list[dict]: ...
 
+    def set_module_run_automation_level(
+        self,
+        run_id: str,
+        *,
+        expected_version: int,
+        level: str,
+        reason: str,
+        member_id: str,
+    ) -> dict: ...
+
+    def list_module_run_automation_events(self, run_id: str) -> list[dict]: ...
+
     def search_module(
         self,
         module_id: str,

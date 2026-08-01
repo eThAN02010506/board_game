@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from ai_kp.api.authz import require_approved_pc_binding, require_campaign_role
-from ai_kp.api.dependencies import get_identity, get_repo
+from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
+from ai_kp.api.llm import create_kp_orchestrator
 from ai_kp.api.schemas import (
     OpposedCheckCreate,
     SkillCheckCreate,
@@ -9,6 +10,7 @@ from ai_kp.api.schemas import (
     SkillCheckOverride,
     SkillCheckResolve,
 )
+from ai_kp.application.auto_turn_service import AutoTurnService
 from ai_kp.application.check_service import (
     CheckService,
     CreateCheckCommand,
@@ -16,6 +18,7 @@ from ai_kp.application.check_service import (
     OpposedSideCommand,
     ResolveCheckCommand,
 )
+from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
@@ -150,13 +153,15 @@ def get_skill_check(
 
 
 @router.post("/checks/{check_id}/resolve")
-def resolve_skill_check(
+async def resolve_skill_check(
     check_id: str,
     payload: SkillCheckResolve,
+    request: Request,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_app_settings),
 ) -> dict:
-    return CheckService(repo).resolve(
+    resolved = CheckService(repo).resolve(
         check_id,
         identity,
         ResolveCheckCommand(
@@ -165,6 +170,16 @@ def resolve_skill_check(
             tens_digits=tuple(payload.tens_digits),
         ),
     )
+    if not payload.auto_advance:
+        return resolved
+    result = await AutoTurnService(repo).advance_after_check(
+        check_id,
+        director=create_kp_orchestrator(repo, settings, request),
+        source_model=settings.llm_model,
+    )
+    if result is None:
+        return resolved
+    return result.as_dict()
 
 
 @router.post("/checks/{check_id}/replay")

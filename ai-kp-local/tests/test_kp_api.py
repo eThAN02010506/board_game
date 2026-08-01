@@ -8,6 +8,7 @@ import httpx
 
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings, get_settings
+from tests.support_investigators import coc7_sheet, create_approved_player
 
 
 class FakeStructuredLlm:
@@ -132,6 +133,65 @@ class KpApiTests(unittest.IsolatedAsyncioTestCase):
                         )
                     ).json()
                     self.assertTrue(any(item["scope"] == "clue" for item in memories))
+
+    async def test_player_action_auto_advance_approves_ai_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                db_path=Path(tmpdir) / "auto-api.sqlite3",
+                llm_base_url="http://unused.local/v1",
+                llm_api_key="test",
+                llm_model="fake-structured",
+            )
+            app = create_app(settings)
+            app.dependency_overrides[get_settings] = lambda: settings
+            with patch(
+                "ai_kp.api.main.OpenAICompatibleClient",
+                return_value=FakeStructuredLlm(),
+            ):
+                transport = httpx.ASGITransport(app=app)
+                async with httpx.AsyncClient(
+                    transport=transport,
+                    base_url="http://test.local",
+                ) as client:
+                    campaign = (
+                        await client.post(
+                            "/campaigns",
+                            json={"title": "雾港自动团"},
+                        )
+                    ).json()
+                    session_bundle = (
+                        await client.post(
+                            f"/campaigns/{campaign['id']}/sessions",
+                            json={"kp_display_name": "Test KP"},
+                        )
+                    ).json()
+                    kp_headers = {
+                        "Authorization": f"Bearer {session_bundle['access_token']}"
+                    }
+                    approved_player = await create_approved_player(
+                        client,
+                        campaign=campaign,
+                        session=session_bundle,
+                        kp_headers=kp_headers,
+                        display_name="Player",
+                        sheet=coc7_sheet("Investigator", skills={"侦查": 60}),
+                    )
+
+                    response = await client.post(
+                        f"/campaigns/{campaign['id']}/actions",
+                        headers=approved_player["headers"],
+                        json={
+                            "action_text": "我检查仓库门。",
+                            "client_action_id": "auto-api-action-001",
+                            "auto_advance": True,
+                        },
+                    )
+
+                    self.assertEqual(response.status_code, 200, response.text)
+                    result = response.json()
+                    self.assertEqual(result["status"], "completed")
+                    self.assertEqual(result["proposal"]["status"], "approved")
+                    self.assertEqual(result["player_action"]["status"], "resolved")
 
 
 if __name__ == "__main__":

@@ -130,6 +130,8 @@ def test_authorization_matrix_and_cross_campaign_isolation(tmp_path: Path) -> No
             ("other_kp_resolve_opposed", "post", f"/opposed-checks/{opposed['id']}/resolve", kp_b, None, 403),
             ("player_director_control", "post", f"/module-runs/{run['id']}/director/control", player_a, {"expected_version": run["version"], "mode": "human_kp", "reason": "unauthorized"}, 403),
             ("other_kp_director_control", "post", f"/module-runs/{run['id']}/director/control", kp_b, {"expected_version": run["version"], "mode": "human_kp", "reason": "cross campaign"}, 404),
+            ("player_automation_level", "post", f"/module-runs/{run['id']}/automation", player_a, {"expected_version": run["version"], "level": "ai_kp", "reason": "unauthorized"}, 403),
+            ("other_kp_automation_level", "post", f"/module-runs/{run['id']}/automation", kp_b, {"expected_version": run["version"], "level": "ai_kp", "reason": "cross campaign"}, 404),
             ("player_list_dynamic_branches", "get", f"/campaigns/{campaign_a['id']}/dynamic-branches", player_a, None, 403),
             ("other_kp_list_dynamic_branches", "get", f"/campaigns/{campaign_a['id']}/dynamic-branches", kp_b, None, 404),
             ("player_map_revision", "post", f"/maps/{saved_map['id']}/revisions", player_a, {"expected_revision_id": saved_map["revision_id"], "map_spec": saved_map["map_spec"]}, 403),

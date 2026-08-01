@@ -12,6 +12,7 @@ import {
 } from "../api/client";
 import type {
   AuthIdentity,
+  AutoTurnResult,
   Campaign,
   CampaignInvestigator,
   CreateOpposedCheckInput,
@@ -195,6 +196,11 @@ export default function App() {
   const [log, setLog] = useState("准备就绪。先连接后端，或直接创建一个测试团。");
   const [loading, setLoading] = useState(false);
   const [characterExpanded, setCharacterExpanded] = useState(false);
+  const [kpActionTab, setKpActionTab] = useState<
+    "player-view" | "checks" | "director" | "table-log"
+  >("player-view");
+  const [playerActionTab, setPlayerActionTab] = useState<"actions" | "checks">("actions");
+  const [autoKpEnabled, setAutoKpEnabled] = useState(true);
   const activeCampaignIdRef = useRef("");
   const activeSessionIdRef = useRef("");
   const activeMapIdRef = useRef("");
@@ -270,6 +276,37 @@ export default function App() {
   function showLog(message: string) {
     logRequestVersion.current += 1;
     setLog(message);
+  }
+
+  function isAutoTurnResult(value: unknown): value is AutoTurnResult {
+    return Boolean(
+      value &&
+        typeof value === "object" &&
+        "player_action" in value &&
+        "status" in value &&
+        "message" in value
+    );
+  }
+
+  function mergeAutoTurnResult(result: AutoTurnResult, campaignId: string) {
+    if (activeCampaignIdRef.current !== campaignId) return;
+    if (result.proposal) {
+      setProposals((items) => [
+        result.proposal!,
+        ...items.filter((item) => item.id !== result.proposal!.id)
+      ]);
+      setActiveProposalId(result.proposal.id);
+      setProposalContext(null);
+      setOverrideText("");
+    }
+    if (result.checks.length) {
+      setSkillChecks((items) => [
+        ...result.checks,
+        ...items.filter((item) => !result.checks.some((check) => check.id === item.id))
+      ]);
+      setPlayerActionTab("checks");
+    }
+    showLog(result.message || "自动 KP 已推进。");
   }
 
   async function run<T>(
@@ -752,17 +789,26 @@ export default function App() {
       showLog("只有已加入团会话的玩家可以提交行动。");
       return;
     }
-    await run("提交玩家行动", () =>
-      requestJson<PlayerActionRecord>(`/campaigns/${activeCampaign.id}/actions`, {
+    const campaignId = activeCampaign.id;
+    const result = await run("提交玩家行动", () =>
+      requestJson<PlayerActionRecord | AutoTurnResult>(`/campaigns/${campaignId}/actions`, {
         method: "POST",
         body: JSON.stringify({
           action_text: playerAction,
           token_id: selectedToken?.id ?? null,
           map_id: activeMap?.id ?? null,
-          client_action_id: crypto.randomUUID()
+          client_action_id: crypto.randomUUID(),
+          auto_advance: autoKpEnabled
         })
       })
     );
+    if (!result || activeCampaignIdRef.current !== campaignId) return;
+    if (isAutoTurnResult(result)) {
+      mergeAutoTurnResult(result, campaignId);
+    } else {
+      showLog("行动已提交，等待 KP 处理。");
+    }
+    void loadSkillChecks(activeCampaign, true);
   }
 
   async function loadSkillChecks(campaign = activeCampaign, silent = false) {
@@ -830,18 +876,24 @@ export default function App() {
     onesDigit?: number,
     tensDigits: number[] = []
   ) {
+    const campaignId = activeCampaign?.id ?? "";
     const result = await run(inputMethod === "digital" ? "投掷数字骰" : "录入实体骰", () =>
-      requestJson<SkillCheck>(`/checks/${checkId}/resolve`, {
+      requestJson<SkillCheck | AutoTurnResult>(`/checks/${checkId}/resolve`, {
         method: "POST",
         body: JSON.stringify({
           input_method: inputMethod,
           ones_digit: inputMethod === "physical" ? onesDigit : null,
-          tens_digits: inputMethod === "physical" ? tensDigits : []
+          tens_digits: inputMethod === "physical" ? tensDigits : [],
+          auto_advance: autoKpEnabled && credentialBridge.snapshot().role === "player"
         })
       })
     );
     if (result) {
-      setSkillChecks((items) => items.map((item) => item.id === result.id ? result : item));
+      if (isAutoTurnResult(result)) {
+        mergeAutoTurnResult(result, campaignId);
+      } else {
+        setSkillChecks((items) => items.map((item) => item.id === result.id ? result : item));
+      }
       if (authIdentity?.role === "kp") void loadPlayerActions(activeCampaign, true);
     }
   }
@@ -1614,8 +1666,9 @@ export default function App() {
           </section>
         </div>}
 
-        {activeNav === "play" && <div className="play-page">
-          <aside className={`play-character-card ${characterExpanded ? "expanded" : ""}`}>
+        {activeNav === "play" && authIdentity && (
+          <div className={`play-page ${authIdentity.role === "kp" ? "kp-layout" : "player-layout"}`}>
+            <aside className={`play-character-card ${characterExpanded ? "expanded" : ""}`}>
             <div className="panel-heading">
               <div><p className="eyebrow">当前调查员</p><h2>{activePc?.name ?? "尚未绑定角色"}</h2></div>
               <button className="ghost-button" onClick={() => setCharacterExpanded((value) => !value)} type="button">
@@ -1633,7 +1686,10 @@ export default function App() {
               </>
             ) : <p className="permission-hint">先在“团与权限”页加入会话并绑定已批准角色。</p>}
             <div className="party-summary">
-              <div className="party-summary-heading"><strong>其他调查员</strong><small>公开摘要</small></div>
+              <div className="party-summary-heading">
+                <strong>{authIdentity.role === "kp" ? "所有玩家" : "队友信息"}</strong>
+                <small>{authIdentity.role === "kp" ? "公开摘要" : "精简信息"}</small>
+              </div>
               {otherPcs.length ? otherPcs.map((pc) => {
                 const location = activeMap?.tokens?.find(
                   (token) => token.actor_type === "pc" && token.actor_id === pc.id
@@ -1643,15 +1699,17 @@ export default function App() {
                 return (
                   <article className="party-member-mini" key={pc.id}>
                     <div><strong>{pc.name}</strong><span>{location ?? "位置未知"}</span></div>
-                    <small>
-                      {summary.cash !== undefined ? `现金 ${summary.cash}` : "现金未公开"}
-                      {Object.keys(attributes).length ? ` · ${Object.entries(attributes).slice(0, 3).map(([key, value]) => `${key.toUpperCase()} ${value}`).join(" / ")}` : " · 属性未公开"}
-                    </small>
+                    {authIdentity.role === "kp" && (
+                      <small>
+                        {summary.cash !== undefined ? `现金 ${summary.cash}` : "现金未公开"}
+                        {Object.keys(attributes).length ? ` · ${Object.entries(attributes).slice(0, 3).map(([key, value]) => `${key.toUpperCase()} ${value}`).join(" / ")}` : " · 属性未公开"}
+                      </small>
+                    )}
                   </article>
                 );
               }) : <small>目前没有其他已加入的调查员。</small>}
             </div>
-            <TokenPanel
+            {authIdentity.role === "kp" && <TokenPanel
               activeMap={activeMap}
               identity={authIdentity}
               movableTokens={movableTokens}
@@ -1669,10 +1727,10 @@ export default function App() {
               tokenActorId={tokenActorId}
               tokenLabel={tokenLabel}
               tokenLocation={tokenLocation}
-            />
-          </aside>
+            />}
+            </aside>
 
-          <div className="play-map-column">
+            <div className="play-map-column">
             <MapStage
               activeMap={activeMap}
               hasIdentity={Boolean(authIdentity)}
@@ -1685,11 +1743,74 @@ export default function App() {
               showReviewControls={false}
             />
             <RoutePlanPanel map={activeMap} identity={authIdentity} />
-          </div>
+            </div>
 
-          <div className="play-action-column">
-          <GameplayWorkbench campaign={activeCampaign} identity={authIdentity} />
-          <CheckPanel
+            <div className="play-action-column">
+            <div className="action-tabs" role="tablist" aria-label={authIdentity.role === "kp" ? "KP 导演控制台" : "玩家游玩台"}>
+              {authIdentity.role === "kp" ? (
+                <>
+                  {(["player-view", "checks", "director", "table-log"] as const).map((tab) => (
+                    <button
+                      aria-selected={kpActionTab === tab}
+                      className={`tab-btn ${kpActionTab === tab ? "active" : ""}`}
+                      key={tab}
+                      onClick={() => setKpActionTab(tab)}
+                      role="tab"
+                      type="button"
+                    >
+                      {{ "player-view": "玩家视角", checks: "检定", director: "导演", "table-log": "桌面记录" }[tab]}
+                    </button>
+                  ))}
+                </>
+              ) : (
+                <>
+                  {(["actions", "checks"] as const).map((tab) => (
+                    <button
+                      aria-selected={playerActionTab === tab}
+                      className={`tab-btn ${playerActionTab === tab ? "active" : ""}`}
+                      key={tab}
+                      onClick={() => setPlayerActionTab(tab)}
+                      role="tab"
+                      type="button"
+                    >
+                      {tab === "actions" ? "行动" : "检定"}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+
+              <div className="action-tab-content">
+                {((authIdentity.role === "kp" && kpActionTab === "player-view") ||
+                  (authIdentity.role !== "kp" && playerActionTab === "actions")) && (
+                  <>
+                    <GameplayWorkbench campaign={activeCampaign} identity={authIdentity} />
+                    <ActionPanel
+                  autoKpEnabled={autoKpEnabled}
+                  identity={authIdentity}
+                  loading={loading}
+                  onAutoKpEnabledChange={setAutoKpEnabled}
+                  onCreateProposal={() => void createProposal()}
+                  onGenerateAiProposal={() => void generateAiProposal()}
+                  onPlayerActionChange={setPlayerAction}
+                  onProposalTextChange={setProposalText}
+                  onRefreshPlayerActions={() => void loadPlayerActions()}
+                  onSearchMemory={() => void searchMemory()}
+                  onSelectPlayerAction={(action) => {
+                    setSelectedPlayerActionId(action.id);
+                    setPlayerAction(action.action_text);
+                  }}
+                  onSubmitPlayerAction={() => void submitPlayerAction()}
+                  playerAction={playerAction}
+                  playerActions={playerActions}
+                  proposalText={proposalText}
+                  selectedPlayerActionId={selectedPlayerActionId}
+                    />
+                  </>
+                )}
+
+                {((authIdentity.role === "kp" && kpActionTab === "checks") ||
+                  (authIdentity.role !== "kp" && playerActionTab === "checks")) && <CheckPanel
             checks={skillChecks}
             opposedChecks={opposedChecks}
             identity={authIdentity}
@@ -1707,29 +1828,10 @@ export default function App() {
             onResolvePhysical={(checkId, onesDigit, tensDigits) => void resolveSkillCheck(checkId, "physical", onesDigit, tensDigits)}
             onResolveOpposed={(opposedCheckId) => void resolveOpposedCheck(opposedCheckId)}
             onRerollOpposed={(opposedCheckId) => void rerollOpposedCheck(opposedCheckId)}
-          />
-          <ActionPanel
-            identity={authIdentity}
-            loading={loading}
-            onCreateProposal={() => void createProposal()}
-            onGenerateAiProposal={() => void generateAiProposal()}
-            onPlayerActionChange={setPlayerAction}
-            onProposalTextChange={setProposalText}
-            onRefreshPlayerActions={() => void loadPlayerActions()}
-            onSearchMemory={() => void searchMemory()}
-            onSelectPlayerAction={(action) => {
-              setSelectedPlayerActionId(action.id);
-              setPlayerAction(action.action_text);
-            }}
-            onSubmitPlayerAction={() => void submitPlayerAction()}
-            playerAction={playerAction}
-            playerActions={playerActions}
-            proposalText={proposalText}
-            selectedPlayerActionId={selectedPlayerActionId}
-          />
+                />}
 
-          {authIdentity?.role === "kp" && (
-            <ProposalPanel
+                {authIdentity.role === "kp" && kpActionTab === "director" && (
+                  <ProposalPanel
               activeMap={activeMap}
               activeProposal={activeProposal}
               campaignTime={campaignTime}
@@ -1752,18 +1854,25 @@ export default function App() {
               overrideText={overrideText}
               proposalContext={proposalContext}
               proposals={proposals}
-            />
-          )}
-          <section className="response-panel">
-            <div className="panel-heading">
-              <h2>桌面记录</h2>
-              <AlertCircle size={18} />
+                  />
+                )}
+                {authIdentity.role === "kp" && kpActionTab === "table-log" && (
+                  <section className="response-panel table-log-panel">
+                    <div className="panel-heading">
+                      <h2>桌面记录</h2>
+                      <AlertCircle size={18} />
+                    </div>
+                    <pre>{log}</pre>
+                  </section>
+                )}
+              </div>
             </div>
-            <pre>{log}</pre>
-          </section>
           </div>
-        </div>
-        }
+        )}
+
+        {activeNav === "play" && !authIdentity && (
+          <section className="page-card permission-hint">请先在“团与权限”页加入会话，再进入游玩台。</section>
+        )}
 
         {activeNav === "memory" && (
           <Suspense fallback={<section className="page-card">正在载入角色记忆……</section>}>
