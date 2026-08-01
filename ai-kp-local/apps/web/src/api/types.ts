@@ -148,6 +148,21 @@ export type ModulePlayPace = "freeform" | "structured" | "downtime";
 export type ModuleRuntimeEntityStatus = "hidden" | "available" | "discovered" | "resolved";
 export type ModuleAutomationLevel = "conservative" | "balanced" | "ai_kp";
 
+export type AutoKpJob = {
+  id: string;
+  campaign_id: string;
+  run_id?: string | null;
+  job_type: "player_action" | "parallel_actions" | "world_expansion" | "check_consequence";
+  resource_id: string;
+  status: "queued" | "running" | "retry_wait" | "succeeded" | "failed" | "needs_attention" | "cancelled";
+  stage: string;
+  attempt_count: number;
+  max_attempts: number;
+  last_error?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ModuleRun = {
   id: string;
   campaign_id: string;
@@ -220,17 +235,7 @@ export type ModuleRunDirectorState = {
   entity_states: ModuleRunEntityState[];
   scene_events: ModuleRunSceneEvent[];
   entity_state_events: ModuleRunEntityStateEvent[];
-  auto_kp_jobs?: Array<{
-    id: string;
-    job_type: string;
-    resource_id: string;
-    status: "queued" | "running" | "retry_wait" | "succeeded" | "failed" | "needs_attention" | "cancelled";
-    stage: string;
-    attempt_count: number;
-    max_attempts: number;
-    last_error?: string | null;
-    updated_at: string;
-  }>;
+  auto_kp_jobs?: AutoKpJob[];
   control_events?: Array<{
     id: string;
     from_mode: ModuleRun["director_control_mode"];
@@ -1127,10 +1132,11 @@ export type PlayerActionRecord = {
 };
 
 export type AutoTurnResult = {
-  status: "completed" | "awaiting_roll" | "needs_attention" | "failed";
+  status: "queued" | "completed" | "awaiting_roll" | "needs_attention" | "failed";
   player_action: PlayerActionRecord;
   proposal: TurnProposal | null;
   checks: SkillCheck[];
+  job?: AutoKpJob;
   message: string;
 };
 

@@ -50,6 +50,7 @@ import { SessionPanel } from "../features/sessions/SessionPanel";
 import { useWorkspaceRealtime } from "../realtime/provider";
 import { AppLayout } from "./layout/AppLayout";
 import { useAsyncTaskLog } from "./hooks/useAsyncTaskLog";
+import { useAutoKpJobs } from "./hooks/useAutoKpJobs";
 import { KpWorkspace, PlayerWorkspace } from "./workspaces/PlayWorkspaces";
 import { resolveWorkspaceRoute, useWorkspaceRoute, type PageId } from "./router";
 import {
@@ -201,6 +202,10 @@ export default function App() {
   >("player-view");
   const [playerActionTab, setPlayerActionTab] = useState<"actions" | "checks">("actions");
   const [autoKpEnabled, setAutoKpEnabled] = useState(true);
+  const { jobs: autoKpJobs, refresh: refreshAutoKpJobs } = useAutoKpJobs(
+    activeCampaign?.id ?? "",
+    Boolean(authIdentity)
+  );
   const activeCampaignIdRef = useRef("");
   const activeSessionIdRef = useRef("");
   const activeMapIdRef = useRef("");
@@ -307,6 +312,7 @@ export default function App() {
       ]);
       setPlayerActionTab("checks");
     }
+    if (result.job) void refreshAutoKpJobs();
     showLog(result.message || "自动 KP 已推进。");
   }
 
@@ -755,7 +761,8 @@ export default function App() {
           token_id: selectedToken?.id ?? null,
           map_id: activeMap?.id ?? null,
           client_action_id: crypto.randomUUID(),
-          auto_advance: autoKpEnabled
+          auto_advance: autoKpEnabled,
+          background: autoKpEnabled
         })
       })
     );
@@ -841,7 +848,8 @@ export default function App() {
           input_method: inputMethod,
           ones_digit: inputMethod === "physical" ? onesDigit : null,
           tens_digits: inputMethod === "physical" ? tensDigits : [],
-          auto_advance: autoKpEnabled && credentialBridge.snapshot().role === "player"
+          auto_advance: autoKpEnabled && credentialBridge.snapshot().role === "player",
+          background: autoKpEnabled && credentialBridge.snapshot().role === "player"
         })
       })
     );
@@ -1634,6 +1642,7 @@ export default function App() {
             activeProposal={activeProposal}
             authIdentity={authIdentity}
             autoKpEnabled={autoKpEnabled}
+            autoKpJobs={autoKpJobs}
             campaignTime={campaignTime}
             characterExpanded={characterExpanded}
             checks={skillChecks}
@@ -1717,6 +1726,7 @@ export default function App() {
             activePc={activePc}
             authIdentity={authIdentity}
             autoKpEnabled={autoKpEnabled}
+            autoKpJobs={autoKpJobs}
             characterExpanded={characterExpanded}
             checks={skillChecks}
             loading={loading}

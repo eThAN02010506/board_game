@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 
 from ai_kp.api.authz import require_approved_pc_binding, require_campaign_role
+from ai_kp.api.auto_kp import player_auto_kp_job
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.llm import create_kp_orchestrator
 from ai_kp.api.schemas import (
@@ -10,6 +11,7 @@ from ai_kp.api.schemas import (
     SkillCheckOverride,
     SkillCheckResolve,
 )
+from ai_kp.application.auto_kp_queue_service import AutoKpQueueService
 from ai_kp.application.auto_turn_service import AutoTurnService
 from ai_kp.application.check_service import (
     CheckService,
@@ -172,6 +174,22 @@ async def resolve_skill_check(
     )
     if not payload.auto_advance:
         return resolved
+    if payload.background:
+        job = AutoKpQueueService(repo).enqueue_check_consequence(check_id)
+        if job is None:
+            return resolved
+        worker = getattr(request.app.state, "auto_kp_worker", None)
+        if worker is not None:
+            worker.wake()
+        action_id = str(resolved["player_action_id"])
+        return {
+            "status": "queued",
+            "player_action": repo.get_player_action(action_id),
+            "proposal": None,
+            "checks": repo.list_skill_checks_for_action(action_id),
+            "job": player_auto_kp_job(job),
+            "message": "检定已完成，后果正在后台自动结算。",
+        }
     result = await AutoTurnService(repo).advance_after_check(
         check_id,
         director=create_kp_orchestrator(repo, settings, request),

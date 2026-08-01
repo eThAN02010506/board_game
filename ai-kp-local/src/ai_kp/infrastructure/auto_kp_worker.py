@@ -7,8 +7,12 @@ import sqlite3
 from threading import Event, RLock, Thread
 from typing import Any
 
-from ai_kp.application.auto_turn_service import AutoTurnService
+from ai_kp.application.auto_turn_service import (
+    RECOVERABLE_AUTO_TURN_ERRORS,
+    AutoTurnService,
+)
 from ai_kp.application.auto_world_expansion_service import AutoWorldExpansionService
+from ai_kp.application.module_run_service import ModuleRunService
 from ai_kp.application.parallel_action_settlement_service import (
     ParallelActionSettlementCommand,
     ParallelActionSettlementService,
@@ -155,6 +159,8 @@ def process_claimed_auto_kp_job(
                 call_registry=call_registry,
             )
         )
+        if result["status"] == "failed":
+            raise RuntimeError(str(result.get("message") or "Auto KP job failed"))
         status = "needs_attention" if result["status"] == "needs_attention" else "succeeded"
         repo.complete_auto_kp_job(
             job_id,
@@ -188,6 +194,51 @@ async def _dispatch_auto_kp_job(
     job_type = str(job["job_type"])
     payload = dict(job.get("payload") or {})
     if job_type == "player_action":
+        action = repo.get_player_action(str(job["resource_id"]))
+        run = repo.get_active_campaign_module_run(str(action["campaign_id"]))
+        if run is not None:
+            analysis = ModuleRunService(repo).analyze(
+                str(run["id"]),
+                str(action["action_text"]),
+            )
+            if analysis["decision"] == "world_gap":
+                try:
+                    world = await AutoWorldExpansionService(
+                        repo
+                    ).create_and_maybe_materialize(
+                        WorldExpansionCommand(
+                            run_id=str(run["id"]),
+                            player_intent=str(action["action_text"]),
+                            pc_id=action.get("pc_id"),
+                            map_id=action.get("map_id"),
+                        ),
+                        _kp_identity_for_session(
+                            repo,
+                            str(action["campaign_id"]),
+                            str(action["session_id"]),
+                        ),
+                        director,
+                        source_model=settings.llm_model,
+                    )
+                except RECOVERABLE_AUTO_TURN_ERRORS:
+                    repo.connection.rollback()
+                else:
+                    if world.status == "materialized" and world.proposal is not None:
+                        repo.link_player_action_to_proposal(
+                            str(action["id"]),
+                            str(world.proposal["id"]),
+                            str(action["campaign_id"]),
+                        )
+                        repo.resolve_player_action_for_proposal(
+                            str(world.proposal["id"]),
+                            "resolved",
+                        )
+                    return {
+                        "status": world.status,
+                        "stage": "world_expansion",
+                        "player_action": repo.get_player_action(str(action["id"])),
+                        **world.as_dict(),
+                    }
         result = await AutoTurnService(repo).advance_player_action(
             str(job["resource_id"]),
             director=director,

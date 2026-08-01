@@ -184,6 +184,7 @@ class SkillCheckResolve(BaseModel):
     ones_digit: int | None = Field(default=None, ge=0, le=9)
     tens_digits: list[int] = Field(default_factory=list, max_length=3)
     auto_advance: bool = False
+    background: bool = False
 
 
 class Coc7EncounterParticipant(BaseModel):
@@ -290,6 +291,7 @@ class PlayerActionCreate(BaseModel):
     map_id: str | None = None
     client_action_id: str | None = Field(default=None, min_length=8, max_length=100)
     auto_advance: bool = False
+    background: bool = False
 
 
 class ParallelActionSettlementRequest(BaseModel):

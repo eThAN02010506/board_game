@@ -7,6 +7,7 @@ from ai_kp.api.authz import (
     require_approved_pc_binding,
     require_campaign_role,
 )
+from ai_kp.api.auto_kp import player_auto_kp_job
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.llm import create_kp_orchestrator
 from ai_kp.api.schemas import (
@@ -17,6 +18,7 @@ from ai_kp.api.schemas import (
     TurnProposalCreate,
 )
 from ai_kp.api.world_expansion_schemas import WorldExpansionEncounterRequest
+from ai_kp.application.auto_kp_queue_service import AutoKpQueueService
 from ai_kp.application.auto_turn_service import AutoTurnService
 from ai_kp.application.check_consequence_service import (
     CheckConsequenceService,
@@ -68,6 +70,19 @@ async def submit_player_action(
     )
     if not payload.auto_advance:
         return action
+    if payload.background:
+        job = AutoKpQueueService(repo).enqueue_player_action(str(action["id"]))
+        worker = getattr(request.app.state, "auto_kp_worker", None)
+        if worker is not None:
+            worker.wake()
+        return {
+            "status": "queued",
+            "player_action": action,
+            "proposal": None,
+            "checks": [],
+            "job": player_auto_kp_job(job),
+            "message": "行动已进入后台 Auto KP 队列；可以安全离开或刷新页面。",
+        }
     result = await AutoTurnService(repo).advance_player_action(
         str(action["id"]),
         director=create_kp_orchestrator(repo, settings, request),

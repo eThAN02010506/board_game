@@ -34,7 +34,10 @@ export default defineConfig({
       cwd: "../..",
       env: {
         AI_KP_BACKUP_ROOT: ".playwright/backups",
+        AI_KP_CORS_ORIGINS: frontendUrl,
         AI_KP_DB_PATH: ".playwright/ai-kp.sqlite3",
+        AI_KP_LLM_BASE_URL: "http://127.0.0.1:9/v1",
+        AI_KP_LLM_MODEL: "e2e-unavailable-model",
         AI_KP_MAP_ASSET_ROOT: ".playwright/map-assets",
         AI_KP_MODULE_ASSET_ROOT: ".playwright/module-assets",
         AI_KP_RULEBOOK_INDEX_ROOT: ".playwright/rag",

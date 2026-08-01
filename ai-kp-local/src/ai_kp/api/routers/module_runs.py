@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ai_kp.api.authz import require_approved_pc_binding, require_campaign_role
+from ai_kp.api.auto_kp import player_auto_kp_job
 from ai_kp.api.dependencies import get_app_settings, get_identity, get_repo
 from ai_kp.api.llm import create_kp_orchestrator
 from ai_kp.api.schemas import (
@@ -79,8 +80,16 @@ def list_auto_kp_jobs(
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> list[dict]:
-    require_campaign_role(identity, campaign_id, ("kp",))
-    return repo.list_auto_kp_jobs(campaign_id, status=status, limit=limit)
+    require_campaign_role(identity, campaign_id)
+    if identity.role == "kp":
+        return repo.list_auto_kp_jobs(campaign_id, status=status, limit=limit)
+    jobs = repo.list_player_auto_kp_jobs(
+        campaign_id,
+        identity.member_id,
+        status=status,
+        limit=limit,
+    )
+    return [player_auto_kp_job(job) for job in jobs]
 
 
 @router.post("/campaigns/{campaign_id}/auto-kp/jobs")

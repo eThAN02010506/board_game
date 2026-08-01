@@ -37,17 +37,20 @@ class AutoKpJobRepository(SQLiteRepository):
         run_id: str | None = None,
         payload: dict[str, Any] | None = None,
         max_attempts: int = 3,
+        delay_seconds: int = 0,
     ) -> dict:
         self._validate_job_type(job_type)
         if not 1 <= max_attempts <= 10:
             raise ValueError("max_attempts must be between 1 and 10")
+        if not 0 <= delay_seconds <= 300:
+            raise ValueError("delay_seconds must be between 0 and 300")
         job_id = new_id("autojob")
         self.connection.execute(
             """
             INSERT INTO auto_kp_jobs
               (id, campaign_id, run_id, job_type, resource_id, idempotency_key,
-               max_attempts, payload_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               max_attempts, payload_json, next_run_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(CURRENT_TIMESTAMP, ?))
             ON CONFLICT(campaign_id, idempotency_key) DO NOTHING
             """,
             (
@@ -59,6 +62,7 @@ class AutoKpJobRepository(SQLiteRepository):
                 idempotency_key,
                 max_attempts,
                 json.dumps(payload or {}, ensure_ascii=False, sort_keys=True),
+                f"+{delay_seconds} seconds",
             ),
         )
         return self.get_auto_kp_job_by_key(campaign_id, idempotency_key)
@@ -111,6 +115,64 @@ class AutoKpJobRepository(SQLiteRepository):
             params,
         ).fetchall()
         return [self._decode_auto_kp_job(row) for row in rows]
+
+    def list_player_auto_kp_jobs(
+        self,
+        campaign_id: str,
+        member_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Return only action/check jobs belonging to one authenticated player."""
+
+        if status is not None and status not in AUTO_KP_JOB_STATUSES:
+            raise ValueError("Unsupported Auto KP job status")
+        if not 1 <= limit <= 100:
+            raise ValueError("Invalid Auto KP job limit")
+        filters = [
+            "j.campaign_id = ?",
+            "(pa.member_id = ? OR cpa.member_id = ? OR ppa.member_id = ?)",
+        ]
+        params: list[Any] = [campaign_id, member_id, member_id, member_id]
+        if status is not None:
+            filters.append("j.status = ?")
+            params.append(status)
+        params.append(limit)
+        rows = self.connection.execute(
+            f"""
+            SELECT DISTINCT j.*
+            FROM auto_kp_jobs j
+            LEFT JOIN player_actions pa
+              ON j.job_type = 'player_action' AND pa.id = j.resource_id
+            LEFT JOIN skill_checks sc
+              ON j.job_type = 'check_consequence' AND sc.id = j.resource_id
+            LEFT JOIN player_actions cpa ON cpa.id = sc.player_action_id
+            LEFT JOIN json_each(j.payload_json, '$.action_ids') batch_action
+              ON j.job_type = 'parallel_actions'
+            LEFT JOIN player_actions ppa ON ppa.id = batch_action.value
+            WHERE {" AND ".join(filters)}
+            ORDER BY j.updated_at DESC, j.created_at DESC, j.id DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [self._decode_auto_kp_job(row) for row in rows]
+
+    def cancel_auto_kp_job(self, job_id: str) -> dict:
+        job = self.get_auto_kp_job(job_id)
+        if job["status"] not in {"queued", "retry_wait"}:
+            raise ValueError("Only queued or waiting-retry Auto KP jobs can be cancelled")
+        self.connection.execute(
+            """
+            UPDATE auto_kp_jobs
+            SET status = 'cancelled', stage = 'superseded', next_run_at = NULL,
+                locked_by = NULL, locked_at = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status IN ('queued', 'retry_wait')
+            """,
+            (job_id,),
+        )
+        return self.get_auto_kp_job(job_id)
 
     def claim_next_auto_kp_job(self, *, worker_id: str) -> dict | None:
         if not worker_id.strip():
@@ -221,6 +283,7 @@ class AutoKpJobRepository(SQLiteRepository):
             UPDATE auto_kp_jobs
             SET status = 'queued', stage = 'queued', next_run_at = NULL,
                 locked_by = NULL, locked_at = NULL, last_error = NULL,
+                attempt_count = 0,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
@@ -229,7 +292,7 @@ class AutoKpJobRepository(SQLiteRepository):
         return self.get_auto_kp_job(job_id)
 
     def recover_stale_auto_kp_jobs(self) -> int:
-        cursor = self.connection.execute(
+        retryable = self.connection.execute(
             """
             UPDATE auto_kp_jobs
             SET status = 'retry_wait',
@@ -244,7 +307,22 @@ class AutoKpJobRepository(SQLiteRepository):
               AND attempt_count < max_attempts
             """
         )
-        return int(cursor.rowcount)
+        exhausted = self.connection.execute(
+            """
+            UPDATE auto_kp_jobs
+            SET status = 'failed',
+                stage = 'failed',
+                locked_by = NULL,
+                locked_at = NULL,
+                next_run_at = NULL,
+                last_error = 'Recovered stale Auto KP job after retry limit',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE status = 'running'
+              AND locked_at <= datetime(CURRENT_TIMESTAMP, '-10 minutes')
+              AND attempt_count >= max_attempts
+            """
+        )
+        return int(retryable.rowcount) + int(exhausted.rowcount)
 
     def _decode_auto_kp_job(self, row: Any) -> dict:
         result = row_to_dict(row)

@@ -3,6 +3,7 @@ import type { Dispatch, FormEventHandler, SetStateAction } from "react";
 
 import type {
   AuthIdentity,
+  AutoKpJob,
   Campaign,
   CampaignInvestigator,
   ContextAssembly,
@@ -62,6 +63,7 @@ type CommonPlayProps = {
 
 type ActionDeskProps = {
   autoKpEnabled: boolean;
+  autoKpJobs: AutoKpJob[];
   onAutoKpEnabledChange: (value: boolean) => void;
   onCreateProposal: () => void;
   onGenerateAiProposal: () => void;
@@ -303,6 +305,7 @@ function ActionDesk(props: CommonPlayProps & ActionDeskProps) {
       <GameplayWorkbench campaign={props.activeCampaign} identity={props.authIdentity} />
       <ActionPanel
         autoKpEnabled={props.autoKpEnabled}
+        autoKpJobs={props.autoKpJobs}
         identity={props.authIdentity}
         loading={props.loading}
         onAutoKpEnabledChange={props.onAutoKpEnabledChange}

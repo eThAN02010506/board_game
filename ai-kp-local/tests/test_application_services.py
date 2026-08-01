@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from ai_kp.application.auto_turn_service import AutoTurnService
-from ai_kp.application.errors import KpSessionEndedError
+from ai_kp.application.errors import ConflictError, KpSessionEndedError
 from ai_kp.application.map_service import (
     GenerateMapCommand,
     MapService,
@@ -308,6 +308,69 @@ class ParallelActionSettlementServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AutoTurnServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_auto_turn_does_not_bypass_safety_pause_with_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "auto-turn-paused.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("Auto turn paused")
+                session = SessionService(repo).create(campaign["id"])
+                module = repo.create_module(
+                    campaign["id"],
+                    "暂停模组",
+                    [
+                        ModuleChunk(
+                            title="入口",
+                            text="门厅里很安静。",
+                            visibility="kp",
+                            order_index=0,
+                        )
+                    ],
+                    source_type="plaintext",
+                )
+                run = repo.start_campaign_module_run(
+                    campaign_id=campaign["id"],
+                    module_id=module["id"],
+                    current_scene_key="entry",
+                    active_spoiler_tags=[],
+                    state={},
+                    started_by_member_id=session["member"]["id"],
+                )
+                run = repo.set_module_run_automation_level(
+                    run["id"],
+                    expected_version=run["version"],
+                    level="ai_kp",
+                    reason="no-KP safety test",
+                    member_id=session["member"]["id"],
+                )
+                repo.set_module_run_control(
+                    run["id"],
+                    expected_version=run["version"],
+                    mode="safety_paused",
+                    reason="safety test",
+                    member_id=session["member"]["id"],
+                )
+                joined = SessionService(repo).join(
+                    session["join_code"],
+                    display_name="Player",
+                )
+                player_identity = repo.authenticate_access_token(joined["access_token"])
+                assert player_identity is not None
+                action = TurnService(repo).submit_player_action(
+                    player_identity,
+                    action_text="I inspect the entry hall.",
+                    client_action_id="auto-action-paused-001",
+                )
+
+                with self.assertRaisesRegex(ConflictError, "safety_paused"):
+                    await AutoTurnService(repo).advance_player_action(
+                        action["id"],
+                        director=FailingTurnDirector(),
+                        source_model="should-not-call",
+                    )
+
+                self.assertEqual(repo.get_player_action(action["id"])["status"], "submitted")
+                self.assertEqual(repo.list_turn_proposals(campaign["id"]), [])
+
     async def test_auto_turn_conservative_mode_waits_for_human_kp(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             with db_session(Path(tmpdir) / "auto-turn-conservative.sqlite3") as connection:

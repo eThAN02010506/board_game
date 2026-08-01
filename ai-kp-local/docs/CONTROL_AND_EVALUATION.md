@@ -28,6 +28,16 @@ Automation strength changes are KP-only, version-checked and audited in
 `module_run_automation_events`. The control mode remains the hard safety gate: if the run is
 `human_kp` or `safety_paused`, raising automation strength does not reopen model-backed progression.
 
+Player-side automatic progression uses the durable `auto_kp_jobs` queue. Action submission and
+resolved-check HTTP requests return immediately; a local worker owns model latency, bounded retry,
+restart recovery and terminal failure recording. A two-second collection window combines submitted
+actions from the same session into one parallel settlement and marks superseded single-action jobs
+as cancelled. Players can query only the status projection for jobs containing their own actions;
+payloads, model errors and KP-only results remain private. Model connection or structured-output
+failures may use a no-world-side-effect fallback, but control conflicts and safety pauses are never
+converted into an auto-approved fallback. A single action classified as a current `world_gap` is
+routed through the existing world-expansion policy and is resolved only after safe materialization.
+
 ## Player handouts
 
 `campaign_handouts` stores draft, revealed or withdrawn handouts. KP may pin and link a handout to

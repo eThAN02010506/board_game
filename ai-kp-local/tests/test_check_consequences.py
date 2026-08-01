@@ -225,6 +225,7 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
         ones: int,
         tens: int,
         auto_advance: bool = False,
+        background: bool = False,
         headers: dict[str, str] | None = None,
     ) -> dict:
         response = await self.client.post(
@@ -235,6 +236,7 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
                 "ones_digit": ones,
                 "tens_digits": [tens],
                 "auto_advance": auto_advance,
+                "background": background,
             },
         )
         self.assertEqual(response.status_code, 200, response.text)
@@ -352,6 +354,54 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["proposal"]["status"], "approved")
         self.assertEqual(result["proposal"]["proposal_kind"], "check_consequence")
         self.assertEqual(fake_llm.calls, 1)
+
+    async def test_player_action_and_check_can_use_durable_background_queue(self) -> None:
+        action_response = await self.client.post(
+            f"/campaigns/{self.campaign['id']}/actions",
+            headers=self.player_headers,
+            json={
+                "action_text": "我先确认走廊是否安全。",
+                "client_action_id": "background-action-001",
+                "auto_advance": True,
+                "background": True,
+            },
+        )
+        self.assertEqual(action_response.status_code, 200, action_response.text)
+        queued_action = action_response.json()
+        self.assertEqual(queued_action["status"], "queued")
+        self.assertEqual(queued_action["job"]["job_type"], "player_action")
+
+        _action, _origin, check = await self.prepare_check()
+        queued_check = await self.resolve_check(
+            check["id"],
+            ones=4,
+            tens=2,
+            auto_advance=True,
+            background=True,
+        )
+        self.assertEqual(queued_check["status"], "queued")
+        self.assertEqual(queued_check["job"]["job_type"], "check_consequence")
+
+        player_jobs_response = await self.client.get(
+            f"/campaigns/{self.campaign['id']}/auto-kp/jobs",
+            headers=self.player_headers,
+        )
+        self.assertEqual(player_jobs_response.status_code, 200)
+        player_jobs = player_jobs_response.json()
+        self.assertEqual(
+            {job["job_type"] for job in player_jobs},
+            {"player_action", "check_consequence"},
+        )
+        self.assertTrue(all("payload" not in job for job in player_jobs))
+        self.assertTrue(all("result" not in job for job in player_jobs))
+        self.assertTrue(all("last_error" not in job for job in player_jobs))
+
+        kp_jobs_response = await self.client.get(
+            f"/campaigns/{self.campaign['id']}/auto-kp/jobs",
+            headers=self.kp_headers,
+        )
+        self.assertEqual(kp_jobs_response.status_code, 200)
+        self.assertTrue(all("payload" in job for job in kp_jobs_response.json()))
 
     async def test_override_or_push_makes_an_old_draft_stale_without_side_effects(self) -> None:
         action, _origin, check = await self.prepare_check()

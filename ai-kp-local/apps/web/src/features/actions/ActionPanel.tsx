@@ -1,5 +1,5 @@
 import { Brain, MessageSquare, RefreshCw, Send } from "lucide-react";
-import type { AuthIdentity, PlayerActionRecord } from "../../api/types";
+import type { AuthIdentity, AutoKpJob, PlayerActionRecord } from "../../api/types";
 import { statusLabel } from "../../ui/statusLabels";
 
 type Props = {
@@ -10,6 +10,7 @@ type Props = {
   playerActions: PlayerActionRecord[];
   selectedPlayerActionId: string;
   autoKpEnabled: boolean;
+  autoKpJobs: AutoKpJob[];
   onPlayerActionChange: (value: string) => void;
   onProposalTextChange: (value: string) => void;
   onAutoKpEnabledChange: (value: boolean) => void;
@@ -61,8 +62,24 @@ export function ActionPanel(props: Props) {
             type="button"
           >
             <Send size={16} />
-            {props.autoKpEnabled ? "提交并自动推进" : "提交给 KP"}
+            {props.autoKpEnabled ? "提交并后台推进" : "提交给 KP"}
           </button>
+          {props.autoKpJobs.length > 0 && (
+            <div aria-label="自动 KP 任务" className="auto-kp-player-status">
+              <strong>自动 KP 状态</strong>
+              <ul className="module-job-list">
+                {props.autoKpJobs.slice(0, 3).map((job) => (
+                  <li className={`module-job ${job.status}`} key={job.id}>
+                    <div>
+                      <strong>{job.job_type === "check_consequence" ? "检定后果" : "玩家行动"}</strong>
+                      <span>{job.status} · {job.stage}</span>
+                    </div>
+                    <small>尝试 {job.attempt_count}/{job.max_attempts}</small>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </>
       )}
       {props.identity?.role === "kp" && (

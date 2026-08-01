@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AuthIdentity, PlayerActionRecord } from "../../api/types";
+import type { AuthIdentity, AutoKpJob, PlayerActionRecord } from "../../api/types";
 import { ActionPanel } from "./ActionPanel";
 
 const kpIdentity: AuthIdentity = {
@@ -49,7 +49,11 @@ const actions: PlayerActionRecord[] = [
   }
 ];
 
-function renderPanel(identity: AuthIdentity | null, loading = false) {
+function renderPanel(
+  identity: AuthIdentity | null,
+  loading = false,
+  autoKpJobs: AutoKpJob[] = []
+) {
   const callbacks = {
     onPlayerActionChange: vi.fn(),
     onProposalTextChange: vi.fn(),
@@ -71,6 +75,7 @@ function renderPanel(identity: AuthIdentity | null, loading = false) {
       proposalText=""
       selectedPlayerActionId="action_submitted"
       autoKpEnabled
+      autoKpJobs={autoKpJobs}
       {...callbacks}
     />
   );
@@ -87,7 +92,7 @@ describe("ActionPanel", () => {
       target: { value: "查看门锁是否有撬动痕迹" }
     });
     fireEvent.click(screen.getByRole("button", { name: "检索记忆" }));
-    fireEvent.click(screen.getByRole("button", { name: "提交并自动推进" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交并后台推进" }));
 
     expect(onPlayerActionChange).toHaveBeenCalledWith("查看门锁是否有撬动痕迹");
     expect(onSearchMemory).toHaveBeenCalledTimes(1);
@@ -102,6 +107,28 @@ describe("ActionPanel", () => {
     fireEvent.click(screen.getByLabelText("AI KP 自动推进"));
 
     expect(onAutoKpEnabledChange).toHaveBeenCalledWith(false);
+  });
+
+  it("shows the player's durable Auto KP progress", () => {
+    renderPanel(playerIdentity, false, [
+      {
+        id: "job_action",
+        campaign_id: "campaign_test",
+        run_id: null,
+        job_type: "player_action",
+        resource_id: "action_submitted",
+        status: "retry_wait",
+        stage: "waiting_retry",
+        attempt_count: 1,
+        max_attempts: 3,
+        created_at: "2026-08-01 10:00:00",
+        updated_at: "2026-08-01 10:00:01"
+      }
+    ]);
+
+    expect(screen.getByLabelText("自动 KP 任务")).toHaveTextContent(
+      "玩家行动retry_wait · waiting_retry尝试 1/3"
+    );
   });
 
   it("lets a KP select only submitted actions and protects AI generation while loading", () => {

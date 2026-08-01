@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from ai_kp.api import main as compatibility_main
 from ai_kp.application.world_service import WorldService
 from ai_kp.bootstrap.settings import Settings
+from ai_kp.infrastructure.database.auto_kp_jobs import AutoKpJobRepository
 from ai_kp.infrastructure.database.character_timelines import CharacterTimelineRepository
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
 from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
@@ -455,6 +456,7 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
 def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     assert Repository.__bases__ == (
         WorldRepository,
+        AutoKpJobRepository,
         EvaluationRepository,
         FactRepository,
         HandoutRepository,

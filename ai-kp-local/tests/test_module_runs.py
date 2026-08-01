@@ -471,6 +471,7 @@ def test_auto_kp_jobs_are_durable_claimable_and_retryable(tmp_path: Path) -> Non
         assert waiting["status"] == "retry_wait"
         retried = repo.retry_auto_kp_job(waiting["id"])
         assert retried["status"] == "queued"
+        assert retried["attempt_count"] == 0
         claimed_again = repo.claim_next_auto_kp_job(worker_id="worker-2")
         assert claimed_again is not None
         done = repo.complete_auto_kp_job(
@@ -480,6 +481,24 @@ def test_auto_kp_jobs_are_durable_claimable_and_retryable(tmp_path: Path) -> Non
         )
         assert done["status"] == "succeeded"
         assert done["result"] == {"status": "completed"}
+
+        exhausted = repo.enqueue_auto_kp_job(
+            campaign_id=campaign["id"],
+            job_type="player_action",
+            resource_id="action_2",
+            idempotency_key="auto-action-exhausted-0001",
+            max_attempts=1,
+        )
+        exhausted_claim = repo.claim_next_auto_kp_job(worker_id="worker-crashed")
+        assert exhausted_claim is not None
+        connection.execute(
+            "UPDATE auto_kp_jobs SET locked_at = datetime(CURRENT_TIMESTAMP, '-11 minutes') WHERE id = ?",
+            (exhausted["id"],),
+        )
+        assert repo.recover_stale_auto_kp_jobs() == 1
+        recovered_exhausted = repo.get_auto_kp_job(exhausted["id"])
+        assert recovered_exhausted["status"] == "failed"
+        assert recovered_exhausted["stage"] == "failed"
     finally:
         connection.close()
 

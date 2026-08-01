@@ -7,7 +7,7 @@ from ai_kp.application.check_consequence_service import (
     CheckConsequenceService,
     GenerateCheckConsequenceCommand,
 )
-from ai_kp.application.errors import ApplicationError, KpSessionEndedError
+from ai_kp.application.errors import UpstreamServiceError
 from ai_kp.application.ports.director import CheckConsequenceDirector, KpDirector
 from ai_kp.application.ports.repositories import TurnStore
 from ai_kp.application.turn_service import KpTurnCommand, ManualProposalCommand, TurnService
@@ -26,13 +26,9 @@ AutoTurnStatus = Literal[
 ]
 AutomationLevel = Literal["conservative", "balanced", "ai_kp"]
 RECOVERABLE_AUTO_TURN_ERRORS = (
-    ApplicationError,
-    KpSessionEndedError,
-    KeyError,
-    PermissionError,
     RuntimeError,
     StructuredOutputError,
-    ValueError,
+    UpstreamServiceError,
 )
 
 
