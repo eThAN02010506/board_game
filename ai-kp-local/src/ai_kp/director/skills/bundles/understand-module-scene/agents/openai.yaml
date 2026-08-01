@@ -1,0 +1,4 @@
+interface:
+  display_name: "Understand Module Scene"
+  short_description: "Interpret visible module scenes and clue paths"
+  default_prompt: "Use $understand-module-scene to interpret the visible module scene without revealing hidden content."

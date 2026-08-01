@@ -7,6 +7,18 @@ from ai_kp.director.skills.contracts import AiSkillManifest
 
 _SKILLS = (
     AiSkillManifest(
+        skill_id="platform.module_scene_understanding",
+        version="1.0.0",
+        display_name="模组场景理解",
+        category="module_understanding",
+        description="解析可见场景、锚点、线索依赖、剧透边界与替代调查路径。",
+        input_schema_version="turn-context.v1",
+        output_schema_version="module-scene-interpretation.v1",
+        allowed_tools=("context.read",),
+        source_requirements=("visible_module", "confirmed_event_state"),
+        bundle_name="understand-module-scene",
+    ),
+    AiSkillManifest(
         skill_id="platform.turn_proposal",
         version="1.0.0",
         display_name="行动理解与场景提案",
@@ -58,13 +70,13 @@ _SKILLS = (
         skill_id="platform.check_consequence_narration",
         version="1.0.0",
         display_name="检定后果叙事",
-        category="scene_direction",
+        category="consequence_narration",
         description="根据已验证的规则结果提出后果叙事，不重新解释或改写骰值。",
         input_schema_version="verified-check-batch.v1",
         output_schema_version="kp-turn-output.v1",
         allowed_tools=("context.read", "proposal.create"),
         source_requirements=("verified_check_result", "campaign_context"),
-        bundle_name="direct-scene",
+        bundle_name="narrate-check-consequence",
     ),
     AiSkillManifest(
         skill_id="platform.world_expansion",
@@ -88,6 +100,7 @@ _SKILLS = (
         output_schema_version="session-recap-output.v1",
         allowed_tools=("context.read", "proposal.create"),
         source_requirements=("frozen_event_window",),
+        bundle_name="curate-session-memory",
     ),
 )
 

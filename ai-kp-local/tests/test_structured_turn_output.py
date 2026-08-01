@@ -147,6 +147,7 @@ class StructuredTurnOutputTests(unittest.IsolatedAsyncioTestCase):
                     result.skill_ids,
                     (
                         "platform.turn_proposal",
+                        "platform.module_scene_understanding",
                         "platform.npc_portrayal",
                         "platform.scene_direction",
                         "platform.output_safety_review",
@@ -154,6 +155,10 @@ class StructuredTurnOutputTests(unittest.IsolatedAsyncioTestCase):
                 )
                 system_prompt = llm.calls[0][0][0].content
                 self.assertIn("[AI Skill: platform.turn_proposal@1.0.0", system_prompt)
+                self.assertIn(
+                    "[AI Skill: platform.module_scene_understanding@1.0.0",
+                    system_prompt,
+                )
                 self.assertIn("[AI Skill: platform.npc_portrayal@1.0.0", system_prompt)
                 self.assertIn("[AI Skill: platform.scene_direction@1.0.0", system_prompt)
                 self.assertIn("[AI Skill: platform.output_safety_review@1.0.0", system_prompt)

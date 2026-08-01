@@ -34,6 +34,7 @@ CHECK_CONSEQUENCE_CONTEXT_BUDGET = 12000
 OutputT = TypeVar("OutputT")
 PLAYER_ACTION_SKILLS = (
     "platform.turn_proposal",
+    "platform.module_scene_understanding",
     "platform.npc_portrayal",
     "platform.scene_direction",
     "platform.output_safety_review",
@@ -44,6 +45,7 @@ CHECK_CONSEQUENCE_SKILLS = (
 )
 WORLD_EXPANSION_SKILLS = (
     "platform.world_expansion",
+    "platform.module_scene_understanding",
     "platform.output_safety_review",
 )
 
@@ -207,7 +209,10 @@ class KpOrchestrator:
         skills = resolve_ai_skills(("platform.session_recap",))
         return await self._complete_structured(
             str(snapshot["campaign_id"]),
-            build_session_recap_context(snapshot),
+            build_session_recap_context(
+                snapshot,
+                skill_instructions=compose_ai_skill_instructions(skills),
+            ),
             parse_session_recap_output,
             skills=skills,
         )

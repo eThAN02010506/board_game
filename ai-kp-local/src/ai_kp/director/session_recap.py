@@ -75,12 +75,19 @@ def parse_session_recap_output(raw: str) -> SessionRecapOutput:
         raise StructuredOutputError(str(exc)) from exc
 
 
-def build_session_recap_context(snapshot: dict) -> ContextAssembly:
+def build_session_recap_context(
+    snapshot: dict,
+    *,
+    skill_instructions: str = "",
+) -> ContextAssembly:
     content = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+    system_content = SESSION_RECAP_INSTRUCTIONS
+    if skill_instructions:
+        system_content = f"{system_content}\n\n{skill_instructions}"
     messages = [
         {
             "role": "system",
-            "content": SESSION_RECAP_INSTRUCTIONS,
+            "content": system_content,
         },
         {
             "role": "user",

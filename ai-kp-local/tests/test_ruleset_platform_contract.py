@@ -110,6 +110,7 @@ def test_ai_skills_are_explicit_proposal_only_contracts() -> None:
     skills = list_ai_skills()
 
     assert {item["skill_id"] for item in skills} == {
+        "platform.module_scene_understanding",
         "platform.turn_proposal",
         "platform.npc_portrayal",
         "platform.scene_direction",

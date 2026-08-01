@@ -18,9 +18,11 @@ The backend has explicit composition, transport, application, domain, ruleset, a
   Skills declare source requirements and logical tool access but cannot import persistence,
   delivery or concrete ruleset code. Packaged `bundles/<name>/SKILL.md` files are UTF-8, size-
   bounded, allow-listed and content-hashed; their UI metadata is shipped in the wheel. Player
-  actions compose action understanding, NPC portrayal, scene direction and safety review into one
-  model call. Check consequences and world expansion use smaller compositions. The context budget
-  accounts for every injected bundle, and proposal audit actions record each Skill ID and version.
+  actions compose action understanding, visible-module scene interpretation, NPC portrayal, scene
+  direction and safety review into one model call. Check consequences use a dedicated immutable-
+  result narration bundle; world expansion reuses module-scene interpretation; session recap uses
+  source-bound memory curation. The context budget accounts for every injected bundle, and proposal
+  audit actions record each Skill ID and version.
 - `src/ai_kp/infrastructure/database/` owns SQLite mechanics, schema, ordered migrations, and feature repositories. Its `Repository` facade intentionally supplies one shared transaction boundary to current application services.
 - `src/ai_kp/infrastructure/{knowledge,llm,images,modules,realtime,security}/` owns external and persistence adapters. These layers may depend inward on domain contracts; domain packages do not depend on these adapters.
 - `src/ai_kp/application/realtime/` owns the authenticated connection lifecycle and pure wire-message

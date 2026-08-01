@@ -1,0 +1,4 @@
+interface:
+  display_name: "Narrate Check Consequence"
+  short_description: "Narrate verified check outcomes without reruling"
+  default_prompt: "Use $narrate-check-consequence to narrate consequences from a verified check result."

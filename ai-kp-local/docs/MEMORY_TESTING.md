@@ -44,6 +44,8 @@ Use a fixed fixture campaign such as `雾港 1928` to test memory behavior after
     return HTTP 409.
 24. Runtime isolation: a new campaign initializes HP, SAN, MP and Luck from its approved revision,
     never from another campaign's damaged runtime state.
+25. Recap Skill composition: the frozen snapshot is paired with the versioned memory-curation
+    bundle in the same bounded model request; the Skill cannot persist or approve a candidate.
 
 ## Real Case Test
 

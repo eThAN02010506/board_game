@@ -5,6 +5,7 @@ import pytest
 from ai_kp.core.db import db_session
 from ai_kp.core.repository import Repository
 from ai_kp.director.context_builder import ContextBuilder
+from ai_kp.director.session_recap import build_session_recap_context
 from ai_kp.director.skills import (
     compose_ai_skill_instructions,
     list_ai_skills,
@@ -13,10 +14,13 @@ from ai_kp.director.skills import (
 from ai_kp.director.skills.bundles import load_ai_skill_bundle
 
 RUNTIME_BUNDLES = (
+    "understand-module-scene",
     "understand-player-action",
     "portray-npc",
     "direct-scene",
+    "narrate-check-consequence",
     "expand-world",
+    "curate-session-memory",
     "review-output-safety",
 )
 
@@ -57,10 +61,29 @@ def test_skill_composition_is_allow_listed_hashed_and_deduplicated() -> None:
     assert instructions.count("sha256=") == 4
     assert "guaranteed safe" in instructions
 
-    shared_bundle = resolve_ai_skills(
-        ("platform.scene_direction", "platform.check_consequence_narration")
+    consequence = compose_ai_skill_instructions(
+        resolve_ai_skills(("platform.check_consequence_narration",))
     )
-    assert compose_ai_skill_instructions(shared_bundle).count("# Direct Scene") == 1
+    assert "# Narrate Check Consequence" in consequence
+    assert "# Direct Scene" not in consequence
+
+
+def test_session_recap_context_includes_the_memory_curation_bundle() -> None:
+    skills = resolve_ai_skills(("platform.session_recap",))
+    context = build_session_recap_context(
+        {
+            "campaign_id": "campaign-1",
+            "event_window_hash": "window-hash",
+            "session": {"title": "Frozen session"},
+            "events": [],
+        },
+        skill_instructions=compose_ai_skill_instructions(skills),
+    )
+
+    system_prompt = context.messages[0]["content"]
+    assert "[AI Skill: platform.session_recap@1.0.0" in system_prompt
+    assert "# Curate Session Memory" in system_prompt
+    assert context.token_estimate >= len(system_prompt) // 4
 
 
 def test_skill_resolution_rejects_duplicates_unknown_ids_and_unsafe_paths() -> None:
@@ -78,7 +101,7 @@ def test_skill_catalogue_exposes_bundle_hashes_without_granting_authority() -> N
     catalogue = list_ai_skills()
     bundled = [item for item in catalogue if item["bundle_name"] is not None]
 
-    assert len(bundled) == 6
+    assert len(bundled) == 8
     assert all(len(item["bundle_hash"]) == 64 for item in bundled)
     assert all(item["authority"] == "proposal_only" for item in catalogue)
     assert all("state.write" not in item["allowed_tools"] for item in catalogue)

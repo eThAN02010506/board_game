@@ -281,6 +281,9 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(proposal["proposed_map_moves"], [])
         self.assertEqual(fake_llm.calls, 1)
         self.assertIn("verified_check_batch", str(fake_llm.messages))
+        consequence_prompt = fake_llm.messages[0][0].content
+        self.assertIn("# Narrate Check Consequence", consequence_prompt)
+        self.assertNotIn("# Direct Scene", consequence_prompt)
 
         retry = await self.generate_consequence(check["id"], fake_llm)
         self.assertEqual(retry.status_code, 200, retry.text)

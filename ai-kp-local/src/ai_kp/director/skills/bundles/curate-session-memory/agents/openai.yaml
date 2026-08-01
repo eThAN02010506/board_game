@@ -1,0 +1,4 @@
+interface:
+  display_name: "Curate Session Memory"
+  short_description: "Extract sourced memories from frozen events"
+  default_prompt: "Use $curate-session-memory to extract traceable memory candidates from a frozen session window."
