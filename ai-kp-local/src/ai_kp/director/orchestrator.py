@@ -20,7 +20,10 @@ from ai_kp.director.session_recap import (
     build_session_recap_context,
     parse_session_recap_output,
 )
-from ai_kp.director.skills import compose_ai_skill_instructions, resolve_ai_skills
+from ai_kp.director.skills import (
+    compose_ai_skill_instructions,
+    resolve_ai_skill_composition,
+)
 from ai_kp.director.skills.contracts import AiSkillManifest
 from ai_kp.director.turn_output import KpTurnOutput, StructuredOutputError, parse_kp_turn_output
 from ai_kp.director.world_expansion import (
@@ -32,22 +35,6 @@ from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
 CHECK_CONSEQUENCE_CONTEXT_BUDGET = 12000
 OutputT = TypeVar("OutputT")
-PLAYER_ACTION_SKILLS = (
-    "platform.turn_proposal",
-    "platform.module_scene_understanding",
-    "platform.npc_portrayal",
-    "platform.scene_direction",
-    "platform.output_safety_review",
-)
-CHECK_CONSEQUENCE_SKILLS = (
-    "platform.check_consequence_narration",
-    "platform.output_safety_review",
-)
-WORLD_EXPANSION_SKILLS = (
-    "platform.world_expansion",
-    "platform.module_scene_understanding",
-    "platform.output_safety_review",
-)
 
 
 class AiCallTracker(Protocol):
@@ -86,7 +73,7 @@ class KpOrchestrator:
         profession_hint: str | None = None,
         active_spoiler_tags: tuple[str, ...] = (),
     ) -> KpTurnResult[KpTurnOutput]:
-        skills = resolve_ai_skills(PLAYER_ACTION_SKILLS)
+        skills = resolve_ai_skill_composition("player_action")
         context = ContextBuilder(self.connection).build(
             campaign_id=campaign_id,
             player_action=player_action,
@@ -115,20 +102,14 @@ class KpOrchestrator:
         location: str | None = None,
         map_id: str | None = None,
     ) -> KpTurnResult[KpTurnOutput]:
-        skills = resolve_ai_skills(CHECK_CONSEQUENCE_SKILLS)
+        skills = resolve_ai_skill_composition("check_consequence")
         hidden_batch = check_snapshot.get("has_hidden_checks") is True
-        snapshot_source = {
-            "kind": "verified_check_batch",
-            "id": str(check_snapshot["result_fingerprint"]),
-            "label": "已验证的确定性检定结果",
-            "content": json.dumps(
-                check_snapshot,
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
-            "visibility": "kp",
-            "required": True,
-        }
+        snapshot_source = _snapshot_source(
+            kind="verified_check_batch",
+            source_id=str(check_snapshot["result_fingerprint"]),
+            label="已验证的确定性检定结果",
+            snapshot=check_snapshot,
+        )
         context = ContextBuilder(
             self.connection,
             max_context_tokens=CHECK_CONSEQUENCE_CONTEXT_BUDGET,
@@ -170,19 +151,13 @@ class KpOrchestrator:
         map_id: str | None = None,
         active_spoiler_tags: tuple[str, ...] = (),
     ) -> KpTurnResult[WorldExpansionOutput]:
-        skills = resolve_ai_skills(WORLD_EXPANSION_SKILLS)
-        analysis_source = {
-            "kind": "scene_director_analysis",
-            "id": str(analysis_snapshot["fingerprint"]),
-            "label": "确定性世界缺口分析",
-            "content": json.dumps(
-                analysis_snapshot,
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
-            "visibility": "kp",
-            "required": True,
-        }
+        skills = resolve_ai_skill_composition("world_expansion")
+        analysis_source = _snapshot_source(
+            kind="scene_director_analysis",
+            source_id=str(analysis_snapshot["fingerprint"]),
+            label="确定性世界缺口分析",
+            snapshot=analysis_snapshot,
+        )
         context = ContextBuilder(self.connection).build(
             campaign_id=campaign_id,
             player_action=player_intent,
@@ -206,7 +181,7 @@ class KpOrchestrator:
         self,
         snapshot: dict,
     ) -> KpTurnResult[SessionRecapOutput]:
-        skills = resolve_ai_skills(("platform.session_recap",))
+        skills = resolve_ai_skill_composition("session_recap")
         return await self._complete_structured(
             str(snapshot["campaign_id"]),
             build_session_recap_context(
@@ -250,23 +225,13 @@ class KpOrchestrator:
         *,
         skills: tuple[AiSkillManifest, ...],
     ) -> KpTurnResult[OutputT]:
-        primary = skills[0]
-        skill_ids = tuple(skill.skill_id for skill in skills)
-        skill_versions = tuple(skill.version for skill in skills)
         request_messages = [
             ChatMessage(role=item["role"], content=item["content"]) for item in context.messages
         ]
         raw_output = await self.llm.complete(request_messages, temperature=0.3)
         try:
             output = parser(raw_output)
-            return KpTurnResult(
-                output=output,
-                context=context,
-                skill_id=primary.skill_id,
-                skill_version=primary.version,
-                skill_ids=skill_ids,
-                skill_versions=skill_versions,
-            )
+            return _turn_result(output, context, skills)
         except StructuredOutputError as first_error:
             repair_instruction = (
                 "上一次输出未通过 JSON 结构校验。"
@@ -294,12 +259,40 @@ class KpOrchestrator:
                 messages=audited_messages,
                 token_estimate=sum(estimate_tokens(item["content"]) for item in audited_messages),
             )
-            return KpTurnResult(
-                output=output,
-                context=audited_context,
-                repaired=True,
-                skill_id=primary.skill_id,
-                skill_version=primary.version,
-                skill_ids=skill_ids,
-                skill_versions=skill_versions,
-            )
+            return _turn_result(output, audited_context, skills, repaired=True)
+
+
+def _snapshot_source(
+    *,
+    kind: str,
+    source_id: str,
+    label: str,
+    snapshot: dict,
+) -> dict:
+    return {
+        "kind": kind,
+        "id": source_id,
+        "label": label,
+        "content": json.dumps(snapshot, ensure_ascii=False, sort_keys=True),
+        "visibility": "kp",
+        "required": True,
+    }
+
+
+def _turn_result(
+    output: OutputT,
+    context: ContextAssembly,
+    skills: tuple[AiSkillManifest, ...],
+    *,
+    repaired: bool = False,
+) -> KpTurnResult[OutputT]:
+    primary = skills[0]
+    return KpTurnResult(
+        output=output,
+        context=context,
+        repaired=repaired,
+        skill_id=primary.skill_id,
+        skill_version=primary.version,
+        skill_ids=tuple(skill.skill_id for skill in skills),
+        skill_versions=tuple(skill.version for skill in skills),
+    )

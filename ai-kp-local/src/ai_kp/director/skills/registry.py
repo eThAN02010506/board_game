@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from ai_kp.director.skills.bundles import load_ai_skill_bundle
 from ai_kp.director.skills.contracts import AiSkillManifest
+
+AiSkillWorkflow = Literal[
+    "player_action",
+    "check_consequence",
+    "world_expansion",
+    "session_recap",
+]
 
 _SKILLS = (
     AiSkillManifest(
@@ -106,6 +115,37 @@ _SKILLS = (
 
 _BY_ID = {skill.skill_id: skill for skill in _SKILLS}
 
+_COMPOSITIONS: dict[AiSkillWorkflow, tuple[str, ...]] = {
+    "player_action": (
+        "platform.turn_proposal",
+        "platform.module_scene_understanding",
+        "platform.npc_portrayal",
+        "platform.scene_direction",
+        "platform.output_safety_review",
+    ),
+    "check_consequence": (
+        "platform.check_consequence_narration",
+        "platform.output_safety_review",
+    ),
+    "world_expansion": (
+        "platform.world_expansion",
+        "platform.module_scene_understanding",
+        "platform.output_safety_review",
+    ),
+    "session_recap": ("platform.session_recap",),
+}
+
+if len(_BY_ID) != len(_SKILLS):
+    raise RuntimeError("AI skill registry contains duplicate skill IDs")
+for workflow, skill_ids in _COMPOSITIONS.items():
+    if len(skill_ids) != len(set(skill_ids)):
+        raise RuntimeError(f"AI skill workflow contains duplicates: {workflow}")
+    if unknown_ids := set(skill_ids).difference(_BY_ID):
+        raise RuntimeError(
+            f"AI skill workflow references unregistered skills: {workflow}: "
+            f"{', '.join(sorted(unknown_ids))}"
+        )
+
 
 def get_ai_skill(skill_id: str) -> AiSkillManifest:
     try:
@@ -146,9 +186,21 @@ def resolve_ai_skills(skill_ids: tuple[str, ...]) -> tuple[AiSkillManifest, ...]
     return tuple(get_ai_skill(skill_id) for skill_id in skill_ids)
 
 
+def resolve_ai_skill_composition(
+    workflow: AiSkillWorkflow,
+) -> tuple[AiSkillManifest, ...]:
+    try:
+        skill_ids = _COMPOSITIONS[workflow]
+    except KeyError as exc:
+        raise ValueError(f"Unknown AI skill workflow: {workflow}") from exc
+    return resolve_ai_skills(skill_ids)
+
+
 __all__ = [
+    "AiSkillWorkflow",
     "compose_ai_skill_instructions",
     "get_ai_skill",
     "list_ai_skills",
+    "resolve_ai_skill_composition",
     "resolve_ai_skills",
 ]

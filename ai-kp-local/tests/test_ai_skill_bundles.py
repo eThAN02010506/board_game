@@ -1,4 +1,5 @@
 from importlib.resources import files
+from typing import cast
 
 import pytest
 
@@ -7,8 +8,10 @@ from ai_kp.core.repository import Repository
 from ai_kp.director.context_builder import ContextBuilder
 from ai_kp.director.session_recap import build_session_recap_context
 from ai_kp.director.skills import (
+    AiSkillWorkflow,
     compose_ai_skill_instructions,
     list_ai_skills,
+    resolve_ai_skill_composition,
     resolve_ai_skills,
 )
 from ai_kp.director.skills.bundles import load_ai_skill_bundle
@@ -95,6 +98,23 @@ def test_skill_resolution_rejects_duplicates_unknown_ids_and_unsafe_paths() -> N
         load_ai_skill_bundle("../outside")
     with pytest.raises(ValueError, match="not installed"):
         load_ai_skill_bundle("missing-skill")
+
+
+def test_workflow_compositions_are_centralized_and_keep_primary_skill_compatibility() -> None:
+    expected_primary: dict[AiSkillWorkflow, str] = {
+        "player_action": "platform.turn_proposal",
+        "check_consequence": "platform.check_consequence_narration",
+        "world_expansion": "platform.world_expansion",
+        "session_recap": "platform.session_recap",
+    }
+
+    for workflow, primary_skill_id in expected_primary.items():
+        composition = resolve_ai_skill_composition(workflow)
+        assert composition[0].skill_id == primary_skill_id
+        assert len(composition) == len({skill.skill_id for skill in composition})
+
+    with pytest.raises(ValueError, match="Unknown AI skill workflow"):
+        resolve_ai_skill_composition(cast(AiSkillWorkflow, "not-a-workflow"))
 
 
 def test_skill_catalogue_exposes_bundle_hashes_without_granting_authority() -> None:

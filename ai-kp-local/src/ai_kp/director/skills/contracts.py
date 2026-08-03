@@ -7,6 +7,7 @@ from typing import Literal
 
 SkillCategory = Literal[
     "action_understanding",
+    "consequence_narration",
     "scene_direction",
     "npc_portrayal",
     "world_expansion",
