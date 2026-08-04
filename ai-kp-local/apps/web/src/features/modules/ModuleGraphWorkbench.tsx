@@ -1,4 +1,4 @@
-import { GitBranch, Link2, Network } from "lucide-react";
+import { GitBranch, Import, Link2, Network } from "lucide-react";
 import { FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { requestJson } from "../../api/client";
@@ -11,8 +11,31 @@ import type {
 
 type Props = {
   moduleId: string;
+  campaignId?: string;
   candidates: ModuleKnowledgeCandidate[];
   onMessage: (message: string) => void;
+};
+
+type ImportPreview = {
+  module_id: string;
+  module_title: string;
+  campaign_id: string;
+  locations: Array<{ module_entity_id: string; name: string; source_candidate_id: string }>;
+  routes: Array<{
+    module_relation_id: string;
+    from_name: string;
+    to_name: string;
+    predicate: string;
+    default_minutes: number;
+  }>;
+  npc_profiles: Array<{
+    npc_entity_id: string;
+    npc_name: string;
+    location_name: string;
+    linked_to_campaign: boolean;
+  }>;
+  time_constraints: Array<{ candidate_id: string; statement: string; years: number[] }>;
+  has_unlinked_npcs: boolean;
 };
 
 const entityTypes = [
@@ -40,7 +63,7 @@ const predicates = [
   ["same_as", "同一实体"]
 ] as const;
 
-export function ModuleGraphWorkbench({ moduleId, candidates, onMessage }: Props) {
+export function ModuleGraphWorkbench({ moduleId, campaignId, candidates, onMessage }: Props) {
   const [graph, setGraph] = useState<{
     moduleId: string;
     entities: ModuleEntity[];
@@ -53,6 +76,16 @@ export function ModuleGraphWorkbench({ moduleId, candidates, onMessage }: Props)
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [entityType, setEntityType] = useState("npc");
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    created_locations: string[];
+    merged_locations: string[];
+    created_routes: string[];
+    skipped_routes: string[];
+    updated_npc_profiles: string[];
+    skipped_npcs: string[];
+  } | null>(null);
   const currentModuleIdRef = useRef(moduleId);
   const moduleScopeEpochRef = useRef(0);
   const graphRequestEpochRef = useRef(0);
@@ -278,6 +311,89 @@ export function ModuleGraphWorkbench({ moduleId, candidates, onMessage }: Props)
 
   if (!moduleId) return null;
 
+  async function loadImportPreview() {
+    if (!campaignId) {
+      onMessage("缺少团上下文，无法预览导入。");
+      return;
+    }
+    const requestedModuleId = moduleId;
+    const scopeEpoch = moduleScopeEpochRef.current;
+    if (!isCurrentModule(requestedModuleId, scopeEpoch)) return;
+    setImportResult(null);
+    setImporting(true);
+    try {
+      const preview = await requestJson<ImportPreview>(
+        `/campaigns/${encodeURIComponent(campaignId)}/modules/${requestedModuleId}/import-preview`
+      );
+      if (isCurrentModule(requestedModuleId, scopeEpoch)) {
+        setImportPreview(preview);
+      }
+    } catch (error) {
+      if (isCurrentModule(requestedModuleId, scopeEpoch)) {
+        onMessage(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (isCurrentModule(requestedModuleId, scopeEpoch)) {
+        setImporting(false);
+      }
+    }
+  }
+
+  async function confirmImport() {
+    if (!campaignId || !importPreview) return;
+    const requestedModuleId = moduleId;
+    const scopeEpoch = moduleScopeEpochRef.current;
+    if (!isCurrentModule(requestedModuleId, scopeEpoch)) return;
+    setImporting(true);
+    try {
+      const result = await requestJson<{
+        import_id: string;
+        created_locations: string[];
+        merged_locations: string[];
+        created_routes: string[];
+        skipped_routes: string[];
+        updated_npc_profiles: string[];
+        skipped_npcs: string[];
+      }>(
+        `/campaigns/${encodeURIComponent(campaignId)}/modules/${requestedModuleId}/import`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            locations: importPreview.locations.map((item) => ({
+              module_entity_id: item.module_entity_id,
+              include: true
+            })),
+            routes: importPreview.routes.map((item) => ({
+              module_relation_id: item.module_relation_id,
+              include: true,
+              travel_minutes: item.default_minutes
+            })),
+            npcs: importPreview.npc_profiles
+              .filter((item) => item.linked_to_campaign)
+              .map((item) => ({
+                module_entity_id: item.npc_entity_id,
+                include: true
+              })),
+            apply_time_constraints: true
+          })
+        }
+      );
+      if (isCurrentModule(requestedModuleId, scopeEpoch)) {
+        setImportResult(result);
+        setImportPreview(null);
+        onMessage("已把已审核模组实体导入团级图谱与 NPC 档案。");
+      }
+    } catch (error) {
+      if (isCurrentModule(requestedModuleId, scopeEpoch)) {
+        onMessage(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      if (isCurrentModule(requestedModuleId, scopeEpoch)) {
+        setImporting(false);
+      }
+    }
+  }
+
   return (
     <section className="page-card module-graph-card">
       <div className="page-intro">
@@ -369,6 +485,105 @@ export function ModuleGraphWorkbench({ moduleId, candidates, onMessage }: Props)
               冲突：{conflict.source_name} {conflict.predicate} {conflict.target_name}
             </span>
           ))}
+        </div>
+      )}
+      {campaignId && (
+        <div className="module-import-panel">
+          <div className="module-import-heading">
+            <div>
+              <p className="eyebrow">来源约束导入</p>
+              <h3>导入已审核实体到团级图谱</h3>
+              <small>只接受已批准来源；未关联本团的 NPC 会被跳过，绝不自动建号。</small>
+            </div>
+            <Import size={20} />
+          </div>
+          <button
+            disabled={importing || !approved.length}
+            onClick={() => void loadImportPreview()}
+            type="button"
+          >
+            {importing ? "处理中…" : "预览可导入项"}
+          </button>
+          {importPreview && (
+            <div className="module-import-preview">
+              <p className="module-import-summary">
+                共 {importPreview.locations.length} 个地点、{importPreview.routes.length} 条路线、
+                {importPreview.npc_profiles.length} 条 NPC 关联
+                {importPreview.has_unlinked_npcs && "（含未关联 NPC）"}。
+              </p>
+              {importPreview.locations.length > 0 && (
+                <div className="module-import-group">
+                  <strong>地点</strong>
+                  <ul>
+                    {importPreview.locations.map((item) => (
+                      <li key={item.module_entity_id}>{item.name}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {importPreview.routes.length > 0 && (
+                <div className="module-import-group">
+                  <strong>路线（默认时间，可后续调整）</strong>
+                  <ul>
+                    {importPreview.routes.map((item) => (
+                      <li key={item.module_relation_id}>
+                        {item.from_name} → {item.to_name}（约 {item.default_minutes} 分钟）
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {importPreview.npc_profiles.length > 0 && (
+                <div className="module-import-group">
+                  <strong>NPC 档案</strong>
+                  <ul>
+                    {importPreview.npc_profiles.map((item) => (
+                      <li key={item.npc_entity_id}>
+                        {item.npc_name} @ {item.location_name}
+                        {!item.linked_to_campaign && (
+                          <small className="module-import-warn">（未关联本团，将跳过）</small>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {importPreview.time_constraints.length > 0 && (
+                <div className="module-import-group">
+                  <strong>年代建议（写入需 KP 复核年份）</strong>
+                  <ul>
+                    {importPreview.time_constraints.map((item) => (
+                      <li key={item.candidate_id}>
+                        {item.statement}（{item.years.join("、")}）
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <button
+                className="primary-button"
+                disabled={importing}
+                onClick={() => void confirmImport()}
+                type="button"
+              >
+                确认导入已审核实体
+              </button>
+            </div>
+          )}
+          {importResult && (
+            <div className="module-import-result">
+              <p>
+                新增地点 {importResult.created_locations.length} 个、合并 {importResult.merged_locations.length} 个；
+                新增路线 {importResult.created_routes.length} 条、跳过 {importResult.skipped_routes.length} 条；
+                更新 NPC 档案 {importResult.updated_npc_profiles.length} 条、跳过未关联 {importResult.skipped_npcs.length} 个。
+              </p>
+              {importResult.skipped_npcs.length > 0 && (
+                <small className="module-import-warn">
+                  未关联 NPC：{importResult.skipped_npcs.join("、")}
+                </small>
+              )}
+            </div>
+          )}
         </div>
       )}
     </section>

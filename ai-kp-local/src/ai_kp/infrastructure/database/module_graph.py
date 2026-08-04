@@ -251,6 +251,87 @@ class ModuleGraphRepository(SQLiteRepository):
             relations.append(relation)
         return entities, relations
 
+    def create_module_campaign_import(
+        self,
+        *,
+        campaign_id: str,
+        module_id: str,
+        created_by_member_id: str,
+    ) -> dict:
+        import_id = new_id("moduleimport")
+        self.connection.execute(
+            """
+            INSERT INTO campaign_module_imports
+              (id, campaign_id, module_id, status, created_by_member_id, applied_at)
+            VALUES (?, ?, ?, 'applied', ?, CURRENT_TIMESTAMP)
+            """,
+            (import_id, campaign_id, module_id, created_by_member_id),
+        )
+        return self.get_module_campaign_import(import_id)
+
+    def create_module_campaign_import_item(self, **values) -> dict:
+        item_id = new_id("moduleimportitem")
+        self.connection.execute(
+            """
+            INSERT INTO campaign_module_import_items
+              (id, import_id, item_kind, module_entity_id, module_relation_id,
+               module_candidate_id, travel_location_id, npc_id, payload_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                item_id,
+                values["import_id"],
+                values["item_kind"],
+                values.get("module_entity_id"),
+                values.get("module_relation_id"),
+                values.get("module_candidate_id"),
+                values.get("travel_location_id"),
+                values.get("npc_id"),
+                values.get("payload_json", "{}"),
+            ),
+        )
+        row = self.connection.execute(
+            "SELECT * FROM campaign_module_import_items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        return row_to_dict(row)
+
+    def get_module_campaign_import(self, import_id: str) -> dict:
+        row = self.connection.execute(
+            "SELECT * FROM campaign_module_imports WHERE id = ?",
+            (import_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Module campaign import not found: {import_id}")
+        return row_to_dict(row)
+
+    def list_module_campaign_imports(self, campaign_id: str) -> list[dict]:
+        rows = self.connection.execute(
+            """
+            SELECT i.*, COUNT(item.id) AS item_count
+            FROM campaign_module_imports i
+            LEFT JOIN campaign_module_import_items item ON item.import_id = i.id
+            WHERE i.campaign_id = ?
+            GROUP BY i.id
+            ORDER BY i.created_at, i.id
+            """,
+            (campaign_id,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            result = row_to_dict(row)
+            items = self.connection.execute(
+                """
+                SELECT * FROM campaign_module_import_items
+                WHERE import_id = ?
+                ORDER BY item_kind, id
+                """,
+                (str(result["id"]),),
+            ).fetchall()
+            result["items"] = [row_to_dict(item) for item in items]
+            results.append(result)
+        return results
+
 
 def _derived_scope_is_current(source: dict, derived: dict, *, label: str) -> bool:
     try:

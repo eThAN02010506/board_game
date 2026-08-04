@@ -73,6 +73,24 @@ class TravelGraphRepository(SQLiteRepository):
         if result.rowcount != 1:
             raise KeyError(f"Travel location not found: {location_id}")
 
+    def find_travel_location_by_normalized_name(
+        self,
+        campaign_id: str,
+        normalized_name: str,
+    ) -> dict | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM campaign_travel_locations
+            WHERE campaign_id = ? AND normalized_name = ?
+            """,
+            (campaign_id, normalized_name),
+        ).fetchone()
+        if row is None:
+            return None
+        result = row_to_dict(row)
+        result["aliases"] = json.loads(result.pop("aliases_json"))
+        return result
+
     def list_travel_routes(self, campaign_id: str) -> list[dict]:
         rows = self.connection.execute(
             """
@@ -129,6 +147,27 @@ class TravelGraphRepository(SQLiteRepository):
             for item in self.list_travel_routes(campaign_id)
             if item["id"] == route_id
         )
+
+    def find_travel_route(
+        self,
+        campaign_id: str,
+        from_location_id: str,
+        to_location_id: str,
+        travel_mode: str,
+    ) -> dict | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM campaign_travel_routes
+            WHERE campaign_id = ? AND from_location_id = ?
+              AND to_location_id = ? AND travel_mode = ?
+            """,
+            (campaign_id, from_location_id, to_location_id, travel_mode),
+        ).fetchone()
+        if row is None:
+            return None
+        result = row_to_dict(row)
+        result["bidirectional"] = bool(result["bidirectional"])
+        return result
 
     def delete_travel_route(self, campaign_id: str, route_id: str) -> None:
         result = self.connection.execute(

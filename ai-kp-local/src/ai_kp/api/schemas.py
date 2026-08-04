@@ -571,6 +571,36 @@ class ModuleReachabilityCheck(BaseModel):
     entry_entity_ids: list[str] = Field(min_length=1, max_length=100)
 
 
+class ModuleImportLocationChoice(BaseModel):
+    module_entity_id: str = Field(min_length=1, max_length=100)
+    include: bool = True
+    aliases: list[str] = Field(default_factory=list, max_length=30)
+
+
+class ModuleImportRouteChoice(BaseModel):
+    module_relation_id: str = Field(min_length=1, max_length=100)
+    include: bool = True
+    travel_minutes: int | None = Field(default=None, ge=1, le=525600)
+    travel_mode: Literal["walk", "drive", "rail", "boat", "flight", "other"] = "other"
+    bidirectional: bool = True
+
+
+class ModuleImportNpcChoice(BaseModel):
+    module_entity_id: str = Field(min_length=1, max_length=100)
+    include: bool = True
+    born_year: int | None = Field(default=None, ge=1, le=9999)
+    died_year: int | None = Field(default=None, ge=1, le=9999)
+    active_from_year: int | None = Field(default=None, ge=1, le=9999)
+    active_until_year: int | None = Field(default=None, ge=1, le=9999)
+
+
+class ModuleImportConfirm(BaseModel):
+    locations: list[ModuleImportLocationChoice] = Field(default_factory=list)
+    routes: list[ModuleImportRouteChoice] = Field(default_factory=list)
+    npcs: list[ModuleImportNpcChoice] = Field(default_factory=list)
+    apply_time_constraints: bool = True
+
+
 class InvestigatorSubmit(BaseModel):
     revision_id: str | None = None
     timeline_branch_id: str | None = Field(default=None, max_length=160)

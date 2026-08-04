@@ -50,6 +50,26 @@ class NpcReappearanceRepository(SQLiteRepository):
         ).fetchone()
         return row is not None
 
+    def list_global_npcs(self) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT id, name FROM npcs ORDER BY name COLLATE NOCASE, id"
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
+    def find_npc_by_name(self, name: str) -> str | None:
+        row = self.connection.execute(
+            "SELECT id FROM npcs WHERE name = ? ORDER BY id LIMIT 1",
+            (name,),
+        ).fetchone()
+        return str(row["id"]) if row is not None else None
+
+    def list_campaign_npc_ids(self, campaign_id: str) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT npc_id FROM campaign_npcs WHERE campaign_id = ?",
+            (campaign_id,),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
     def npc_is_authorized_reappearance(
         self,
         campaign_id: str,

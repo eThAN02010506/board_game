@@ -739,6 +739,7 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
         </div>
       </section>
       <ModuleGraphWorkbench
+        campaignId={campaign?.id}
         candidates={candidates}
         moduleId={selectedModuleId}
         onMessage={setMessage}
