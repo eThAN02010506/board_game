@@ -319,8 +319,8 @@ CAPABILITIES: tuple[Capability, ...] = (
             "预算。候选会解释通过或待复核原因，最终事务会重新检查并追加出场凭据；"
             "独立 NPC 工作台和团级加权地点图谱已提供档案编辑、策略管理及可解释最短"
             "旅行时间；KP 私密暗骰会在确定性门控后按需解析是否出现及合法地点，"
-            "多目的地只计算一次且幂等重试不会重骰。尚缺自动读取模组地点关系的"
-            "候选导入与 NPC 时间线视图。"
+            "多目的地只计算一次且幂等重试不会重骰。已可从已审核模组实体候选导入"
+            "地点/路线与 NPC 档案并保留来源追溯；尚缺 NPC 时间线视图。"
         ),
         dependencies=("character_timeline", "memory_foundation"),
         acceptance=(
@@ -368,7 +368,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         audience="kp",
         summary=(
             "MapSpec revision、规范哈希、布局哈希、图片生成参数与内容寻址文件已经分离并可重启恢复；"
-            "KP 已可验证并保存地点/路线后续 revision；尚缺发布差异预览。"
+            "KP 已可验证并保存地点/路线后续 revision，并预览当前与上次发布的差异。"
         ),
         dependencies=("map_workspace",),
         acceptance=("关闭模型并重启后仍能打开原图，编辑产生新 revision 而不覆盖旧版。",),
@@ -379,7 +379,10 @@ CAPABILITIES: tuple[Capability, ...] = (
         status="partial",
         phase="F4",
         audience="kp",
-        summary="已支持地点/路线新 revision、独立自由多边形雾层、比例继承、删除与显式揭开；尚待发布差异预览、小队级揭示和真人桌面验证。",
+        summary=(
+            "已支持地点/路线新 revision、独立自由多边形雾层、比例继承、删除与显式揭开，"
+            "以及发布差异预览；尚待小队级揭示和真人桌面验证。"
+        ),
         dependencies=("map_workspace",),
         acceptance=("揭示前玩家无法从列表、SVG、移动历史或实时事件推断隐藏地点。",),
     ),

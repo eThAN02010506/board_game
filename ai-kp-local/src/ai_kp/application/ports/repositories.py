@@ -148,6 +148,18 @@ class MapStore(CampaignStore, RealtimeOutbox, Protocol):
 
     def get_map_publish_snapshot(self, map_id: str) -> dict[str, Any]: ...
 
+    def get_current_map_revision(self, map_id: str) -> dict[str, Any] | None: ...
+
+    def get_map_revision(
+        self,
+        map_id: str,
+        revision_id: str,
+    ) -> dict[str, Any] | None: ...
+
+    def get_published_revision_spec(self, map_id: str) -> dict[str, Any] | None: ...
+
+    def record_published_revision(self, map_id: str, revision_id: str) -> None: ...
+
     def is_map_token_player_visible(self, token_id: str) -> bool: ...
 
     def place_map_token(
@@ -285,6 +297,24 @@ class ModuleGraphStore(Protocol):
         module_id: str,
         entry_entity_ids: tuple[str, ...],
     ) -> dict: ...
+
+    def list_module_entities(self, module_id: str) -> list[dict]: ...
+
+    def list_module_relations(self, module_id: str) -> list[dict]: ...
+
+    def create_module_campaign_import(
+        self,
+        *,
+        campaign_id: str,
+        module_id: str,
+        created_by_member_id: str,
+    ) -> dict: ...
+
+    def create_module_campaign_import_item(self, **values) -> dict: ...
+
+    def get_module_campaign_import(self, import_id: str) -> dict: ...
+
+    def list_module_campaign_imports(self, campaign_id: str) -> list[dict]: ...
 
 
 class ModuleRunStore(Protocol):

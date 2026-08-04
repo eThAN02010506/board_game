@@ -398,6 +398,49 @@ class MapRepository:
         result["validation"] = json.loads(result.pop("validation_json"))
         return result
 
+    def get_map_revision(
+        self,
+        map_id: str,
+        revision_id: str,
+    ) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT r.*
+            FROM map_revisions r
+            WHERE r.map_id = ? AND r.id = ?
+            """,
+            (map_id, revision_id),
+        ).fetchone()
+        if row is None:
+            return None
+        result = row_to_dict(row)
+        result["spec"] = json.loads(result.pop("spec_json"))
+        result["validation"] = json.loads(result.pop("validation_json"))
+        return result
+
+    def get_published_revision_spec(self, map_id: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT r.spec_json, r.revision_no
+            FROM maps m
+            JOIN map_revisions r ON r.id = m.published_revision_id
+            WHERE m.id = ?
+            """,
+            (map_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "spec": json.loads(row["spec_json"]),
+            "revision_no": int(row["revision_no"]),
+        }
+
+    def record_published_revision(self, map_id: str, revision_id: str) -> None:
+        self.connection.execute(
+            "UPDATE maps SET published_revision_id = ? WHERE id = ?",
+            (revision_id, map_id),
+        )
+
     def create_map_revision_from_spec(
         self,
         map_id: str,

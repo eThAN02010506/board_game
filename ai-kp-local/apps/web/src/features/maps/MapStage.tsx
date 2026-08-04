@@ -1,5 +1,6 @@
 import {
   CheckCircle2,
+  Diff,
   Image,
   Map,
   Minus,
@@ -11,7 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { requestBlob } from "../../api/client";
+import { requestBlob, requestJson } from "../../api/client";
 import type { MapAsset, Role, SavedMap } from "../../api/types";
 
 type Props = {
@@ -32,6 +33,25 @@ function svgDataUri(svg: string | undefined): string {
   return svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : "";
 }
 
+type MapPublishDiff = {
+  first_publish: boolean;
+  revision: {
+    current_id: string | null;
+    current_no: number | null;
+    published_id: string | null;
+    published_no: number | null;
+  };
+  layout_hash_changed: boolean;
+  locations: { added: ElementChange[]; removed: ElementChange[]; changed: ChangedElement[] };
+  connections: { added: ElementChange[]; removed: ElementChange[]; changed: ChangedElement[] };
+  canvas_changed: boolean;
+  title_changed: boolean;
+  player_visible_changes: ElementChange[];
+};
+
+type ElementChange = { id: string; name: string };
+type ChangedElement = { id: string; name: string; fields: string[] };
+
 export function MapStage({
   showReviewControls = true,
   ...props
@@ -44,6 +64,9 @@ export function MapStage({
   const [backgroundError, setBackgroundError] = useState("");
   const [seed, setSeed] = useState("1928");
   const [zoom, setZoom] = useState(1);
+  const [publishDiff, setPublishDiff] = useState<MapPublishDiff | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState("");
 
   useEffect(() => {
     setPreviewAssetId(null);
@@ -121,6 +144,33 @@ export function MapStage({
     setPreviewAssetId(asset.id);
   }
 
+  async function loadPublishDiff() {
+    const mapId = props.activeMap?.id;
+    const revisionId = props.activeMap?.revision_id;
+    if (!mapId || !revisionId) return;
+    setDiffLoading(true);
+    setDiffError("");
+    try {
+      const diff = await requestJson<MapPublishDiff>(
+        `/maps/${encodeURIComponent(mapId)}/publish-diff`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expected_revision_id: revisionId,
+            expected_selected_asset_id:
+              props.activeMap?.render?.selected_asset_id ?? null
+          })
+        }
+      );
+      setPublishDiff(diff);
+    } catch (error) {
+      setDiffError(error instanceof Error ? error.message : String(error));
+      setPublishDiff(null);
+    } finally {
+      setDiffLoading(false);
+    }
+  }
+
   return (
     <section className="map-stage" id="map-section">
       <div className="stage-toolbar">
@@ -158,12 +208,70 @@ export function MapStage({
               {props.activeMap.status === "published" ? "收回为草稿" : "审核通过并发布"}
             </button>
           )}
+          {props.activeMap && props.role === "kp" && showReviewControls && (
+            <button
+              className="ghost-button"
+              disabled={props.loading || !props.activeMap.revision_id}
+              onClick={() => void loadPublishDiff()}
+              title="对比当前 revision 与上次发布，预览玩家将看到的变化"
+              type="button"
+            >
+              <Diff size={15} />
+              {diffLoading ? "计算中…" : "预览发布差异"}
+            </button>
+          )}
           <button className="ghost-button" onClick={props.onRefresh} type="button">
             <RefreshCw size={16} />
             刷新
           </button>
         </div>
       </div>
+
+      {publishDiff && (
+        <details className="map-publish-diff">
+          <summary>
+            发布差异预览
+            {publishDiff.first_publish
+              ? "（首次发布，无对比基线）"
+              : `（R${publishDiff.revision.published_no} → R${publishDiff.revision.current_no}）`}
+          </summary>
+          {diffError && <p className="error-copy">{diffError}</p>}
+          {publishDiff.first_publish ? (
+            <p className="muted-copy">
+              这是首次发布，玩家将首次看到当前地图结构。
+            </p>
+          ) : (
+            <div className="map-diff-grid">
+              <DiffGroup label="新增地点" changes={publishDiff.locations.added} tone="added" />
+              <DiffGroup label="删除地点" changes={publishDiff.locations.removed} tone="removed" />
+              <DiffGroup
+                label="变更地点"
+                changes={publishDiff.locations.changed.map((item) => ({
+                  id: item.id,
+                  name: item.fields.length
+                    ? `${item.name}（${item.fields.join("、")}）`
+                    : item.name
+                }))}
+                tone="changed"
+              />
+              <DiffGroup label="新增路线" changes={publishDiff.connections.added} tone="added" />
+              <DiffGroup label="删除路线" changes={publishDiff.connections.removed} tone="removed" />
+              {publishDiff.canvas_changed && (
+                <p className="diff-note">画布尺寸变化</p>
+              )}
+              {publishDiff.title_changed && (
+                <p className="diff-note">标题变化</p>
+              )}
+              {publishDiff.player_visible_changes.length > 0 && (
+                <p className="diff-note">
+                  玩家可见变化：{" "}
+                  {publishDiff.player_visible_changes.map((item) => item.name).join("、")}
+                </p>
+              )}
+            </div>
+          )}
+        </details>
+      )}
 
       <div className="saved-map-list">
         {props.maps.map((map) => (
@@ -444,5 +552,27 @@ export function MapStage({
         </div>
       )}
     </section>
+  );
+}
+
+function DiffGroup({
+  label,
+  changes,
+  tone
+}: {
+  label: string;
+  changes: Array<{ id: string; name: string }>;
+  tone: "added" | "removed" | "changed";
+}) {
+  if (!changes.length) return null;
+  return (
+    <div className={`map-diff-group diff-${tone}`}>
+      <strong>{label}</strong>
+      <ul>
+        {changes.map((change) => (
+          <li key={change.id}>{change.name}</li>
+        ))}
+      </ul>
+    </div>
   );
 }

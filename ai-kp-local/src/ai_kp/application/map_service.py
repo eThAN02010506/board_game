@@ -110,6 +110,7 @@ class MapService:
             raise ValueError("地图版本已变化，请刷新并重新审核后发布")
         if snapshot["selected_public_asset_id"] != expected_selected_asset_id:
             raise ValueError("正式背景已变化，请刷新并重新审核后发布")
+        self.repo.record_published_revision(map_id, expected_revision_id)
         return self._set_status(
             map_id,
             campaign_id,
@@ -117,6 +118,52 @@ class MapService:
             status="published",
             event_type="map.published",
         )
+
+    def publish_diff(
+        self,
+        map_id: str,
+        campaign_id: str,
+        *,
+        expected_revision_id: str,
+        expected_selected_asset_id: str | None = None,
+    ) -> dict:
+        """Read-only preview of what a publish would change for players."""
+        self.repo.begin_immediate()
+        snapshot = self.repo.get_map_publish_snapshot(map_id)
+        validation = snapshot.get("validation")
+        if not isinstance(validation, dict) or validation.get("valid") is not True:
+            raise ValueError("地图规范未通过校验，不能发布")
+        if snapshot["current_revision_id"] != expected_revision_id:
+            raise ValueError("地图版本已变化，请刷新并重新审核后发布")
+        if snapshot["selected_public_asset_id"] != expected_selected_asset_id:
+            raise ValueError("正式背景已变化，请刷新并重新审核后发布")
+        current = self.repo.get_current_map_revision(map_id)
+        published = self.repo.get_published_revision_spec(map_id)
+        if current is None:
+            raise ValueError("地图当前没有可审核的版本")
+        if published is None:
+            return {
+                "revision": {
+                    "current_id": current["id"],
+                    "current_no": int(current["revision_no"]),
+                    "published_id": None,
+                    "published_no": None,
+                },
+                "first_publish": True,
+                "layout_hash_changed": True,
+                "locations": {"added": [], "removed": [], "changed": []},
+                "connections": {"added": [], "removed": [], "changed": []},
+                "canvas_changed": False,
+                "title_changed": False,
+                "player_visible_changes": [],
+            }
+        return _diff_map_specs(
+            current_spec=current["spec"],
+            published_spec=published["spec"],
+            current_no=int(current["revision_no"]),
+            published_no=int(published["revision_no"]),
+        )
+
 
     def unpublish(self, map_id: str, campaign_id: str, session_id: str) -> dict:
         return self._set_status(
@@ -247,3 +294,162 @@ class MapService:
             resource_id=token_id,
             payload={"map_id": map_id},
         )
+
+
+_PLAYER_VISIBILITY = frozenset({"player", "table"})
+
+
+def _diff_map_specs(
+    *,
+    current_spec: dict,
+    published_spec: dict,
+    current_no: int,
+    published_no: int,
+) -> dict:
+    """Three-way diff of MapSpec locations and connections by stable element id."""
+
+    current_locations = {str(item["id"]): item for item in current_spec.get("locations", [])}
+    published_locations = {
+        str(item["id"]): item for item in published_spec.get("locations", [])
+    }
+    current_connections = {
+        str(item["id"]): item for item in current_spec.get("connections", [])
+    }
+    published_connections = {
+        str(item["id"]): item for item in published_spec.get("connections", [])
+    }
+
+    location_changes = _diff_elements(
+        current_elements=current_locations,
+        published_elements=published_locations,
+        compare_fields=(
+            "name",
+            "visibility",
+            "position",
+            "public_description",
+        ),
+    )
+    connection_changes = _diff_elements(
+        current_elements=current_connections,
+        published_elements=published_connections,
+        compare_fields=(
+            "visibility",
+            "traversal",
+            "direction",
+        ),
+    )
+
+    current_canvas = current_spec.get("canvas") or {}
+    published_canvas = published_spec.get("canvas") or {}
+    canvas_changed = (
+        current_canvas.get("width") != published_canvas.get("width")
+        or current_canvas.get("height") != published_canvas.get("height")
+    )
+    title_changed = current_spec.get("title") != published_spec.get("title")
+    layout_hash_changed = (
+        current_spec.get("layout_hash") != published_spec.get("layout_hash")
+    )
+
+    player_visible_changes = _collect_player_visible_changes(
+        location_changes,
+        connection_changes,
+        current_locations,
+        current_connections,
+    )
+
+    return {
+        "revision": {
+            "current_id": None,
+            "current_no": current_no,
+            "published_id": None,
+            "published_no": published_no,
+        },
+        "first_publish": False,
+        "layout_hash_changed": layout_hash_changed,
+        "locations": location_changes,
+        "connections": connection_changes,
+        "canvas_changed": canvas_changed,
+        "title_changed": title_changed,
+        "player_visible_changes": player_visible_changes,
+    }
+
+
+def _diff_elements(
+    *,
+    current_elements: dict,
+    published_elements: dict,
+    compare_fields: tuple,
+) -> dict:
+    added: list[dict] = []
+    removed: list[dict] = []
+    changed: list[dict] = []
+    for element_id in sorted(set(current_elements) - set(published_elements)):
+        added.append(
+            {
+                "id": element_id,
+                "name": _element_label(current_elements[element_id]),
+            }
+        )
+    for element_id in sorted(set(published_elements) - set(current_elements)):
+        removed.append(
+            {
+                "id": element_id,
+                "name": _element_label(published_elements[element_id]),
+            }
+        )
+    for element_id in sorted(set(current_elements) & set(published_elements)):
+        current_item = current_elements[element_id]
+        published_item = published_elements[element_id]
+        field_diffs = []
+        for field in compare_fields:
+            if _field_value(current_item.get(field)) != _field_value(published_item.get(field)):
+                field_diffs.append(field)
+        if field_diffs:
+            changed.append(
+                {
+                    "id": element_id,
+                    "name": _element_label(current_item),
+                    "fields": field_diffs,
+                }
+            )
+    return {"added": added, "removed": removed, "changed": changed}
+
+
+def _element_label(item: dict) -> str:
+    return str(item.get("name") or item.get("from_name") or item.get("id") or "?")
+
+
+def _field_value(value) -> object:
+    return value
+
+
+def _collect_player_visible_changes(
+    location_changes: dict,
+    connection_changes: dict,
+    current_locations: dict,
+    current_connections: dict,
+) -> list[dict]:
+    changes: list[dict] = []
+    for change in location_changes.get("added") + location_changes.get("changed"):
+        item = current_locations.get(change["id"], {})
+        if item.get("visibility") in _PLAYER_VISIBILITY:
+            changes.append(
+                {
+                    "kind": "location",
+                    "change": "added_or_changed",
+                    "id": change["id"],
+                    "name": change["name"],
+                }
+            )
+    for change in connection_changes.get("added") + connection_changes.get("changed"):
+        item = current_connections.get(change["id"], {})
+        if item.get("visibility") in _PLAYER_VISIBILITY:
+            changes.append(
+                {
+                    "kind": "connection",
+                    "change": "added_or_changed",
+                    "id": change["id"],
+                    "name": change["name"],
+                }
+            )
+    return changes

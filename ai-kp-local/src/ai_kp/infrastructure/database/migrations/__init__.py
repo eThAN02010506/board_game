@@ -55,6 +55,8 @@ from ai_kp.infrastructure.database.migrations import (
     v0048_automation_levels,
     v0049_auto_kp_jobs,
     v0050_action_adjudications,
+    v0051_map_published_revision,
+    v0052_module_campaign_imports,
 )
 
 
@@ -305,6 +307,16 @@ MIGRATIONS = (
         v0050_action_adjudications.VERSION,
         v0050_action_adjudications.NAME,
         v0050_action_adjudications.migrate,
+    ),
+    Migration(
+        v0051_map_published_revision.VERSION,
+        v0051_map_published_revision.NAME,
+        v0051_map_published_revision.migrate,
+    ),
+    Migration(
+        v0052_module_campaign_imports.VERSION,
+        v0052_module_campaign_imports.NAME,
+        v0052_module_campaign_imports.migrate,
     ),
 )
 

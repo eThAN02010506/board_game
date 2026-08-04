@@ -1930,6 +1930,68 @@ h2 {
   color: #9a382f;
 }
 
+.module-import-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid #cfc2ac;
+  border-radius: 12px;
+  background: #f7f1e5;
+  padding: 13px;
+}
+
+.module-import-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.module-import-heading h3 {
+  margin: 2px 0 4px;
+}
+
+.module-import-heading small {
+  color: #6a746c;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.module-import-preview,
+.module-import-result {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d8ccb6;
+  border-radius: 9px;
+  background: #fffdf7;
+  padding: 10px;
+}
+
+.module-import-summary {
+  margin: 0;
+  color: #293b34;
+  font-size: 12px;
+}
+
+.module-import-group strong {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #6a746c;
+  margin-bottom: 3px;
+}
+
+.module-import-group ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.module-import-warn {
+  color: #9a382f;
+}
+
 .rule-review-card,
 .rule-query-card,
 .ruleset-status-card {
@@ -4517,6 +4579,80 @@ textarea {
 
 .map-review-strip .quality-fail {
   color: #a23f35;
+}
+
+.map-publish-diff {
+  margin-top: 12px;
+  border: 1px solid #d5c8b2;
+  border-radius: 10px;
+  background: #fbf7ee;
+  padding: 10px 12px;
+}
+
+.map-publish-diff summary {
+  cursor: pointer;
+  color: #293b34;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.map-publish-diff .muted-copy,
+.map-publish-diff .diff-note {
+  margin: 8px 0 0;
+  color: #6a746c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.map-publish-diff .error-copy {
+  margin: 8px 0 0;
+  color: #a23f35;
+  font-size: 12px;
+}
+
+.map-diff-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.map-diff-group {
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.map-diff-group strong {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.map-diff-group ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.map-diff-group li::marker {
+  color: inherit;
+}
+
+.diff-added {
+  background: #eaf4ec;
+  color: #1f6a43;
+}
+
+.diff-removed {
+  background: #fbeceb;
+  color: #a23f35;
+}
+
+.diff-changed {
+  background: #fbf1e0;
+  color: #8a5a1f;
 }
 
 .map-image-workbench {

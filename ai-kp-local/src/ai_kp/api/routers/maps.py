@@ -463,6 +463,23 @@ def publish_map(
     )
 
 
+@router.post("/maps/{map_id}/publish-diff")
+def publish_diff(
+    map_id: str,
+    payload: MapPublishRequest,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    campaign_id = campaign_for_map(repo, map_id)
+    require_campaign_role(identity, campaign_id, ("kp",))
+    return MapService(repo).publish_diff(
+        map_id,
+        campaign_id,
+        expected_revision_id=payload.expected_revision_id,
+        expected_selected_asset_id=payload.expected_selected_asset_id,
+    )
+
+
 @router.post("/maps/{map_id}/unpublish")
 def unpublish_map(
     map_id: str,

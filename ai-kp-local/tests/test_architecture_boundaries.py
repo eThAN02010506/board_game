@@ -407,6 +407,7 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
         "maps.py": {
             ("MapService", "generate_and_save"),
             ("MapService", "publish"),
+            ("MapService", "publish_diff"),
             ("MapService", "unpublish"),
             ("MapService", "place_token"),
             ("MapService", "move_token"),
@@ -436,6 +437,8 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
             ("ModuleGraphService", "create_entity"),
             ("ModuleGraphService", "create_relation"),
             ("ModuleGraphService", "check_reachability"),
+            ("ModuleCampaignImportService", "preview"),
+            ("ModuleCampaignImportService", "confirm"),
         },
         "memory.py": {
             ("MemoryTimelineService", "list_timeline"),
@@ -535,7 +538,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 50
+    assert LATEST_SCHEMA_VERSION == 52
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -587,6 +590,8 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (48, "add_module_run_automation_levels"),
         (49, "add_auto_kp_jobs"),
         (50, "add_action_adjudications"),
+        (51, "map_published_revision"),
+        (52, "module_campaign_imports"),
     ]
 
 
