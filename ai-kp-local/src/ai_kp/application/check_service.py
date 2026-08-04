@@ -219,6 +219,9 @@ class CheckService:
             raise PermissionError("Opposed check belongs to another session")
         if opposed["status"] != "reroll_required":
             raise ValueError("Only an exact tied opposed check can be rerolled")
+        self.repo.begin_immediate()
+        # Re-check after acquiring the write lock so two concurrent reroll
+        # requests serialize: the second one will see the first's result.
         existing = next(
             (
                 item
@@ -232,7 +235,6 @@ class CheckService:
         if existing is not None:
             return existing
         left, right = opposed["left_check"], opposed["right_check"]
-        self.repo.begin_immediate()
         children = []
         for check in (left, right):
             children.append(

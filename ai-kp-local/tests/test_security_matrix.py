@@ -1,15 +1,18 @@
 """Data-driven authorization, fault-injection and tenant-isolation regressions."""
 
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from ai_kp.api.dependencies import get_repo
 from ai_kp.api.main import create_app
+from ai_kp.application.check_service import CheckService
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.schema import connect
+from ai_kp.platform.sessions.models import AuthenticatedMember
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -274,3 +277,105 @@ def test_persisted_opposed_check_api_resolves_and_rerolls_exact_tie(
             f"/opposed-checks/{contest['id']}/reroll", headers=kp
         )
         assert repeated.json()["id"] == reroll.json()["id"]
+
+
+def test_concurrent_opposed_reroll_creates_a_single_child(
+    tmp_path: Path,
+) -> None:
+    """Two simultaneous tie rerolls must serialize on the write lock and
+    return the same child, never two competing rerolls."""
+    from threading import Event
+
+    database_path = tmp_path / "opposed-concurrent.sqlite3"
+    settings = Settings(
+        db_path=database_path,
+        admin_token="opposed-concurrent-admin",
+    )
+    with TestClient(
+        create_app(settings),
+        base_url="http://127.0.0.1",
+        headers={"X-AI-KP-Admin-Token": "opposed-concurrent-admin"},
+    ) as client:
+        campaign, session, kp = _campaign_session(client, "并发平局")
+        contest = client.post(
+            f"/campaigns/{campaign['id']}/opposed-checks",
+            headers=kp,
+            json={
+                "left": {"skill_name": "斗殴 A", "target": 50},
+                "right": {"skill_name": "斗殴 B", "target": 50},
+            },
+        ).json()
+        for check_id in (contest["left_check_id"], contest["right_check_id"]):
+            result = client.post(
+                f"/checks/{check_id}/resolve",
+                headers=kp,
+                json={"input_method": "physical", "ones_digit": 0, "tens_digits": [3]},
+            )
+            assert result.status_code == 200, result.text
+        resolved = client.post(
+            f"/opposed-checks/{contest['id']}/resolve", headers=kp
+        )
+        assert resolved.status_code == 200, resolved.text
+        assert resolved.json()["status"] == "reroll_required"
+
+        member = session["member"]
+        identity = AuthenticatedMember(
+            member_id=member["id"],
+            session_id=member["session_id"],
+            campaign_id=campaign["id"],
+            role=member["role"],
+            display_name=member["display_name"],
+            pc_id=member["pc_id"],
+        )
+        campaign_id = campaign["id"]
+        opposed_id = contest["id"]
+
+        first_connection = connect(database_path)
+        second_connection = connect(database_path)
+        first_entered_critical = Event()
+        allow_first_commit = Event()
+        second_blocked_on_lock = Event()
+
+        def _trace_second_lock(sql: str) -> None:
+            if sql.strip().upper().startswith("BEGIN IMMEDIATE"):
+                second_blocked_on_lock.set()
+
+        second_connection.set_trace_callback(_trace_second_lock)
+
+        def reroll_on(connection, critical_event=None, allow=None):
+            repo = Repository(connection)
+            result = CheckService(repo).reroll_opposed(opposed_id, identity)
+            if critical_event is not None:
+                critical_event.set()
+            if allow is not None:
+                assert allow.wait(timeout=5)
+            connection.commit()
+            return result
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first_future = pool.submit(
+                    reroll_on, first_connection, first_entered_critical, allow_first_commit
+                )
+                assert first_entered_critical.wait(timeout=5)
+                second_future = pool.submit(reroll_on, second_connection)
+                assert second_blocked_on_lock.wait(timeout=5)
+                assert not second_future.done()
+                allow_first_commit.set()
+                first_result = first_future.result(timeout=5)
+                second_result = second_future.result(timeout=5)
+        finally:
+            first_connection.close()
+            second_connection.close()
+
+        assert second_result["id"] == first_result["id"]
+        assert first_result["rerolled_from_opposed_check_id"] == opposed_id
+        # Both sides observe exactly one reroll child.
+        leftovers = [
+            item
+            for item in client.get(
+                f"/campaigns/{campaign_id}/opposed-checks", headers=kp
+            ).json()
+            if item.get("rerolled_from_opposed_check_id") == opposed_id
+        ]
+        assert len(leftovers) == 1
