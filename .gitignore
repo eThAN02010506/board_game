@@ -6,3 +6,7 @@ __pycache__/
 .mypy_cache/
 .docx_render*/
 .pnpm-store/
+
+# Local runtime data, database files, RAG indexes, and machine-local tooling config.
+data/
+.claude/
