@@ -31,7 +31,9 @@ def plan_proposed_checks(
                 skill_name=str(proposed_check["skill"]),
                 difficulty=difficulty,
                 hidden=bool(proposed_check.get("hidden")),
-                pc_id=proposed_check.get("pc_id") or proposal.get("pc_id"),
+                # The server derives the PC from the authenticated action, never
+                # from a model-supplied pc_id on an individual check.
+                pc_id=proposal.get("pc_id"),
             )
         )
     return tuple(plans)

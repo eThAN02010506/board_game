@@ -726,8 +726,29 @@ class SkillCheckRepository(SQLiteRepository):
                         "skill_key": str(skill.get("skill_key") or skill_name),
                     }
             characteristics = canonical.get("characteristics") or {}
+            normalized_characteristic_key = {
+                "strength": "str",
+                "力量": "str",
+                "constitution": "con",
+                "体质": "con",
+                "size": "siz",
+                "体型": "siz",
+                "dexterity": "dex",
+                "敏捷": "dex",
+                "appearance": "app",
+                "外貌": "app",
+                "intelligence": "int",
+                "智力": "int",
+                "power": "pow",
+                "意志": "pow",
+                "education": "edu",
+                "教育": "edu",
+                "lucky": "luck",
+                "luck": "luck",
+                "幸运": "luck",
+            }.get(wanted, wanted)
             for key, value in characteristics.items():
-                if str(key).casefold() == wanted:
+                if str(key).casefold() == normalized_characteristic_key:
                     return {
                         "target": int(value),
                         "target_source": "approved_investigator_revision",

@@ -585,7 +585,10 @@ class TurnRepository(SQLiteRepository):
 
     def _apply_proposed_checks(self, proposal: dict) -> None:
         for proposed_check in proposal["proposed_checks"]:
-            check_pc_id = proposed_check.get("pc_id") or proposal["pc_id"]
+            # The server derives the PC from the authenticated action. A model
+            # may attach a pc_id to an individual check, but it is never
+            # authority over the proposal's server-derived pc_id.
+            check_pc_id = proposal["pc_id"]
             if check_pc_id:
                 self._require_pc_in_campaign(check_pc_id, proposal["campaign_id"])
             self.append_event(
@@ -603,18 +606,21 @@ class TurnRepository(SQLiteRepository):
 
     def _apply_proposed_events(self, proposal: dict) -> None:
         for proposed_event in proposal["proposed_events"]:
-            if proposed_event.get("actor_id") and proposed_event["actor_type"] == "pc":
-                self._require_pc_in_campaign(
-                    proposed_event["actor_id"], proposal["campaign_id"]
-                )
-            if proposed_event.get("actor_id") and proposed_event["actor_type"] == "npc":
-                self._require_npc_in_campaign(
-                    proposed_event["actor_id"], proposal["campaign_id"]
-                )
+            actor_type = proposed_event.get("actor_type", "system")
+            actor_id = proposed_event.get("actor_id")
+            if actor_type == "pc":
+                # The server derives the PC from the authenticated action. A
+                # model may guess an investigator id here, but it is never
+                # authority over the proposal's server-derived pc_id.
+                actor_id = proposal["pc_id"]
+                if actor_id:
+                    self._require_pc_in_campaign(actor_id, proposal["campaign_id"])
+            elif actor_id and actor_type == "npc":
+                self._require_npc_in_campaign(actor_id, proposal["campaign_id"])
             self.append_event(
                 campaign_id=proposal["campaign_id"],
-                actor_type=proposed_event.get("actor_type", "system"),
-                actor_id=proposed_event.get("actor_id"),
+                actor_type=actor_type,
+                actor_id=actor_id,
                 visibility=proposed_event.get("visibility", "table"),
                 event_type=proposed_event.get("event_type", "proposed_event"),
                 happened_at=proposed_event.get("happened_at"),
@@ -628,7 +634,9 @@ class TurnRepository(SQLiteRepository):
         source_event_id: str,
     ) -> None:
         for proposed_memory in proposal["proposed_memories"]:
-            memory_pc_id = proposed_memory.get("pc_id") or proposal["pc_id"]
+            # The server derives the PC from the authenticated action, never
+            # from a model-supplied pc_id on an individual memory candidate.
+            memory_pc_id = proposal["pc_id"]
             if memory_pc_id:
                 self._require_pc_in_campaign(memory_pc_id, proposal["campaign_id"])
             if proposed_memory.get("npc_id"):
