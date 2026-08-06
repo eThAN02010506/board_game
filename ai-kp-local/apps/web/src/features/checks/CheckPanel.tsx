@@ -1,5 +1,6 @@
 import { Dice5, EyeOff, RefreshCw, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   AuthIdentity,
@@ -37,28 +38,26 @@ type Props = {
   onPush: (checkId: string, reason: string) => void;
 };
 
-const levelLabels: Record<NonNullable<SkillCheck["success_level"]>, string> = {
-  fumble: "大失败",
-  failure: "失败",
-  regular: "常规成功",
-  hard: "困难成功",
-  extreme: "极难成功",
-  critical: "大成功"
-};
-
-const difficultyLabels: Record<SkillCheck["difficulty"], string> = {
-  regular: "常规",
-  hard: "困难",
-  extreme: "极难"
-};
-
-const visibilityLabels: Record<SkillCheck["visibility"], string> = {
-  public: "全桌公开",
-  private: "掷骰者与 KP",
-  blind: "仅 KP"
-};
-
 export function CheckPanel(props: Props) {
+  const { t } = useTranslation();
+  const levelLabels: Record<NonNullable<SkillCheck["success_level"]>, string> = {
+    fumble: t("gamedata.levels.fumble"),
+    failure: t("gamedata.levels.failure"),
+    regular: t("gamedata.levels.regular"),
+    hard: t("gamedata.levels.hard"),
+    extreme: t("gamedata.levels.extreme"),
+    critical: t("gamedata.levels.critical")
+  };
+  const difficultyLabels: Record<SkillCheck["difficulty"], string> = {
+    regular: t("gamedata.difficulties.regular"),
+    hard: t("gamedata.difficulties.hard"),
+    extreme: t("gamedata.difficulties.extreme")
+  };
+  const visibilityLabels: Record<SkillCheck["visibility"], string> = {
+    public: t("gamedata.visibility.public"),
+    private: t("gamedata.visibility.private"),
+    blind: t("gamedata.visibility.blind")
+  };
   const [skillName, setSkillName] = useState("侦查");
   const [difficulty, setDifficulty] = useState<SkillCheck["difficulty"]>("regular");
   const [bonusDice, setBonusDice] = useState(0);

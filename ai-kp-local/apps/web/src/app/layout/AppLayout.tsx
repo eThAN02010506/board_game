@@ -1,5 +1,6 @@
 import { CircleDot, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 import type { AuthIdentity } from "../../api/types";
 import type { PageId, WorkspaceRoute } from "../router";
@@ -32,16 +33,17 @@ export function AppLayout({
   realtimeNote,
   realtimeStatus
 }: Props) {
+  const { t } = useTranslation();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const initialRoute = useRef(true);
   const role = identity?.role ?? "guest";
   const visibleRoutes = visibleWorkspaceRoutes(identity?.role);
   const workspaceLabel =
     role === "kp"
-      ? "KP 导演台"
+      ? t("common.workspace.kp")
       : role === "player"
-        ? "玩家游玩台"
-        : "本地叙事工作台";
+        ? t("common.workspace.player")
+        : t("common.workspace.local");
 
   useEffect(() => {
     if (initialRoute.current) {
@@ -54,7 +56,7 @@ export function AppLayout({
   return (
     <main className={`app-shell role-${role} ${activePage === "investigators" ? "investigator-shell" : ""}`}>
       <a className="skip-link" href="#main-workspace">
-        跳到主内容
+        {t("common.skipToContent")}
       </a>
       <aside className="sidebar">
         <div className="brand">
@@ -66,7 +68,7 @@ export function AppLayout({
             <small>{workspaceLabel}</small>
           </span>
         </div>
-        <nav aria-label="工作台页面">
+        <nav aria-label={t("common.navLabel")}>
           {visibleRoutes.map((item) => {
             const Icon = item.icon;
             return (
@@ -90,8 +92,8 @@ export function AppLayout({
                 }}
               >
                 <Icon size={17} />
-                {item.label}
-                {item.planned && <small>规划</small>}
+                {t(`common.nav.${item.id}`)}
+                {item.planned && <small>{t("common.planned")}</small>}
               </a>
             );
           })}
@@ -101,37 +103,37 @@ export function AppLayout({
       <section className="workspace" id="main-workspace" tabIndex={-1}>
         <header className="topbar">
           <div>
-            <p className="eyebrow">{workspaceLabel} · {currentRoute.label}</p>
+            <p className="eyebrow">{workspaceLabel} · {t(`common.nav.${currentRoute.id}`)}</p>
             <h1 ref={headingRef} tabIndex={-1}>
               {campaignTitle}
             </h1>
             <span aria-live="polite" className="sr-only" role="status">
-              已打开{currentRoute.label}
+              {t("common.opened")}{t(`common.nav.${currentRoute.id}`)}
             </span>
           </div>
           <div className="topbar-actions">
             <button className="ghost-button" onClick={onRefresh} type="button">
               <RefreshCw size={16} />
-              连接后端
+              {t("common.connect")}
             </button>
             {identity && (
               <span className={`realtime-pill ${realtimeStatus}`} title={realtimeNote}>
                 {realtimeStatus === "live" ? <Wifi size={14} /> : <WifiOff size={14} />}
                 {realtimeStatus === "live"
-                  ? "实时同步"
+                  ? t("common.realtime.live")
                   : realtimeStatus === "connecting"
-                    ? "正在连接"
+                    ? t("common.realtime.connecting")
                     : realtimeStatus === "retrying"
-                      ? "重新连接"
-                      : "同步离线"}
+                      ? t("common.realtime.retrying")
+                      : t("common.realtime.offline")}
               </span>
             )}
             <span className={`status-pill ${loading ? "busy" : "ready"}`}>
               {loading
-                ? "请求中"
+                ? t("common.loading")
                 : identity
-                  ? `${identity.role === "kp" ? "KP" : "玩家"} · ${identity.display_name}`
-                  : "未加入会话"}
+                  ? `${identity.role === "kp" ? "KP" : t("common.playerRole")} · ${identity.display_name}`
+                  : t("common.noSession")}
             </span>
           </div>
         </header>

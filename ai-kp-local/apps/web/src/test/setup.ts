@@ -2,7 +2,18 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 
+import i18n from "../i18n";
+
 afterEach(() => cleanup());
+
+// Tests assert Chinese copy (the default UI language), so force the browser
+// language to zh-CN regardless of the host machine's locale.
+Object.defineProperty(navigator, "language", {
+  configurable: true,
+  get: () => "zh-CN"
+});
+
+i18n.changeLanguage("zh-CN");
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
