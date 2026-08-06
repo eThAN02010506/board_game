@@ -1,4 +1,5 @@
 import { Brain, Check, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type {
   CampaignInvestigator,
   ContextAssembly,
@@ -32,15 +33,16 @@ type Props = {
 };
 
 export function ProposalPanel(props: Props) {
+  const { t } = useTranslation();
   return (
     <section className="tool-panel proposal-panel">
       <div className="panel-heading">
-        <h2>人类 KP 审批</h2>
+        <h2>{t("proposals.title")}</h2>
         <Check size={18} />
       </div>
       <button className="ghost-button" onClick={props.onRefresh} type="button">
         <RefreshCw size={16} />
-        刷新草稿
+        {t("proposals.refreshDrafts")}
       </button>
       <div className="list-stack">
         {props.proposals.map((proposal) => (
@@ -52,8 +54,8 @@ export function ProposalPanel(props: Props) {
           >
             <span>
               {statusLabel(proposal.status)}
-              {proposal.proposal_kind === "check_consequence" ? " · 检定后果" : ""}
-              {proposal.proposal_kind === "world_expansion" ? " · 世界补全" : ""}
+              {proposal.proposal_kind === "check_consequence" ? t("proposals.checkConsequenceSuffix") : ""}
+              {proposal.proposal_kind === "world_expansion" ? t("proposals.worldExpansionSuffix") : ""}
             </span>
             <small>{proposal.player_action}</small>
           </button>
@@ -65,9 +67,9 @@ export function ProposalPanel(props: Props) {
             <span className={`proposal-status ${props.activeProposal.status}`}>
               {statusLabel(props.activeProposal.status)}
               {props.activeProposal.proposal_kind === "check_consequence"
-                ? " · 检定后果"
+                ? t("proposals.checkConsequenceSuffix")
                 : props.activeProposal.proposal_kind === "world_expansion"
-                ? " · 世界补全"
+                ? t("proposals.worldExpansionSuffix")
                 : ""}
             </span>
             <p>{props.activeProposal.public_narration}</p>
@@ -75,32 +77,32 @@ export function ProposalPanel(props: Props) {
             {props.activeProposal.action_ruling && (
               <section className={`action-ruling ruling-${props.activeProposal.action_ruling.feasibility}`}>
                 <header>
-                  <strong>行动裁定</strong>
+                  <strong>{t("proposals.actionRuling")}</strong>
                   <span>
                     {props.activeProposal.action_ruling.feasibility === "possible"
-                      ? "可行"
+                      ? t("proposals.feasiblePossible")
                       : props.activeProposal.action_ruling.feasibility === "partial"
-                      ? "部分可行"
-                      : "目标不可行"}
+                      ? t("proposals.feasiblePartial")
+                      : t("proposals.feasibleImpossible")}
                     {" · "}
                     {props.activeProposal.action_ruling.resolution === "automatic"
-                      ? "自动结算"
+                      ? t("proposals.resolutionAutomatic")
                       : props.activeProposal.action_ruling.resolution === "check"
-                      ? "需要检定"
+                      ? t("proposals.resolutionCheck")
                       : props.activeProposal.action_ruling.resolution === "opposed"
-                      ? "需要对抗"
-                      : "不掷骰"}
+                      ? t("proposals.resolutionOpposed")
+                      : t("proposals.resolutionNoRoll")}
                   </span>
                 </header>
                 <dl>
-                  <div><dt>目标</dt><dd>{props.activeProposal.action_ruling.goal}</dd></div>
-                  <div><dt>手段</dt><dd>{props.activeProposal.action_ruling.method}</dd></div>
-                  <div><dt>对象</dt><dd>{props.activeProposal.action_ruling.target}</dd></div>
-                  <div><dt>理由</dt><dd>{props.activeProposal.action_ruling.reason}</dd></div>
-                  <div><dt>成功上限</dt><dd>{props.activeProposal.action_ruling.maximum_effect}</dd></div>
+                  <div><dt>{t("proposals.goal")}</dt><dd>{props.activeProposal.action_ruling.goal}</dd></div>
+                  <div><dt>{t("proposals.method")}</dt><dd>{props.activeProposal.action_ruling.method}</dd></div>
+                  <div><dt>{t("proposals.target")}</dt><dd>{props.activeProposal.action_ruling.target}</dd></div>
+                  <div><dt>{t("proposals.reason")}</dt><dd>{props.activeProposal.action_ruling.reason}</dd></div>
+                  <div><dt>{t("proposals.maximumEffect")}</dt><dd>{props.activeProposal.action_ruling.maximum_effect}</dd></div>
                 </dl>
                 {props.activeProposal.action_ruling.alternative && (
-                  <p>可改为：{props.activeProposal.action_ruling.alternative}</p>
+                  <p>{t("proposals.alternativePrefix")}：{props.activeProposal.action_ruling.alternative}</p>
                 )}
               </section>
             )}
@@ -123,7 +125,7 @@ export function ProposalPanel(props: Props) {
                 )}
                 {!!props.activeProposal.world_expansion.candidate.assumptions.length && (
                   <details>
-                    <summary>待确认假设</summary>
+                    <summary>{t("proposals.assumptions")}</summary>
                     <ul>
                       {props.activeProposal.world_expansion.candidate.assumptions.map(
                         (item) => <li key={item}>{item}</li>
@@ -133,7 +135,7 @@ export function ProposalPanel(props: Props) {
                 )}
                 {!!props.activeProposal.world_expansion.candidate.conflicts.length && (
                   <details open>
-                    <summary>潜在冲突</summary>
+                    <summary>{t("proposals.conflicts")}</summary>
                     <ul>
                       {props.activeProposal.world_expansion.candidate.conflicts.map(
                         (item) => <li key={item}>{item}</li>
@@ -143,7 +145,7 @@ export function ProposalPanel(props: Props) {
                 )}
                 <details>
                   <summary>
-                    替代方案（{props.activeProposal.world_expansion.candidate.alternatives.length}）
+                    {t("proposals.alternativesCount", { count: props.activeProposal.world_expansion.candidate.alternatives.length })}
                   </summary>
                   {props.activeProposal.world_expansion.candidate.alternatives.map(
                     (alternative) => (
@@ -156,26 +158,25 @@ export function ProposalPanel(props: Props) {
                   )}
                 </details>
                 <small>
-                  来源：模组运行 v{props.activeProposal.world_expansion.module_run_version}。
-                  若场景或线索状态变化，审批会被拒绝并要求重新分析。
+                  {t("proposals.sourceHint", { version: props.activeProposal.world_expansion.module_run_version })}
                 </small>
               </section>
             )}
             <div className="effect-list">
-              <ProposalEffectList title="待检定" items={props.activeProposal.proposed_checks} />
-              <ProposalEffectList title="事件" items={props.activeProposal.proposed_events} />
-              <ProposalEffectList title="长期记忆" items={props.activeProposal.proposed_memories} />
-              <ProposalEffectList title="NPC 变更" items={props.activeProposal.proposed_npc_updates} />
-              <ProposalEffectList title="地图移动" items={props.activeProposal.proposed_map_moves} />
-              <ProposalEffectList title="严格世界事实" items={props.activeProposal.proposed_facts ?? []} />
+              <ProposalEffectList title={t("proposals.effectChecks")} items={props.activeProposal.proposed_checks} />
+              <ProposalEffectList title={t("proposals.effectEvents")} items={props.activeProposal.proposed_events} />
+              <ProposalEffectList title={t("proposals.effectMemories")} items={props.activeProposal.proposed_memories} />
+              <ProposalEffectList title={t("proposals.effectNpcUpdates")} items={props.activeProposal.proposed_npc_updates} />
+              <ProposalEffectList title={t("proposals.effectMapMoves")} items={props.activeProposal.proposed_map_moves} />
+              <ProposalEffectList title={t("proposals.effectFacts")} items={props.activeProposal.proposed_facts ?? []} />
             </div>
           </>
         ) : (
-          <p>暂无草稿。</p>
+          <p>{t("proposals.noDrafts")}</p>
         )}
       </div>
       <label>
-        覆写公开描述
+        {t("proposals.overrideText")}
         <textarea
           value={props.overrideText}
           onChange={(event) => props.onOverrideTextChange(event.target.value)}
@@ -184,7 +185,7 @@ export function ProposalPanel(props: Props) {
       <div className="approval-actions">
         <button className="ghost-button" onClick={props.onInspectContext} type="button">
           <Brain size={16} />
-          检查 AI 上下文
+          {t("proposals.inspectContext")}
         </button>
         <button
           className="primary-button"
@@ -193,7 +194,7 @@ export function ProposalPanel(props: Props) {
           type="button"
         >
           <Check size={16} />
-          批准落库
+          {t("proposals.approve")}
         </button>
         <button
           className="secondary-button"
@@ -201,7 +202,7 @@ export function ProposalPanel(props: Props) {
           onClick={props.onReject}
           type="button"
         >
-          拒绝
+          {t("proposals.reject")}
         </button>
       </div>
       {props.activeProposal?.proposal_kind === "world_expansion" && (
@@ -218,18 +219,20 @@ export function ProposalPanel(props: Props) {
       {props.proposalContext &&
         props.proposalContext.proposal_id === props.activeProposal?.id && (
           <div className="context-summary">
-            <strong>上下文快照</strong>
+            <strong>{t("proposals.contextSnapshot")}</strong>
             <small>
-              约 {props.proposalContext.token_estimate} tokens · 纳入{" "}
-              {props.proposalContext.included_sources.length} 项 · 排除{" "}
-              {props.proposalContext.excluded_sources.length} 项
+              {t("proposals.contextMeta", {
+                tokens: props.proposalContext.token_estimate,
+                included: props.proposalContext.included_sources.length,
+                excluded: props.proposalContext.excluded_sources.length
+              })}
             </small>
             <details>
-              <summary>最终提示词</summary>
+              <summary>{t("proposals.finalPrompt")}</summary>
               <pre>{JSON.stringify(props.proposalContext.final_prompt, null, 2)}</pre>
             </details>
             <details open>
-              <summary>纳入来源</summary>
+              <summary>{t("proposals.includedSources")}</summary>
               <ul>
                 {props.proposalContext.included_sources.map((source) => (
                   <li key={`included-${source.id}`}>
@@ -240,7 +243,7 @@ export function ProposalPanel(props: Props) {
               </ul>
             </details>
             <details>
-              <summary>排除来源</summary>
+              <summary>{t("proposals.excludedSources")}</summary>
               <ul>
                 {props.proposalContext.excluded_sources.map((source) => (
                   <li key={`excluded-${source.id}-${source.excluded_reason}`}>
