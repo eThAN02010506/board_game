@@ -12,6 +12,7 @@ import {
   XCircle
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   credentialBridge,
   isApiError,
@@ -43,17 +44,31 @@ import {
 } from "./CharacterTimelinePanel";
 
 const attributeFields = ["str", "con", "siz", "dex", "app", "int", "pow", "edu", "luck"];
-const backgroundFields = [
-  ["appearance", "外貌"],
-  ["beliefs", "思想与信念"],
-  ["significant_people", "重要之人"],
-  ["significant_places", "意义非凡之地"],
-  ["treasured_possessions", "宝贵之物"],
-  ["traits", "特质"],
-  ["injuries_scars", "伤口与疤痕"],
-  ["phobias_manias", "恐惧症与躁狂症"],
-  ["secret", "个人秘密（本人/KP）"]
+const backgroundFieldKeys = [
+  "appearance",
+  "beliefs",
+  "significant_people",
+  "significant_places",
+  "treasured_possessions",
+  "traits",
+  "injuries_scars",
+  "phobias_manias",
+  "secret"
 ] as const;
+const BACKGROUND_LABEL_KEY: Record<string, string> = {
+  appearance: "appearance",
+  beliefs: "beliefs",
+  significant_people: "significantPeople",
+  significant_places: "significantPlaces",
+  treasured_possessions: "treasuredPossessions",
+  traits: "traits",
+  injuries_scars: "injuriesScars",
+  phobias_manias: "phobiasManias",
+  secret: "secret"
+};
+function backgroundLabel(t: (key: string) => string, field: string): string {
+  return t(`investigators.background.${BACKGROUND_LABEL_KEY[field] ?? field}`);
+}
 
 type ManualDraft = {
   name: string;
@@ -108,7 +123,7 @@ function createEmptyDraft(catalog: CharacterSkillCatalogItem[] = []): ManualDraf
     itemsText: "",
     currency: "美元",
     cash: "",
-    background: Object.fromEntries(backgroundFields.map(([key]) => [key, ""]))
+    background: Object.fromEntries(backgroundFieldKeys.map((key) => [key, ""]))
   };
 }
 
@@ -117,13 +132,16 @@ type Props = {
   identity: AuthIdentity | null;
 };
 
-const statusLabels: Record<CampaignInvestigator["status"], string> = {
-  draft: "草稿",
-  submitted: "待 KP 审核",
-  changes_requested: "需修改",
-  approved: "已批准",
-  withdrawn: "已撤回"
+const STATUS_KEY: Record<string, string> = {
+  draft: "draft",
+  submitted: "submitted",
+  changes_requested: "changesRequested",
+  approved: "approved",
+  withdrawn: "withdrawn"
 };
+function investigatorStatusLabel(t: (key: string) => string, status: string): string {
+  return t(`investigators.status.${STATUS_KEY[status] ?? status}`);
+}
 function payloadFromPreview(preview: InvestigatorImportPreview) {
   return {
     canonical_sheet: preview.canonical_sheet,
@@ -294,7 +312,7 @@ function manualFromSheet(
     itemsText: (assets.items || []).map((item) => [item.name, item.location, item.visibility].map((value) => value ?? "").join("|")).join("\n"),
     currency: String(assets.currency || "美元"),
     cash: assets.cash == null ? "" : String(assets.cash),
-    background: Object.fromEntries(backgroundFields.map(([key]) => [key, String(background[key] || "")]))
+    background: Object.fromEntries(backgroundFieldKeys.map((key) => [key, String(background[key] || "")]))
   };
 }
 
@@ -345,8 +363,9 @@ function DelayedSkillTooltip({ skill }: { skill: ManualSkillDraft }) {
 }
 
 export function InvestigatorPage({ campaign, identity }: Props) {
+  const { t } = useTranslation();
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
-  const [displayName, setDisplayName] = useState("玩家");
+  const [displayName, setDisplayName] = useState(t("common.playerRole"));
   const [investigators, setInvestigators] = useState<Investigator[]>([]);
   const [campaignRecords, setCampaignRecords] = useState<CampaignInvestigator[]>([]);
   const [members, setMembers] = useState<SessionMember[]>([]);
@@ -368,7 +387,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
   const [branchLabels, setBranchLabels] = useState<Record<string, string>>({});
   const [decisionReasons, setDecisionReasons] = useState<Record<string, string>>({});
   const [changeDrafts, setChangeDrafts] = useState<Record<string, PermanentChangeDraft>>({});
-  const [message, setMessage] = useState("正在读取本地玩家档案……");
+  const [message, setMessage] = useState(t("investigators.loadingProfile"));
   const [busy, setBusy] = useState(false);
   const libraryRequestVersion = useRef(0);
   const campaignRecordsRequestVersion = useRef(0);
@@ -455,7 +474,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
       }));
       setSkillRecommendation(result);
       setManualPreview(null);
-      setMessage(`已应用“${result.profile_name}”推荐方案；现在可以逐项手动调整并保存。`);
+      setMessage(t("investigators.msgRecommendApplied", { name: result.profile_name }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -508,7 +527,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
       ) return;
       setProfile(nextProfile);
       setInvestigators(library);
-      setMessage(library.length ? `已读取 ${library.length} 名调查员。` : "档案已就绪，可以建卡或导入 Excel。");
+      setMessage(library.length ? t("investigators.msgLoaded", { count: library.length }) : t("investigators.libraryReady"));
     } catch (error) {
       if (
         libraryRequestVersion.current !== requestVersion ||
@@ -573,7 +592,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
     const stored = readPlayerProfileToken();
     credentialBridge.player(stored);
     if (stored) void loadLibrary();
-    else setMessage("先建立本机玩家档案；角色卡会长期保存在本地数据库中。");
+    else setMessage(t("investigators.noTokenHint"));
   }, []);
 
   useEffect(() => {
@@ -595,7 +614,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
       credentialBridge.player(bundle.player_token);
       writePlayerProfileToken(bundle.player_token);
       setProfile(bundle.profile);
-      setMessage("本机玩家档案已建立。令牌只保存在当前浏览器。");
+      setMessage(t("investigators.profileCreated"));
       await loadLibrary(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -611,7 +630,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
     try {
       const result = await requestFile<InvestigatorImportPreview>("/investigator-imports/preview", file);
       setPreview(result);
-      setMessage(`已安全读取 ${file.name}；忽略 ${result.ignored_formula_cells} 个公式单元格。`);
+      setMessage(t("investigators.msgExcelRead", { file: file.name, count: result.ignored_formula_cells }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -628,7 +647,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
         method: "POST",
         body: JSON.stringify(payloadFromPreview(preview))
       });
-      setMessage(`已保存 ${saved.name} 的第 ${saved.current_revision.revision_no} 版不可变草稿。`);
+      setMessage(t("investigators.msgSavedDraft", { name: saved.name, revision: saved.current_revision.revision_no }));
       setPreview(null);
       setTargetInvestigatorId("");
       await loadLibrary(true);
@@ -647,7 +666,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
         body: JSON.stringify({ canonical_sheet: buildManualSheet(manual), source_type: "manual" })
       });
       setManualPreview(result);
-      setMessage(`规则预览完成，共 ${result.warnings.length} 项需确认内容。`);
+      setMessage(t("investigators.msgRulePreview", { count: result.warnings.length }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -664,7 +683,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
         method: "POST",
         body: JSON.stringify({ canonical_sheet: buildManualSheet(manual), source_type: "manual" })
       });
-      setMessage(`已保存 ${saved.name} 的第 ${saved.current_revision.revision_no} 版草稿。`);
+      setMessage(t("investigators.msgSavedVersion", { name: saved.name, revision: saved.current_revision.revision_no }));
       setManual(createEmptyDraft(skillCatalog));
       setManualPreview(null);
       setSkillRecommendation(null);
@@ -682,7 +701,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
     setManualTargetId(investigator.id);
     setManualPreview(null);
     setSkillRecommendation(null);
-    setMessage(`已将 ${investigator.name} v${investigator.current_revision.revision_no} 载入编辑器；保存时会创建新版本。`);
+    setMessage(t("investigators.msgLoadedEditor", { name: investigator.name, revision: investigator.current_revision.revision_no }));
   }
 
   async function submitInvestigator(investigator: Investigator) {
@@ -699,7 +718,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
           })
         }
       );
-      setMessage(`${investigator.name} v${record.submitted_revision?.revision_no} 已提交给 KP。`);
+      setMessage(t("investigators.msgSubmitted", { name: investigator.name, revision: record.submitted_revision?.revision_no }));
       await loadCampaignRecords(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -729,7 +748,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
           || timeline.branches[0]?.id
           || ""
       }));
-      setMessage("已读取调查员的跨团时间线；这里只显示玩家可知事实。");
+      setMessage(t("investigators.msgTimelineLoaded"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -749,7 +768,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
       setBranchSelections((current) => ({ ...current, [investigatorId]: branch.id }));
       setBranchLabels((current) => ({ ...current, [investigatorId]: "" }));
       await loadTimeline(investigatorId);
-      setMessage("已建立明确的平行时间线分支；角色可在另一场同时进行的团中使用。");
+      setMessage(t("investigators.msgBranchCreated"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -764,7 +783,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
   ) {
     const reason = (decisionReasons[proposal.id] || "").trim();
     if (!reason) {
-      setMessage("接受或拒绝永久变化前，请填写决定理由。");
+      setMessage(t("investigators.msgDecisionReasonRequired"));
       return;
     }
     setBusy(true);
@@ -780,8 +799,8 @@ export function InvestigatorPage({ campaign, identity }: Props) {
       await loadLibrary(true);
       await loadTimeline(investigator.id);
       setMessage(action === "accepted"
-        ? "已接受永久变化，并创建新的里程碑角色卡版本。"
-        : "已拒绝永久变化，原角色卡保持不变。");
+        ? t("investigators.msgAccepted")
+        : t("investigators.msgRejected"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -818,7 +837,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
         delete next[record.investigator_id];
         return next;
       });
-      setMessage("永久变化候选已提交给玩家；玩家接受前不会改写角色卡。");
+      setMessage(t("investigators.msgProposedChange"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -834,7 +853,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
         method: "POST",
         body: JSON.stringify({ action, comment: reviewComments[record.investigator_id] || null })
       });
-      setMessage(action === "approved" ? `已批准 ${record.name}。` : `已退回 ${record.name} 修改。`);
+      setMessage(action === "approved" ? t("investigators.msgApproved", { name: record.name }) : t("investigators.msgReturned", { name: record.name }));
       await loadCampaignRecords(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -851,7 +870,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
         method: "POST",
         body: JSON.stringify({ investigator_id: record.investigator_id })
       });
-      setMessage(`已将 ${record.name} 绑定到选定玩家席位。`);
+      setMessage(t("investigators.msgBound", { name: record.name }));
       await loadCampaignRecords(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -875,7 +894,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
           current_luck: number(draft.current_luck)
         })
       });
-      setMessage(`已更新 ${record.name} 的团内状态。`);
+      setMessage(t("investigators.msgStateUpdated", { name: record.name }));
       await loadCampaignRecords(true);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -888,37 +907,37 @@ export function InvestigatorPage({ campaign, identity }: Props) {
     <div className="investigator-page" id="investigator-section">
       <section className="investigator-hero">
         <div>
-          <p className="eyebrow">玩家角色中心</p>
-          <h2>建立、导入并长期保存调查员</h2>
-          <p>{profile ? `${profile.display_name} 的角色卡保存在本机，可跨团复用并分别交给 KP 审核。` : "先建立本机玩家档案，再创建或导入你的第一名调查员。"}</p>
+          <p className="eyebrow">{t("investigators.playerCenter")}</p>
+          <h2>{t("investigators.heroTitle")}</h2>
+          <p>{profile ? t("investigators.msgProfileHint", { name: profile.display_name }) : t("investigators.profileSetupHint")}</p>
         </div>
-        <div className="investigator-flow" aria-label="角色卡流程">
-          <span><b>01</b>导入或建卡</span><span><b>02</b>保存版本</span><span><b>03</b>提交 KP</span>
+        <div className="investigator-flow" aria-label={t("investigators.playerCenter")}>
+          <span><b>01</b>{t("investigators.flowImport")}</span><span><b>02</b>{t("investigators.flowSave")}</span><span><b>03</b>{t("investigators.flowSubmit")}</span>
         </div>
       </section>
       {!profile ? (
         <section className="page-card investigator-profile-setup">
-          <div className="page-intro"><div><p className="eyebrow">独立角色卡页面</p><h2>建立本机玩家档案</h2></div><UserRound size={24} /></div>
-          <p>调查员属于玩家档案，不绑定某一个团；同一调查员可分别提交给不同 KP 审核。</p>
-          <form onSubmit={createProfile}><label>玩家显示名<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label><button className="primary-button" disabled={busy || !displayName.trim()} type="submit"><Plus size={16} />建立档案</button></form>
+          <div className="page-intro"><div><p className="eyebrow">{t("investigators.standalonePage")}</p><h2>{t("investigators.createProfile")}</h2></div><UserRound size={24} /></div>
+          <p>{t("investigators.profileIntro")}</p>
+          <form onSubmit={createProfile}><label>{t("investigators.displayName")}<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label><button className="primary-button" disabled={busy || !displayName.trim()} type="submit"><Plus size={16} />{t("investigators.createProfileBtn")}</button></form>
         </section>
       ) : (
         <>
           <section className="page-card investigator-library">
-            <div className="page-intro"><div><p className="eyebrow">{profile.display_name} 的本地调查员库</p><h2>角色卡版本</h2></div><button className="ghost-button" disabled={busy} onClick={() => void loadLibrary()} type="button"><RefreshCw size={15} />刷新</button></div>
+            <div className="page-intro"><div><p className="eyebrow">{t("investigators.localLibrary", { name: profile.display_name })}</p><h2>{t("investigators.revisionTitle")}</h2></div><button className="ghost-button" disabled={busy} onClick={() => void loadLibrary()} type="button"><RefreshCw size={15} />{t("common.refresh")}</button></div>
             <div className="investigator-list">
               {investigators.length ? investigators.map((investigator) => {
                 const record = campaignRecords.find((item) => item.investigator_id === investigator.id);
                 return <article className="investigator-record" key={investigator.id}>
-                  <div><strong>{investigator.name}</strong><span>{String(investigator.current_revision.public_summary.occupation || "未填写职业")}</span></div>
-                  <small>不可变 v{investigator.current_revision.revision_no} · {investigator.current_revision.source_type}</small>
-                  {record && <span className={`proposal-status ${record.status}`}>{statusLabels[record.status]}</span>}
-                  {record?.review_comment && <p className="permission-hint">KP：{record.review_comment}</p>}
-                  <details className="character-sheet-details"><summary>查看角色卡摘要</summary><div className="derived-grid"><span>HP <strong>{investigator.current_revision.canonical_sheet.derived.max_hp}</strong></span><span>SAN <strong>{investigator.current_revision.canonical_sheet.derived.initial_san}</strong></span><span>MP <strong>{investigator.current_revision.canonical_sheet.derived.max_mp}</strong></span><span>MOV <strong>{investigator.current_revision.canonical_sheet.derived.mov}</strong></span><span>DB <strong>{investigator.current_revision.canonical_sheet.derived.damage_bonus}</strong></span><span>体格 <strong>{investigator.current_revision.canonical_sheet.derived.build}</strong></span></div><div className="skill-preview">{[...investigator.current_revision.canonical_sheet.skills].sort((left, right) => right.current_value - left.current_value).slice(0, 8).map((skill) => <span key={skill.skill_key}>{skill.display_name} {skill.current_value}</span>)}</div></details>
+                  <div><strong>{investigator.name}</strong><span>{String(investigator.current_revision.public_summary.occupation || t("investigators.noOccupation"))}</span></div>
+                  <small>{t("investigators.immutableRevision", { revision: investigator.current_revision.revision_no, source: investigator.current_revision.source_type })}</small>
+                  {record && <span className={`proposal-status ${record.status}`}>{investigatorStatusLabel(t, record.status)}</span>}
+                  {record?.review_comment && <p className="permission-hint">{t("investigators.kpComment")}：{record.review_comment}</p>}
+                  <details className="character-sheet-details"><summary>{t("investigators.viewSummary")}</summary><div className="derived-grid"><span>HP <strong>{investigator.current_revision.canonical_sheet.derived.max_hp}</strong></span><span>SAN <strong>{investigator.current_revision.canonical_sheet.derived.initial_san}</strong></span><span>MP <strong>{investigator.current_revision.canonical_sheet.derived.max_mp}</strong></span><span>MOV <strong>{investigator.current_revision.canonical_sheet.derived.mov}</strong></span><span>DB <strong>{investigator.current_revision.canonical_sheet.derived.damage_bonus}</strong></span><span>{t("investigators.build")} <strong>{investigator.current_revision.canonical_sheet.derived.build}</strong></span></div><div className="skill-preview">{[...investigator.current_revision.canonical_sheet.skills].sort((left, right) => right.current_value - left.current_value).slice(0, 8).map((skill) => <span key={skill.skill_key}>{skill.display_name} {skill.current_value}</span>)}</div></details>
                   <div className="inline-actions">
-                    <button className="ghost-button" disabled={busy} onClick={() => editInvestigator(investigator)} type="button">载入编辑器</button>
-                    <button className="ghost-button" disabled={busy} onClick={() => void loadTimeline(investigator.id)} type="button">跨团时间线</button>
-                    {campaign && identity?.role === "player" && <button className="secondary-button" disabled={busy || record?.status === "submitted"} onClick={() => void submitInvestigator(investigator)} type="button">提交当前版本给 {campaign.title} KP</button>}
+                    <button className="ghost-button" disabled={busy} onClick={() => editInvestigator(investigator)} type="button">{t("investigators.loadEditor")}</button>
+                    <button className="ghost-button" disabled={busy} onClick={() => void loadTimeline(investigator.id)} type="button">{t("investigators.timeline")}</button>
+                    {campaign && identity?.role === "player" && <button className="secondary-button" disabled={busy || record?.status === "submitted"} onClick={() => void submitInvestigator(investigator)} type="button">{t("investigators.submitVersion", { campaign: campaign.title })}</button>}
                   </div>
                   {timelines[investigator.id] && <CharacterTimelinePanel
                     branchId={branchSelections[investigator.id] || ""}
@@ -935,101 +954,101 @@ export function InvestigatorPage({ campaign, identity }: Props) {
                     timeline={timelines[investigator.id]}
                   />}
                 </article>;
-              }) : <p className="empty-copy">还没有调查员。</p>}
+              }) : <p className="empty-copy">{t("investigators.noInvestigators")}</p>}
             </div>
           </section>
 
           <section className="page-card excel-import-card">
-            <div className="page-intro"><div><p className="eyebrow">完整 Excel 导入</p><h2>导入 COC 角色卡</h2><p>安全读取身份、属性、技能、装备与背景，再由规则引擎重新计算关键数值。</p></div><span className="excel-heading-icon"><FileSpreadsheet size={27} /></span></div>
+            <div className="page-intro"><div><p className="eyebrow">{t("investigators.excelImport")}</p><h2>{t("investigators.importSheet")}</h2><p>{t("investigators.excelIntro")}</p></div><span className="excel-heading-icon"><FileSpreadsheet size={27} /></span></div>
             <div className={`excel-import-layout ${previewSheet ? "has-preview" : ""}`}>
               <label className="file-drop">
                 <span className="file-drop-illustration"><FileSpreadsheet size={32} /></span>
-                <strong>{preview?.source_filename || "拖入或选择 .xlsx 文件"}</strong>
-                <span>支持项目内 COC 空白卡模板及其已填写副本</span>
+                <strong>{preview?.source_filename || t("investigators.dropOrSelect")}</strong>
+                <span>{t("investigators.templateHint")}</span>
                 <input accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={busy} onChange={(event) => void previewExcel(event.target.files?.[0])} type="file" />
-                <span className="file-drop-action">选择 Excel 文件</span>
-                <small>公式、宏和外部链接不会执行；所有派生值由后端重新计算。</small>
+                <span className="file-drop-action">{t("investigators.chooseExcel")}</span>
+                <small>{t("investigators.excelSafeHint")}</small>
               </label>
               {!previewSheet && <aside className="excel-import-guide">
-                <strong>导入后完整预览</strong>
-                <div><span><CheckCircle2 size={15} />身份与九项属性</span><span><CheckCircle2 size={15} />全部技能与专攻</span><span><CheckCircle2 size={15} />武器、物品和背景</span><span><CheckCircle2 size={15} />HP、SAN、MOV 与 DB</span></div>
-                <p>只有在你确认预览后，角色卡才会保存成不可变草稿版本。</p>
+                <strong>{t("investigators.fullPreview")}</strong>
+                <div><span><CheckCircle2 size={15} />{t("investigators.identityNineAttrs")}</span><span><CheckCircle2 size={15} />{t("investigators.allSkillsSpecializations")}</span><span><CheckCircle2 size={15} />{t("investigators.weaponsItemsBg")}</span><span><CheckCircle2 size={15} />{t("investigators.derivedPreview")}</span></div>
+                <p>{t("investigators.previewConfirmHint")}</p>
               </aside>}
             </div>
             {previewSheet && preview && <div className="import-preview excel-character-preview">
               <div className="excel-preview-banner">
-                <div><span className="excel-preview-status"><ShieldCheck size={15} />解析完成</span><h3>{previewSheet.identity.name || "未命名调查员"}</h3><p>{previewSheet.identity.occupation || "未填写职业"} · {previewSheet.identity.era || "时代未填"}</p></div>
-                <div className="excel-import-stats"><span><strong>{previewSheet.skills.length}</strong>技能</span><span><strong>{previewBreakdown?.weapons ?? 0}</strong>武器</span><span><strong>{previewBreakdown?.items ?? 0}</strong>物品</span><span><strong>{preview.ignored_formula_cells}</strong>公式已忽略</span></div>
+                <div><span className="excel-preview-status"><ShieldCheck size={15} />{t("investigators.parsed")}</span><h3>{previewSheet.identity.name || t("investigators.unnamed")}</h3><p>{previewSheet.identity.occupation || t("investigators.noOccupation")} · {previewSheet.identity.era || t("investigators.eraMissing")}</p></div>
+                <div className="excel-import-stats"><span><strong>{previewSheet.skills.length}</strong>{t("investigators.skillsLabel")}</span><span><strong>{previewBreakdown?.weapons ?? 0}</strong>{t("investigators.weaponsLabel")}</span><span><strong>{previewBreakdown?.items ?? 0}</strong>{t("investigators.itemsLabel")}</span><span><strong>{preview.ignored_formula_cells}</strong>{t("investigators.formulasIgnored")}</span></div>
               </div>
-              <section className="excel-preview-section"><div className="excel-section-heading"><strong>基础资料</strong><span>从工作簿读取</span></div><div className="excel-identity-grid"><span>玩家<strong>{previewSheet.identity.player_name || "—"}</strong></span><span>年龄<strong>{previewSheet.identity.age || "—"}</strong></span><span>性别<strong>{previewSheet.identity.gender || "—"}</strong></span><span>居住地<strong>{previewSheet.identity.residence || "—"}</strong></span><span>出生地<strong>{previewSheet.identity.birthplace || "—"}</strong></span><span>背景字段<strong>{previewBreakdown?.backgroundFields ?? 0} 项</strong></span></div></section>
-              <section className="excel-preview-section"><div className="excel-section-heading"><strong>九项属性</strong><span>原始数值</span></div><div className="excel-characteristics-grid">{attributeFields.map((key) => <span key={key}><b>{key.toUpperCase()}</b><strong>{previewSheet.characteristics[key] ?? "—"}</strong></span>)}</div></section>
-              <section className="excel-preview-section"><div className="excel-section-heading"><strong>派生数值</strong><span>规则引擎重算</span></div><div className="derived-grid excel-derived-grid"><span>HP <strong>{previewSheet.derived.max_hp}</strong></span><span>SAN <strong>{previewSheet.derived.initial_san}</strong></span><span>MP <strong>{previewSheet.derived.max_mp}</strong></span><span>MOV <strong>{previewSheet.derived.mov}</strong></span><span>DB <strong>{previewSheet.derived.damage_bonus}</strong></span><span>体格 <strong>{previewSheet.derived.build}</strong></span><span>闪避 <strong>{previewSheet.derived.dodge}</strong></span><span>最大 SAN <strong>{previewSheet.derived.max_san}</strong></span></div></section>
-              <section className="excel-preview-section"><div className="excel-section-heading"><strong>优势技能</strong><span>按当前值排序</span></div><div className="skill-preview excel-strongest-skills">{strongestSkills.map((skill) => <span key={skill.skill_key}>{skill.display_name}{skill.specialization ? `（${skill.specialization}）` : ""}<strong>{skill.current_value}</strong></span>)}</div><details className="excel-all-skills"><summary>查看已解析的全部 {previewSheet.skills.length} 项技能</summary><div>{previewSheet.skills.map((skill) => <span key={skill.skill_key}><b>{skill.display_name}{skill.specialization ? `（${skill.specialization}）` : ""}</b><strong>{skill.current_value}</strong><small>{skill.base_value}+{skill.occupation_points}+{skill.interest_points}+{skill.development_points}</small></span>)}</div></details></section>
-              {preview.warnings.length > 0 ? <details className="excel-warning-panel" open><summary>{preview.warnings.length} 项需要确认</summary><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : <p className="excel-clean-result"><CheckCircle2 size={16} />确定性规则检查未发现警告。</p>}
-              <div className="excel-save-bar"><label>保存方式<select value={targetInvestigatorId} onChange={(event) => setTargetInvestigatorId(event.target.value)}><option value="">保存为新调查员</option>{investigators.map((investigator) => <option key={investigator.id} value={investigator.id}>作为“{investigator.name}”的新版本</option>)}</select></label><button className="primary-button" disabled={busy || !previewSheet.identity.name} onClick={() => void savePreview()} type="button"><Save size={16} />确认并保存草稿版本</button></div>
+              <section className="excel-preview-section"><div className="excel-section-heading"><strong>{t("investigators.basicInfo")}</strong><span>{t("investigators.fromWorkbook")}</span></div><div className="excel-identity-grid"><span>{t("investigators.player")}<strong>{previewSheet.identity.player_name || "—"}</strong></span><span>{t("investigators.age")}<strong>{previewSheet.identity.age || "—"}</strong></span><span>{t("investigators.gender")}<strong>{previewSheet.identity.gender || "—"}</strong></span><span>{t("investigators.residence")}<strong>{previewSheet.identity.residence || "—"}</strong></span><span>{t("investigators.birthplace")}<strong>{previewSheet.identity.birthplace || "—"}</strong></span><span>{t("investigators.bgFieldsCount")}<strong>{previewBreakdown?.backgroundFields ?? 0} {t("investigators.bgFieldsCountUnit")}</strong></span></div></section>
+              <section className="excel-preview-section"><div className="excel-section-heading"><strong>{t("investigators.nineAttributes")}</strong><span>{t("investigators.rawValues")}</span></div><div className="excel-characteristics-grid">{attributeFields.map((key) => <span key={key}><b>{key.toUpperCase()}</b><strong>{previewSheet.characteristics[key] ?? "—"}</strong></span>)}</div></section>
+              <section className="excel-preview-section"><div className="excel-section-heading"><strong>{t("investigators.derivedValues")}</strong><span>{t("investigators.engineRecalc")}</span></div><div className="derived-grid excel-derived-grid"><span>HP <strong>{previewSheet.derived.max_hp}</strong></span><span>SAN <strong>{previewSheet.derived.initial_san}</strong></span><span>MP <strong>{previewSheet.derived.max_mp}</strong></span><span>MOV <strong>{previewSheet.derived.mov}</strong></span><span>DB <strong>{previewSheet.derived.damage_bonus}</strong></span><span>{t("investigators.build")} <strong>{previewSheet.derived.build}</strong></span><span>{t("investigators.dodge")} <strong>{previewSheet.derived.dodge}</strong></span><span>{t("investigators.maxSan")} <strong>{previewSheet.derived.max_san}</strong></span></div></section>
+              <section className="excel-preview-section"><div className="excel-section-heading"><strong>{t("investigators.strongestSkills")}</strong><span>{t("investigators.sortedByValue")}</span></div><div className="skill-preview excel-strongest-skills">{strongestSkills.map((skill) => <span key={skill.skill_key}>{skill.display_name}{skill.specialization ? `（${skill.specialization}）` : ""}<strong>{skill.current_value}</strong></span>)}</div><details className="excel-all-skills"><summary>{t("investigators.allParsedSkills", { count: previewSheet.skills.length })}</summary><div>{previewSheet.skills.map((skill) => <span key={skill.skill_key}><b>{skill.display_name}{skill.specialization ? `（${skill.specialization}）` : ""}</b><strong>{skill.current_value}</strong><small>{skill.base_value}+{skill.occupation_points}+{skill.interest_points}+{skill.development_points}</small></span>)}</div></details></section>
+              {preview.warnings.length > 0 ? <details className="excel-warning-panel" open><summary>{t("investigators.needsConfirmation", { count: preview.warnings.length })}</summary><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : <p className="excel-clean-result"><CheckCircle2 size={16} />{t("investigators.noWarnings")}</p>}
+              <div className="excel-save-bar"><label>{t("investigators.saveAs")}<select value={targetInvestigatorId} onChange={(event) => setTargetInvestigatorId(event.target.value)}><option value="">{t("investigators.saveAsNew")}</option>{investigators.map((investigator) => <option key={investigator.id} value={investigator.id}>{t("investigators.asNewVersion", { name: investigator.name })}</option>)}</select></label><button className="primary-button" disabled={busy || !previewSheet.identity.name} onClick={() => void savePreview()} type="button"><Save size={16} />{t("investigators.confirmSaveDraft")}</button></div>
             </div>}
           </section>
 
           <section className="page-card manual-character-card">
-            <div className="page-intro"><div><p className="eyebrow">完整手工建卡</p><h2>调查员编辑器</h2></div><UserRound size={24} /></div>
+            <div className="page-intro"><div><p className="eyebrow">{t("investigators.manualBuild")}</p><h2>{t("investigators.editorTitle")}</h2></div><UserRound size={24} /></div>
             <form onSubmit={saveManual}>
               <fieldset className="manual-character-fields" disabled={busy}>
               <div className="form-grid compact-fields">
-                <label>姓名<input required value={manual.name} onChange={(event) => patchManual({ name: event.target.value })} /></label><label>玩家名<input value={manual.playerName} onChange={(event) => patchManual({ playerName: event.target.value })} /></label><label>职业<input value={manual.occupation} onChange={(event) => patchManual({ occupation: event.target.value })} /></label><label>时代<input value={manual.era} onChange={(event) => patchManual({ era: event.target.value })} /></label><label>年龄<input max="89" min="15" type="number" value={manual.age} onChange={(event) => patchManual({ age: event.target.value })} /></label><label>性别描述<input value={manual.gender} onChange={(event) => patchManual({ gender: event.target.value })} /></label><label>居住地<input value={manual.residence} onChange={(event) => patchManual({ residence: event.target.value })} /></label><label>出生地<input value={manual.birthplace} onChange={(event) => patchManual({ birthplace: event.target.value })} /></label>
+                <label>{t("investigators.name")}<input required value={manual.name} onChange={(event) => patchManual({ name: event.target.value })} /></label><label>{t("investigators.playerName")}<input value={manual.playerName} onChange={(event) => patchManual({ playerName: event.target.value })} /></label><label>{t("investigators.occupation")}<input value={manual.occupation} onChange={(event) => patchManual({ occupation: event.target.value })} /></label><label>{t("investigators.era")}<input value={manual.era} onChange={(event) => patchManual({ era: event.target.value })} /></label><label>{t("investigators.age")}<input max="89" min="15" type="number" value={manual.age} onChange={(event) => patchManual({ age: event.target.value })} /></label><label>{t("investigators.genderDesc")}<input value={manual.gender} onChange={(event) => patchManual({ gender: event.target.value })} /></label><label>{t("investigators.residence")}<input value={manual.residence} onChange={(event) => patchManual({ residence: event.target.value })} /></label><label>{t("investigators.birthplace")}<input value={manual.birthplace} onChange={(event) => patchManual({ birthplace: event.target.value })} /></label>
               </div>
               <div className="attribute-entry-grid">{attributeFields.map((key) => <label key={key}>{key.toUpperCase()}<input min="0" type="number" value={manual.attributes[key]} onChange={(event) => { setManual((current) => ({ ...current, attributes: { ...current.attributes, [key]: event.target.value } })); setManualPreview(null); setSkillRecommendation(null); }} /></label>)}</div>
-              <label>职业点公式<select value={manual.occupationFormula} onChange={(event) => patchManual({ occupationFormula: event.target.value as ManualDraft["occupationFormula"] })}><option value="edu4">EDU×4</option><option value="edu2_app2">EDU×2 + APP×2</option><option value="edu2_dex2">EDU×2 + DEX×2</option><option value="edu2_pow2">EDU×2 + POW×2</option><option value="edu2_str2">EDU×2 + STR×2</option></select></label>
-              <div className="derived-grid skill-budget-summary"><span className={occupationUsed > currentOccupationBudget ? "budget-over" : ""}>职业点 <strong>{occupationUsed}/{currentOccupationBudget}</strong></span><span className={occupationUsed > currentOccupationBudget ? "budget-over" : ""}>职业剩余 <strong>{currentOccupationBudget - occupationUsed}</strong></span><span className={interestUsed > interestBudget ? "budget-over" : ""}>兴趣点 <strong>{interestUsed}/{interestBudget}</strong></span><span className={interestUsed > interestBudget ? "budget-over" : ""}>兴趣剩余 <strong>{interestBudget - interestUsed}</strong></span></div>
+              <label>{t("investigators.occupationFormula")}<select value={manual.occupationFormula} onChange={(event) => patchManual({ occupationFormula: event.target.value as ManualDraft["occupationFormula"] })}><option value="edu4">{t("investigators.formulaEdu4")}</option><option value="edu2_app2">{t("investigators.formulaEdu2App2")}</option><option value="edu2_dex2">{t("investigators.formulaEdu2Dex2")}</option><option value="edu2_pow2">{t("investigators.formulaEdu2Pow2")}</option><option value="edu2_str2">{t("investigators.formulaEdu2Str2")}</option></select></label>
+              <div className="derived-grid skill-budget-summary"><span className={occupationUsed > currentOccupationBudget ? "budget-over" : ""}>{t("investigators.budgetUsed")} <strong>{occupationUsed}/{currentOccupationBudget}</strong></span><span className={occupationUsed > currentOccupationBudget ? "budget-over" : ""}>{t("investigators.budgetRemaining")} <strong>{currentOccupationBudget - occupationUsed}</strong></span><span className={interestUsed > interestBudget ? "budget-over" : ""}>{t("investigators.interestUsed")} <strong>{interestUsed}/{interestBudget}</strong></span><span className={interestUsed > interestBudget ? "budget-over" : ""}>{t("investigators.interestRemaining")} <strong>{interestBudget - interestUsed}</strong></span></div>
               <section className="skill-recommendation-panel">
                 <div>
-                  <p className="eyebrow">本地规则建议</p>
-                  <h3>推荐加点</h3>
-                  <small>{recommendationReady ? "将按职业、时代、年龄、属性和职业点公式生成完整方案。" : "先填写职业、时代、15–89 岁年龄及全部九项属性。"}</small>
+                  <p className="eyebrow">{t("investigators.localRuleAdvice")}</p>
+                  <h3>{t("investigators.recommendTitle")}</h3>
+                  <small>{recommendationReady ? t("investigators.recommendHintReady") : t("investigators.recommendHintNotReady")}</small>
                 </div>
-                <button className="recommend-skill-button" disabled={busy || !recommendationReady} onClick={() => void applySkillRecommendation()} type="button"><Sparkles size={17} />{skillRecommendation ? "重新生成并应用" : "生成并应用推荐加点"}</button>
-                <p className="permission-hint">应用时会替换当前职业点和兴趣点；应用后仍可逐项手动修改并正常保存。</p>
+                <button className="recommend-skill-button" disabled={busy || !recommendationReady} onClick={() => void applySkillRecommendation()} type="button"><Sparkles size={17} />{skillRecommendation ? t("investigators.recommendRegenerate") : t("investigators.recommendGenerate")}</button>
+                <p className="permission-hint">{t("investigators.recommendAppliedHint")}</p>
                 {skillRecommendation && <div className="recommendation-result">
-                  <div><strong>{skillRecommendation.profile_name}</strong><span>职业点 {skillRecommendation.occupation_spent}/{skillRecommendation.occupation_budget} · 兴趣点 {skillRecommendation.interest_spent}/{skillRecommendation.interest_budget}</span></div>
+                  <div><strong>{skillRecommendation.profile_name}</strong><span>{t("investigators.budgetUsed")} {skillRecommendation.occupation_spent}/{skillRecommendation.occupation_budget} · {t("investigators.interestUsed")} {skillRecommendation.interest_spent}/{skillRecommendation.interest_budget}</span></div>
                   <ul>{skillRecommendation.rationale.map((reason) => <li key={reason}>{reason}</li>)}</ul>
                 </div>}
               </section>
               <section className="skill-allocation-editor">
                 <div className="skill-allocation-heading">
-                  <div><p className="eyebrow">参考 COC空白卡.xlsx</p><h3>完整技能与加点</h3><small>共 {manual.skills.length} 项。基础值、普通/困难/极限成功率会自动计算。</small></div>
+                  <div><p className="eyebrow">{t("investigators.referenceTemplate")}</p><h3>{t("investigators.fullSkills")}</h3><small>{t("investigators.skillsCountHint", { count: manual.skills.length })}</small></div>
                   <div className="skill-allocation-filters">
-                    <label className="skill-search"><Search size={15} /><input aria-label="搜索技能" placeholder="搜索技能或专攻" value={skillQuery} onChange={(event) => setSkillQuery(event.target.value)} /></label>
-                    <label className="skill-allocation-toggle"><input checked={showAllocatedSkillsOnly} onChange={(event) => setShowAllocatedSkillsOnly(event.target.checked)} type="checkbox" />只看已加点</label>
+                    <label className="skill-search"><Search size={15} /><input aria-label={t("investigators.searchSkillLabel")} placeholder={t("investigators.searchPlaceholder")} value={skillQuery} onChange={(event) => setSkillQuery(event.target.value)} /></label>
+                    <label className="skill-allocation-toggle"><input checked={showAllocatedSkillsOnly} onChange={(event) => setShowAllocatedSkillsOnly(event.target.checked)} type="checkbox" />{t("investigators.onlyAllocated")}</label>
                   </div>
                 </div>
                 <div className="skill-table-layout">
                   {displayedSkillColumns.map((skillColumn, columnIndex) => <div className="skill-table-panel" key={skillColumn[0]?.skill_key || `empty-${columnIndex}`}>
                   <table className="skill-allocation-table">
-                    <thead><tr><th>技能</th><th>专攻</th><th>基础</th><th>职业点</th><th>兴趣点</th><th>普通</th><th>困难</th><th>极限</th></tr></thead>
+                    <thead><tr><th>{t("investigators.name")}</th><th>{t("investigators.specializationLabel")}</th><th>{t("investigators.baseLabel")}</th><th>{t("investigators.occupationPoints")}</th><th>{t("investigators.interestPoints")}</th><th>{t("investigators.regularLabel")}</th><th>{t("investigators.hardLabel")}</th><th>{t("investigators.extremeLabel")}</th></tr></thead>
                     <tbody>{skillColumn.map((skill) => {
                       const currentValue = skillCurrentValue(skill, manual.attributes);
                       const baseValue = resolvedSkillBase(skill, manual.attributes);
                       return <tr className={!skill.creation_points_allowed ? "skill-points-locked" : currentValue > 75 ? "skill-over-75" : ""} key={skill.skill_key}>
-                        <th scope="row"><DelayedSkillTooltip skill={skill} />{!skill.creation_points_allowed && <small>创建时不可加点</small>}</th>
-                        <td>{skill.specialization_editable ? <input aria-label={`${skill.display_name}专攻`} placeholder="填写专攻" value={skill.specialization} onChange={(event) => patchSkill(skill.skill_key, { specialization: event.target.value })} /> : <span>{skill.specialization || "—"}</span>}</td>
+                        <th scope="row"><DelayedSkillTooltip skill={skill} />{!skill.creation_points_allowed && <small>{t("investigators.lockedSkill")}</small>}</th>
+                        <td>{skill.specialization_editable ? <input aria-label={t("investigators.specializationAria", { skill: skill.display_name })} placeholder={t("investigators.specializationPlaceholder")} value={skill.specialization} onChange={(event) => patchSkill(skill.skill_key, { specialization: event.target.value })} /> : <span>{skill.specialization || "—"}</span>}</td>
                         <td><strong>{baseValue}</strong>{skill.base_formula !== "fixed" && <small>{skill.base_formula === "dex_half" ? "DEX÷2" : "EDU"}</small>}</td>
-                        <td><div className="skill-point-stepper"><button aria-label={`减少${skill.display_name}职业点`} disabled={!skill.creation_points_allowed || skill.occupationPoints <= 0} onClick={() => adjustSkillPoints(skill, "occupationPoints", -1)} type="button"><Minus size={13} /></button><input aria-label={`${skill.display_name}职业点`} disabled={!skill.creation_points_allowed} min="0" type="number" value={skill.occupationPoints} onChange={(event) => patchSkill(skill.skill_key, { occupationPoints: Math.max(0, number(event.target.value)) })} /><button aria-label={`增加${skill.display_name}职业点`} disabled={!skill.creation_points_allowed} onClick={() => adjustSkillPoints(skill, "occupationPoints", 1)} type="button"><Plus size={13} /></button></div></td>
-                        <td><div className="skill-point-stepper"><button aria-label={`减少${skill.display_name}兴趣点`} disabled={!skill.creation_points_allowed || skill.interestPoints <= 0} onClick={() => adjustSkillPoints(skill, "interestPoints", -1)} type="button"><Minus size={13} /></button><input aria-label={`${skill.display_name}兴趣点`} disabled={!skill.creation_points_allowed} min="0" type="number" value={skill.interestPoints} onChange={(event) => patchSkill(skill.skill_key, { interestPoints: Math.max(0, number(event.target.value)) })} /><button aria-label={`增加${skill.display_name}兴趣点`} disabled={!skill.creation_points_allowed} onClick={() => adjustSkillPoints(skill, "interestPoints", 1)} type="button"><Plus size={13} /></button></div></td>
+                        <td><div className="skill-point-stepper"><button aria-label={t("investigators.decreaseOccupation", { skill: skill.display_name })} disabled={!skill.creation_points_allowed || skill.occupationPoints <= 0} onClick={() => adjustSkillPoints(skill, "occupationPoints", -1)} type="button"><Minus size={13} /></button><input aria-label={t("investigators.occupationPointFor", { skill: skill.display_name })} disabled={!skill.creation_points_allowed} min="0" type="number" value={skill.occupationPoints} onChange={(event) => patchSkill(skill.skill_key, { occupationPoints: Math.max(0, number(event.target.value)) })} /><button aria-label={t("investigators.increaseOccupation", { skill: skill.display_name })} disabled={!skill.creation_points_allowed} onClick={() => adjustSkillPoints(skill, "occupationPoints", 1)} type="button"><Plus size={13} /></button></div></td>
+                        <td><div className="skill-point-stepper"><button aria-label={t("investigators.decreaseInterest", { skill: skill.display_name })} disabled={!skill.creation_points_allowed || skill.interestPoints <= 0} onClick={() => adjustSkillPoints(skill, "interestPoints", -1)} type="button"><Minus size={13} /></button><input aria-label={t("investigators.interestPointFor", { skill: skill.display_name })} disabled={!skill.creation_points_allowed} min="0" type="number" value={skill.interestPoints} onChange={(event) => patchSkill(skill.skill_key, { interestPoints: Math.max(0, number(event.target.value)) })} /><button aria-label={t("investigators.increaseInterest", { skill: skill.display_name })} disabled={!skill.creation_points_allowed} onClick={() => adjustSkillPoints(skill, "interestPoints", 1)} type="button"><Plus size={13} /></button></div></td>
                         <td><strong>{currentValue}</strong></td><td>{Math.floor(currentValue / 2)}</td><td>{Math.floor(currentValue / 5)}</td>
                       </tr>;
                     })}</tbody>
                   </table>
                   </div>)}
                 </div>
-                {!displayedSkills.length && <p className="empty-copy skill-empty-copy">没有符合当前筛选的技能。</p>}
-                <p className="permission-hint">技能超过 75 会标色并交由 KP 确认；克苏鲁神话在创建角色时不允许分配职业点或兴趣点。</p>
+                {!displayedSkills.length && <p className="empty-copy skill-empty-copy">{t("investigators.noFilterMatch")}</p>}
+                <p className="permission-hint">{t("investigators.skillOver75Hint")}</p>
               </section>
-              <label>武器（每行：名称|技能|伤害|射程|每轮次数|弹药|故障值）<textarea rows={4} value={manual.weaponsText} onChange={(event) => patchManual({ weaponsText: event.target.value })} /></label>
-              <div className="form-grid compact-fields"><label>货币<input value={manual.currency} onChange={(event) => patchManual({ currency: event.target.value })} /></label><label>现金<input min="0" type="number" value={manual.cash} onChange={(event) => patchManual({ cash: event.target.value })} /></label></div><p className="permission-hint">信用评级由上方技能表统一加点，会同步用于资产摘要。</p>
-              <label>物品（每行：名称|位置|可见性）<textarea rows={4} value={manual.itemsText} onChange={(event) => patchManual({ itemsText: event.target.value })} /></label>
-              <div className="form-grid background-fields">{backgroundFields.map(([key, label]) => <label key={key}>{label}<textarea rows={3} value={manual.background[key]} onChange={(event) => { setManual((current) => ({ ...current, background: { ...current.background, [key]: event.target.value } })); setManualPreview(null); }} /></label>)}</div>
-              {manualPreview && <div className="import-preview"><div className="derived-grid"><span>HP <strong>{manualPreview.canonical_sheet.derived.max_hp}</strong></span><span>SAN <strong>{manualPreview.canonical_sheet.derived.initial_san}</strong></span><span>MP <strong>{manualPreview.canonical_sheet.derived.max_mp}</strong></span><span>MOV <strong>{manualPreview.canonical_sheet.derived.mov}</strong></span><span>DB <strong>{manualPreview.canonical_sheet.derived.damage_bonus}</strong></span><span>体格 <strong>{manualPreview.canonical_sheet.derived.build}</strong></span></div>{manualPreview.warnings.length > 0 && <ul>{manualPreview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}</div>}
-              <label>保存方式<select value={manualTargetId} onChange={(event) => setManualTargetId(event.target.value)}><option value="">保存为新调查员</option>{investigators.map((investigator) => <option key={investigator.id} value={investigator.id}>作为“{investigator.name}”的新版本</option>)}</select></label>
-              <div className="inline-actions"><button className="secondary-button" disabled={busy || !manual.name.trim()} onClick={() => void validateManual()} type="button"><ShieldCheck size={16} />规则预览</button><button className="primary-button" disabled={busy || !manual.name.trim()} type="submit"><Save size={16} />保存不可变草稿</button></div>
+              <label>{t("investigators.weaponsFormat")}<textarea rows={4} value={manual.weaponsText} onChange={(event) => patchManual({ weaponsText: event.target.value })} /></label>
+              <div className="form-grid compact-fields"><label>{t("investigators.currency")}<input value={manual.currency} onChange={(event) => patchManual({ currency: event.target.value })} /></label><label>{t("investigators.cash")}<input min="0" type="number" value={manual.cash} onChange={(event) => patchManual({ cash: event.target.value })} /></label></div><p className="permission-hint">{t("investigators.creditRatingHint")}</p>
+              <label>{t("investigators.itemsFormat")}<textarea rows={4} value={manual.itemsText} onChange={(event) => patchManual({ itemsText: event.target.value })} /></label>
+              <div className="form-grid background-fields">{backgroundFieldKeys.map((key) => <label key={key}>{backgroundLabel(t, key)}<textarea rows={3} value={manual.background[key]} onChange={(event) => { setManual((current) => ({ ...current, background: { ...current.background, [key]: event.target.value } })); setManualPreview(null); }} /></label>)}</div>
+              {manualPreview && <div className="import-preview"><div className="derived-grid"><span>HP <strong>{manualPreview.canonical_sheet.derived.max_hp}</strong></span><span>SAN <strong>{manualPreview.canonical_sheet.derived.initial_san}</strong></span><span>MP <strong>{manualPreview.canonical_sheet.derived.max_mp}</strong></span><span>MOV <strong>{manualPreview.canonical_sheet.derived.mov}</strong></span><span>DB <strong>{manualPreview.canonical_sheet.derived.damage_bonus}</strong></span><span>{t("investigators.build")} <strong>{manualPreview.canonical_sheet.derived.build}</strong></span></div>{manualPreview.warnings.length > 0 && <ul>{manualPreview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}</div>}
+              <label>{t("investigators.saveAs")}<select value={manualTargetId} onChange={(event) => setManualTargetId(event.target.value)}><option value="">{t("investigators.saveAsNew")}</option>{investigators.map((investigator) => <option key={investigator.id} value={investigator.id}>{t("investigators.asNewVersion", { name: investigator.name })}</option>)}</select></label>
+              <div className="inline-actions"><button className="secondary-button" disabled={busy || !manual.name.trim()} onClick={() => void validateManual()} type="button"><ShieldCheck size={16} />{t("investigators.rulePreview")}</button><button className="primary-button" disabled={busy || !manual.name.trim()} type="submit"><Save size={16} />{t("investigators.saveImmutableDraft")}</button></div>
               </fieldset>
             </form>
           </section>
@@ -1037,14 +1056,14 @@ export function InvestigatorPage({ campaign, identity }: Props) {
       )}
 
       {campaign && identity?.role === "kp" && <section className="page-card investigator-review-card">
-        <div className="page-intro"><div><p className="eyebrow">{campaign.title}</p><h2>KP 角色卡审核</h2></div><button className="ghost-button" disabled={busy} onClick={() => void loadCampaignRecords()} type="button"><RefreshCw size={15} />刷新</button></div>
+        <div className="page-intro"><div><p className="eyebrow">{campaign.title}</p><h2>{t("investigators.kpReview")}</h2></div><button className="ghost-button" disabled={busy} onClick={() => void loadCampaignRecords()} type="button"><RefreshCw size={15} />{t("common.refresh")}</button></div>
         {campaignRecords.length ? campaignRecords.map((record) => <article className="investigator-review-record" key={record.investigator_id}>
-          <div className="preview-heading"><div><strong>{record.name} · v{record.submitted_revision?.revision_no}</strong><span>{statusLabels[record.status]} · {record.submitted_revision?.canonical_sheet.identity.occupation || "未填职业"}</span></div><span className={`proposal-status ${record.status}`}>{statusLabels[record.status]}</span></div>
-          {record.submitted_revision?.warnings.length ? <details open><summary>{record.submitted_revision.warnings.length} 项规则提示</summary><ul>{record.submitted_revision.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : <p className="permission-hint">确定性角色规则校验未发现警告。</p>}
-          {record.diff.length > 0 && <details><summary>与已批准版本相比：{record.diff.length} 项变更</summary><ul className="diff-list">{record.diff.slice(0, 30).map((item) => <li key={item.path}><code>{item.path}</code><span>{JSON.stringify(item.before) ?? "∅"} → {JSON.stringify(item.after) ?? "∅"}</span></li>)}</ul></details>}
-          {record.status === "submitted" && <><label>给玩家的审核意见<textarea rows={3} value={reviewComments[record.investigator_id] || ""} onChange={(event) => setReviewComments((current) => ({ ...current, [record.investigator_id]: event.target.value }))} /></label><div className="inline-actions"><button className="primary-button" disabled={busy} onClick={() => void review(record, "approved")} type="button"><CheckCircle2 size={16} />批准当前版本</button><button className="secondary-button" disabled={busy || !(reviewComments[record.investigator_id] || "").trim()} onClick={() => void review(record, "changes_requested")} type="button"><XCircle size={16} />退回修改</button></div></>}
-          {record.approved_revision_id && <div className="approval-tools"><label>绑定到玩家席位<select value={bindingMembers[record.investigator_id] || ""} onChange={(event) => setBindingMembers((current) => ({ ...current, [record.investigator_id]: event.target.value }))}><option value="">选择玩家</option>{members.map((member) => <option key={member.id} value={member.id}>{member.display_name}{member.pc_id ? "（已有角色）" : ""}</option>)}</select></label><button className="secondary-button" disabled={busy || !bindingMembers[record.investigator_id]} onClick={() => void bindInvestigator(record)} type="button">绑定已批准角色</button></div>}
-          {record.campaign_state && <div className="runtime-state-editor"><strong>团内运行状态 · v{record.campaign_state.state_version}</strong><div className="attribute-entry-grid">{(["current_hp", "current_san", "current_mp", "current_luck"] as const).map((key) => <label key={key}>{key.replace("current_", "").toUpperCase()}<input min="0" type="number" value={stateDrafts[record.investigator_id]?.[key] ?? ""} onChange={(event) => setStateDrafts((current) => ({ ...current, [record.investigator_id]: { ...current[record.investigator_id], [key]: event.target.value } }))} /></label>)}</div><button className="ghost-button" disabled={busy} onClick={() => void updateRuntimeState(record)} type="button">保存团内状态</button></div>}
+          <div className="preview-heading"><div><strong>{record.name} · v{record.submitted_revision?.revision_no}</strong><span>{investigatorStatusLabel(t, record.status)} · {record.submitted_revision?.canonical_sheet.identity.occupation || t("investigators.noOccupation")}</span></div><span className={`proposal-status ${record.status}`}>{investigatorStatusLabel(t, record.status)}</span></div>
+          {record.submitted_revision?.warnings.length ? <details open><summary>{t("investigators.ruleWarnings", { count: record.submitted_revision.warnings.length })}</summary><ul>{record.submitted_revision.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : <p className="permission-hint">{t("investigators.noRuleWarnings")}</p>}
+          {record.diff.length > 0 && <details><summary>{t("investigators.diffSummary", { count: record.diff.length })}</summary><ul className="diff-list">{record.diff.slice(0, 30).map((item) => <li key={item.path}><code>{item.path}</code><span>{JSON.stringify(item.before) ?? "∅"} → {JSON.stringify(item.after) ?? "∅"}</span></li>)}</ul></details>}
+          {record.status === "submitted" && <><label>{t("investigators.reviewComment")}<textarea rows={3} value={reviewComments[record.investigator_id] || ""} onChange={(event) => setReviewComments((current) => ({ ...current, [record.investigator_id]: event.target.value }))} /></label><div className="inline-actions"><button className="primary-button" disabled={busy} onClick={() => void review(record, "approved")} type="button"><CheckCircle2 size={16} />{t("investigators.approveCurrent")}</button><button className="secondary-button" disabled={busy || !(reviewComments[record.investigator_id] || "").trim()} onClick={() => void review(record, "changes_requested")} type="button"><XCircle size={16} />{t("investigators.returnChanges")}</button></div></>}
+          {record.approved_revision_id && <div className="approval-tools"><label>{t("investigators.bindToSeat")}<select value={bindingMembers[record.investigator_id] || ""} onChange={(event) => setBindingMembers((current) => ({ ...current, [record.investigator_id]: event.target.value }))}><option value="">{t("investigators.selectPlayer")}</option>{members.map((member) => <option key={member.id} value={member.id}>{member.display_name}{member.pc_id ? t("investigators.hasRole") : ""}</option>)}</select></label><button className="secondary-button" disabled={busy || !bindingMembers[record.investigator_id]} onClick={() => void bindInvestigator(record)} type="button">{t("investigators.bindApproved")}</button></div>}
+          {record.campaign_state && <div className="runtime-state-editor"><strong>{t("investigators.runtimeState", { version: record.campaign_state.state_version })}</strong><div className="attribute-entry-grid">{(["current_hp", "current_san", "current_mp", "current_luck"] as const).map((key) => <label key={key}>{key.replace("current_", "").toUpperCase()}<input min="0" type="number" value={stateDrafts[record.investigator_id]?.[key] ?? ""} onChange={(event) => setStateDrafts((current) => ({ ...current, [record.investigator_id]: { ...current[record.investigator_id], [key]: event.target.value } }))} /></label>)}</div><button className="ghost-button" disabled={busy} onClick={() => void updateRuntimeState(record)} type="button">{t("investigators.saveState")}</button></div>}
           {record.status === "approved" && <KpTimelineTools
             busy={busy}
             draft={changeDrafts[record.investigator_id] || EMPTY_PERMANENT_CHANGE}
@@ -1059,7 +1078,7 @@ export function InvestigatorPage({ campaign, identity }: Props) {
             onPropose={() => void proposePermanentChange(record)}
             timeline={timelines[record.investigator_id]}
           />}
-        </article>) : <p className="empty-copy">当前团还没有玩家提交调查员。</p>}
+        </article>) : <p className="empty-copy">{t("investigators.noSubmissions")}</p>}
       </section>}
       <p className="inline-message investigator-global-message">{message}</p>
     </div>
