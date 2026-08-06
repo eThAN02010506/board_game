@@ -1,5 +1,6 @@
 import { AlertCircle } from "lucide-react";
 import type { Dispatch, FormEventHandler, SetStateAction } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   AuthIdentity,
@@ -156,30 +157,31 @@ function PlayHero(props: {
   pendingCount: number;
   role: AuthIdentity["role"];
 }) {
+  const { t } = useTranslation();
   return (
     <section className="play-hero-card">
       <div>
         <p className="eyebrow">
-          {props.role === "kp" ? "Keeper cockpit" : "Player table"}
+          {props.role === "kp" ? t("play.heroKpEyebrow") : t("play.heroPlayerEyebrow")}
         </p>
-        <h2>{props.role === "kp" ? "导演控制室" : "你的行动桌面"}</h2>
+        <h2>{props.role === "kp" ? t("play.heroKpTitle") : t("play.heroPlayerTitle")}</h2>
         <p>
           {props.role === "kp"
-            ? "统一查看玩家行动、地图、检定、审批和自动 KP 队列；适合掌控节奏与风险。"
-            : "专注描述行动、查看角色与地图、完成检定；不会暴露 KP 草稿或后台控制。"}
+            ? t("play.heroKpHint")
+            : t("play.heroPlayerHint")}
         </p>
       </div>
-      <div className="play-hero-metrics" aria-label="当前桌面状态">
+      <div className="play-hero-metrics" aria-label={t("play.deskStatus")}>
         <span>
-          <small>角色</small>
-          <strong>{props.activePc?.name ?? "未绑定"}</strong>
+          <small>{t("play.metricCharacter")}</small>
+          <strong>{props.activePc?.name ?? t("play.unbound")}</strong>
         </span>
         <span>
-          <small>地图</small>
-          <strong>{props.activeMap?.title ?? "未打开"}</strong>
+          <small>{t("play.metricMap")}</small>
+          <strong>{props.activeMap?.title ?? t("play.notOpen")}</strong>
         </span>
         <span>
-          <small>{props.role === "kp" ? "待审行动" : "待掷检定"}</small>
+          <small>{props.role === "kp" ? t("play.metricPendingActions") : t("play.metricPendingChecks")}</small>
           <strong>{props.pendingCount}</strong>
         </span>
       </div>
@@ -188,19 +190,20 @@ function PlayHero(props: {
 }
 
 function CharacterSidebar(props: CommonPlayProps) {
+  const { t } = useTranslation();
   return (
     <aside className={`play-character-card ${props.characterExpanded ? "expanded" : ""}`}>
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">当前调查员</p>
-          <h2>{props.activePc?.name ?? "尚未绑定角色"}</h2>
+          <p className="eyebrow">{t("play.currentInvestigator")}</p>
+          <h2>{props.activePc?.name ?? t("play.noBoundCharacter")}</h2>
         </div>
         <button
           className="ghost-button"
           onClick={() => props.onSetCharacterExpanded((value) => !value)}
           type="button"
         >
-          {props.characterExpanded ? "收起" : "展开完整卡"}
+          {props.characterExpanded ? t("play.collapse") : t("play.expandFull")}
         </button>
       </div>
       {props.activePc ? (
@@ -221,13 +224,13 @@ function CharacterSidebar(props: CommonPlayProps) {
         </>
       ) : (
         <p className="permission-hint">
-          先在“团与权限”页加入会话并绑定已批准角色。
+          {t("play.bindHint")}
         </p>
       )}
       <div className="party-summary">
         <div className="party-summary-heading">
-          <strong>{props.authIdentity.role === "kp" ? "所有玩家" : "队友信息"}</strong>
-          <small>{props.authIdentity.role === "kp" ? "公开摘要" : "精简信息"}</small>
+          <strong>{props.authIdentity.role === "kp" ? t("play.allPlayers") : t("play.allyInfo")}</strong>
+          <small>{props.authIdentity.role === "kp" ? t("play.publicSummary") : t("play.briefInfo")}</small>
         </div>
         {props.otherPcs.length ? (
           props.otherPcs.map((pc) => {
@@ -240,24 +243,24 @@ function CharacterSidebar(props: CommonPlayProps) {
               <article className="party-member-mini" key={pc.id}>
                 <div>
                   <strong>{pc.name}</strong>
-                  <span>{location ?? "位置未知"}</span>
+                  <span>{location ?? t("play.locationUnknown")}</span>
                 </div>
                 {props.authIdentity.role === "kp" && (
                   <small>
-                    {summary.cash !== undefined ? `现金 ${summary.cash}` : "现金未公开"}
+                    {summary.cash !== undefined ? `${t("play.cash")} ${summary.cash}` : t("play.cashHidden")}
                     {Object.keys(attributes).length
                       ? ` · ${Object.entries(attributes)
                           .slice(0, 3)
                           .map(([key, value]) => `${key.toUpperCase()} ${value}`)
                           .join(" / ")}`
-                      : " · 属性未公开"}
+                      : t("play.attributesHidden")}
                   </small>
                 )}
               </article>
             );
           })
         ) : (
-          <small>目前没有其他已加入的调查员。</small>
+          <small>{t("play.noOtherInvestigators")}</small>
         )}
       </div>
       {props.authIdentity.role === "kp" && (
@@ -360,6 +363,7 @@ function CheckDesk(props: CommonPlayProps & CheckDeskProps) {
 }
 
 export function KpWorkspace(props: KpWorkspaceProps) {
+  const { t } = useTranslation();
   return (
     <div className="play-page kp-layout">
       <PlayHero
@@ -371,7 +375,7 @@ export function KpWorkspace(props: KpWorkspaceProps) {
       <CharacterSidebar {...props} />
       <PlayMapColumn {...props} />
       <div className="play-action-column">
-        <div className="action-tabs" role="tablist" aria-label="KP 导演控制台">
+        <div className="action-tabs" role="tablist" aria-label={t("play.kpConsoleLabel")}>
           {(["player-view", "checks", "director", "table-log"] as const).map((tab) => (
             <button
               aria-selected={props.kpActionTab === tab}
@@ -381,7 +385,7 @@ export function KpWorkspace(props: KpWorkspaceProps) {
               role="tab"
               type="button"
             >
-              {{ "player-view": "玩家视角", checks: "检定", director: "导演", "table-log": "桌面记录" }[tab]}
+              {{ "player-view": t("play.tabPlayerView"), checks: t("play.tabChecks"), director: t("play.tabDirector"), "table-log": t("play.tabTableLog") }[tab]}
             </button>
           ))}
         </div>
@@ -411,7 +415,7 @@ export function KpWorkspace(props: KpWorkspaceProps) {
           {props.kpActionTab === "table-log" && (
             <section className="response-panel table-log-panel">
               <div className="panel-heading">
-                <h2>桌面记录</h2>
+                <h2>{t("play.tabTableLog")}</h2>
                 <AlertCircle size={18} />
               </div>
               <pre>{props.log}</pre>
@@ -424,6 +428,7 @@ export function KpWorkspace(props: KpWorkspaceProps) {
 }
 
 export function PlayerWorkspace(props: PlayerWorkspaceProps) {
+  const { t } = useTranslation();
   return (
     <div className="play-page player-layout">
       <PlayHero
@@ -435,7 +440,7 @@ export function PlayerWorkspace(props: PlayerWorkspaceProps) {
       <CharacterSidebar {...props} />
       <PlayMapColumn {...props} />
       <div className="play-action-column">
-        <div className="action-tabs" role="tablist" aria-label="玩家游玩台">
+        <div className="action-tabs" role="tablist" aria-label={t("play.playerConsoleLabel")}>
           {(["actions", "checks"] as const).map((tab) => (
             <button
               aria-selected={props.playerActionTab === tab}
@@ -445,7 +450,7 @@ export function PlayerWorkspace(props: PlayerWorkspaceProps) {
               role="tab"
               type="button"
             >
-              {tab === "actions" ? "行动" : "检定"}
+              {tab === "actions" ? t("play.tabActions") : t("play.tabChecks")}
             </button>
           ))}
         </div>

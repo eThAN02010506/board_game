@@ -5,6 +5,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { requestJson } from "../../api/client";
 import type {
@@ -43,6 +44,7 @@ function commandId(prefix: string) {
 }
 
 export function GameplayWorkbench({ campaign, identity }: Props) {
+  const { t } = useTranslation();
   const [encounters, setEncounters] = useState<Coc7Encounter[]>([]);
   const [investigators, setInvestigators] = useState<CampaignInvestigator[]>([]);
   const [selectedEncounterId, setSelectedEncounterId] = useState("");
@@ -50,16 +52,16 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
   const [characterState, setCharacterState] =
     useState<Coc7CharacterGameplayState | null>(null);
   const [events, setEvents] = useState<Coc7GameplayEvent[]>([]);
-  const [message, setMessage] = useState("状态转换会保存骰值、版本与规则来源。");
+  const [message, setMessage] = useState(t("gameplay.messageInitial"));
   const [busy, setBusy] = useState(false);
   const [kind, setKind] = useState<"combat" | "chase">("combat");
-  const [title, setTitle] = useState("新的 CoC7 场景");
+  const [title, setTitle] = useState(t("gameplay.newSceneTitle"));
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
-  const [npcName, setNpcName] = useState("未知威胁");
+  const [npcName, setNpcName] = useState(t("gameplay.unknownThreat"));
   const [npcDex, setNpcDex] = useState("55");
   const [npcHp, setNpcHp] = useState("10");
   const [npcMove, setNpcMove] = useState("8");
-  const [locations, setLocations] = useState("起点,狭窄通道,终点");
+  const [locations, setLocations] = useState(t("gameplay.locationsDefault"));
   const [targetParticipantId, setTargetParticipantId] = useState("");
   const [damage, setDamage] = useState("1");
   const [attackDraft, setAttackDraft] = useState({
@@ -71,7 +73,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
     defenderRoll: "50",
     attackerBuild: "0",
     defenderBuild: "0",
-    maneuverEffect: "击倒",
+    maneuverEffect: t("gameplay.maneuverEffectDefault"),
     defense: "dodge" as "dodge" | "fight_back"
   });
   const [chaseDraft, setChaseDraft] = useState({
@@ -245,8 +247,8 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
   if (!campaign || !identity) {
     return (
       <section className="tool-panel gameplay-workbench">
-        <h2>CoC7 状态机</h2>
-        <p>加入团会话后可查看战斗、追逐、伤害、理智和成长状态。</p>
+        <h2>{t("gameplay.stateMachineTitle")}</h2>
+        <p>{t("gameplay.joinHint")}</p>
       </section>
     );
   }
@@ -257,7 +259,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
     setBusy(true);
     try {
       await action();
-      setMessage(`${label}已保存，可从事件时间线重放。`);
+      setMessage(t("gameplay.saved", { label }));
       await load(true);
       if (selectedEncounter) await loadEncounterDetails(selectedEncounter);
       if (selectedInvestigatorId) await loadCharacter(selectedInvestigatorId);
@@ -392,8 +394,8 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
     <section className="tool-panel gameplay-workbench">
       <header className="panel-heading">
         <div>
-          <p className="eyebrow">持久化 · 可重放 · CoC7 2002c</p>
-          <h2>战斗、追逐与调查员状态</h2>
+          <p className="eyebrow">{t("gameplay.eyebrow")}</p>
+          <h2>{t("gameplay.title")}</h2>
         </div>
         <Activity size={19} />
       </header>
@@ -404,7 +406,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
           onClick={() => void load()}
           type="button"
         >
-          <RefreshCw size={14} />刷新
+          <RefreshCw size={14} />{t("gameplay.refresh")}
         </button>
         <span>{message}</span>
       </div>
@@ -436,7 +438,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
           growthSkills={growthSkills}
           isKeeper={identity.role === "kp"}
           onExecute={() =>
-            void runAction("调查员状态转换", characterStateCommand)
+            void runAction(t("gameplay.actionCharacterState"), characterStateCommand)
           }
           setCommand={setCharacterCommand}
           setDraft={setCharacterDraft}
@@ -446,33 +448,33 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
 
       {identity.role === "kp" && (
         <details className="gameplay-create">
-          <summary>创建战斗或追逐</summary>
+          <summary>{t("gameplay.createEncounter")}</summary>
           <div className="gameplay-command-grid">
             <label>
-              类型
+              {t("gameplay.type")}
               <select
                 value={kind}
                 onChange={(event) =>
                   setKind(event.target.value as "combat" | "chase")
                 }
               >
-                <option value="combat">战斗</option>
-                <option value="chase">追逐</option>
+                <option value="combat">{t("gameplay.combat")}</option>
+                <option value="chase">{t("gameplay.chase")}</option>
               </select>
             </label>
             <label>
-              标题
+              {t("gameplay.encounterTitle")}
               <input value={title} onChange={(event) => setTitle(event.target.value)} />
             </label>
             <label>
-              NPC / 威胁
+              {t("gameplay.threatLabel")}
               <input
                 value={npcName}
                 onChange={(event) => setNpcName(event.target.value)}
               />
             </label>
             <label>
-              NPC DEX
+              {t("gameplay.npcDex")}
               <input
                 min={0}
                 type="number"
@@ -481,7 +483,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
               />
             </label>
             <label>
-              NPC HP
+              {t("gameplay.npcHp")}
               <input
                 min={1}
                 type="number"
@@ -492,7 +494,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
             {kind === "chase" && (
               <>
                 <label>
-                  NPC MOV
+                  {t("gameplay.npcMov")}
                   <input
                     min={0}
                     type="number"
@@ -501,7 +503,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                   />
                 </label>
                 <label className="wide">
-                  地点链（逗号分隔）
+                  {t("gameplay.locationChain")}
                   <input
                     value={locations}
                     onChange={(event) => setLocations(event.target.value)}
@@ -531,11 +533,11 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
           <button
             className="primary-button"
             disabled={busy || !selectedParticipants.length}
-            onClick={() => void runAction("遭遇创建", createEncounter)}
+            onClick={() => void runAction(t("gameplay.actionCreateEncounter"), createEncounter)}
             type="button"
           >
             {kind === "combat" ? <Crosshair size={14} /> : <Footprints size={14} />}
-            创建{kind === "combat" ? "战斗" : "追逐"}
+            {kind === "combat" ? t("gameplay.createCombat") : t("gameplay.createChase")}
           </button>
         </details>
       )}
@@ -550,8 +552,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
           >
             <strong>{encounter.title}</strong>
             <span>
-              {encounter.kind === "combat" ? "战斗" : "追逐"} · 第{" "}
-              {encounter.round_no} 轮 · {encounter.status}
+              {encounter.kind === "combat" ? t("gameplay.combat") : t("gameplay.chase")} · {t("gameplay.roundLabel", { round: encounter.round_no })} · {encounter.status}
             </span>
           </button>
         ))}
@@ -563,7 +564,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
             <div>
               <strong>{selectedEncounter.title}</strong>
               <small>
-                版本 {selectedEncounter.version} · 当前席位{" "}
+                {t("gameplay.versionLabel", { version: selectedEncounter.version })} · {t("gameplay.currentSeat")}{" "}
                 {selectedEncounter.state.turn_order[selectedEncounter.turn_index] ??
                   "—"}
               </small>
@@ -574,25 +575,25 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                   className="ghost-button"
                   disabled={busy}
                   onClick={() =>
-                    void runAction("推进回合", () =>
+                    void runAction(t("gameplay.actionAdvanceTurn"), () =>
                       encounterCommand("advance_turn", {})
                     )
                   }
                   type="button"
                 >
-                  推进席位
+                  {t("gameplay.advanceTurn")}
                 </button>
                 <button
                   className="ghost-button"
                   disabled={busy}
                   onClick={() =>
-                    void runAction("结束遭遇", () =>
+                    void runAction(t("gameplay.actionEndEncounter"), () =>
                       encounterCommand("complete", {})
                     )
                   }
                   type="button"
                 >
-                  结束
+                  {t("gameplay.endEncounter")}
                 </button>
               </span>
             )}
@@ -614,7 +615,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                   selectedEncounter.state.locations && (
                     <small>
                       {selectedEncounter.state.locations[participant.location_index]
-                        ?.label ?? "位置未知"}
+                        ?.label ?? t("gameplay.locationUnknown")}
                     </small>
                   )}
               </div>
@@ -624,13 +625,13 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
           {identity.role === "kp" && selectedEncounter.status === "active" && (
             <details>
               <summary>
-                {selectedEncounter.kind === "combat" ? "战斗裁决" : "追逐裁决"}
+                {selectedEncounter.kind === "combat" ? t("gameplay.resolveCombat") : t("gameplay.resolveChase")}
               </summary>
               {selectedEncounter.kind === "combat" ? (
                 <div className="gameplay-command-stack">
                   <div className="gameplay-command-grid">
                     <label>
-                      直接伤害目标
+                      {t("gameplay.directDamageTarget")}
                       <select
                         value={targetParticipantId}
                         onChange={(event) =>
@@ -645,7 +646,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       </select>
                     </label>
                     <label>
-                      伤害
+                      {t("gameplay.damage")}
                       <input
                         min={0}
                         type="number"
@@ -656,7 +657,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                     <button
                       disabled={busy}
                       onClick={() =>
-                        void runAction("伤害", () =>
+                        void runAction(t("gameplay.actionDamage"), () =>
                           encounterCommand("damage", {
                             target_id: targetParticipantId,
                             damage: Number(damage)
@@ -665,12 +666,12 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       }
                       type="button"
                     >
-                      应用伤害
+                      {t("gameplay.applyDamage")}
                     </button>
                   </div>
                   <div className="gameplay-command-grid">
                     <label>
-                      攻击者
+                      {t("gameplay.attacker")}
                       <select
                         value={attackDraft.attackerId}
                         onChange={(event) =>
@@ -688,7 +689,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       </select>
                     </label>
                     <label>
-                      目标
+                      {t("gameplay.target")}
                       <select
                         value={attackDraft.targetId}
                         onChange={(event) =>
@@ -706,7 +707,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       </select>
                     </label>
                     <label>
-                      攻击技能 / 骰
+                      {t("gameplay.attackSkill")}
                       <span className="paired-inputs">
                         <input
                           type="number"
@@ -731,7 +732,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       </span>
                     </label>
                     <label>
-                      防御技能 / 骰
+                      {t("gameplay.defenseSkill")}
                       <span className="paired-inputs">
                         <input
                           type="number"
@@ -756,7 +757,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       </span>
                     </label>
                     <label>
-                      防御
+                      {t("gameplay.defense")}
                       <select
                         value={attackDraft.defense}
                         onChange={(event) =>
@@ -766,15 +767,15 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                           }))
                         }
                       >
-                        <option value="dodge">闪避</option>
-                        <option value="fight_back">反击</option>
+                        <option value="dodge">{t("gameplay.dodge")}</option>
+                        <option value="fight_back">{t("gameplay.fightBack")}</option>
                       </select>
                     </label>
                     <label>
-                      双方体格
+                      {t("gameplay.build")}
                       <span className="paired-inputs">
                         <input
-                          aria-label="攻击者体格"
+                          aria-label={t("gameplay.attackerBuild")}
                           type="number"
                           value={attackDraft.attackerBuild}
                           onChange={(event) =>
@@ -785,7 +786,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                           }
                         />
                         <input
-                          aria-label="防御者体格"
+                          aria-label={t("gameplay.defenderBuild")}
                           type="number"
                           value={attackDraft.defenderBuild}
                           onChange={(event) =>
@@ -798,7 +799,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       </span>
                     </label>
                     <label>
-                      战技效果
+                      {t("gameplay.maneuverEffect")}
                       <input
                         value={attackDraft.maneuverEffect}
                         onChange={(event) =>
@@ -812,7 +813,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                     <button
                       disabled={busy}
                       onClick={() =>
-                        void runAction("近战交换", () =>
+                        void runAction(t("gameplay.actionMelee"), () =>
                           encounterCommand("melee", {
                             attacker_id: attackDraft.attackerId,
                             target_id: attackDraft.targetId,
@@ -833,12 +834,12 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       }
                       type="button"
                     >
-                      裁决近战
+                      {t("gameplay.resolveMelee")}
                     </button>
                     <button
                       disabled={busy}
                       onClick={() =>
-                        void runAction("战技", () =>
+                        void runAction(t("gameplay.actionManeuver"), () =>
                           encounterCommand("maneuver", {
                             attacker_id: attackDraft.attackerId,
                             target_id: attackDraft.targetId,
@@ -861,12 +862,12 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       }
                       type="button"
                     >
-                      裁决战技
+                      {t("gameplay.resolveManeuver")}
                     </button>
                     <button
                       disabled={busy}
                       onClick={() =>
-                        void runAction("枪械攻击", () =>
+                        void runAction(t("gameplay.actionFirearm"), () =>
                           encounterCommand("firearm", {
                             attacker_id: attackDraft.attackerId,
                             target_id: attackDraft.targetId,
@@ -878,7 +879,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       }
                       type="button"
                     >
-                      裁决枪械
+                      {t("gameplay.resolveFirearm")}
                     </button>
                   </div>
                 </div>
@@ -886,7 +887,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                 <div className="gameplay-command-stack">
                   <div className="gameplay-command-grid">
                     <label>
-                      参与者
+                      {t("gameplay.participant")}
                       <select
                         value={chaseDraft.participantId}
                         onChange={(event) =>
@@ -904,7 +905,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       </select>
                     </label>
                     <label>
-                      前进地点数
+                      {t("gameplay.stepsLabel")}
                       <input
                         min={1}
                         type="number"
@@ -920,7 +921,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                     <button
                       disabled={busy}
                       onClick={() =>
-                        void runAction("追逐移动", () =>
+                        void runAction(t("gameplay.actionChaseMove"), () =>
                           encounterCommand("move", {
                             participant_id: chaseDraft.participantId,
                             steps: Number(chaseDraft.steps),
@@ -930,7 +931,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       }
                       type="button"
                     >
-                      移动
+                      {t("gameplay.move")}
                     </button>
                   </div>
                   <div className="gameplay-command-grid">
@@ -945,10 +946,10 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                         }
                         type="checkbox"
                       />
-                      险境检定成功
+                      {t("gameplay.hazardPassed")}
                     </label>
                     <label>
-                      失败额外 AP
+                      {t("gameplay.failureCost")}
                       <input
                         min={0}
                         type="number"
@@ -962,7 +963,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       />
                     </label>
                     <label>
-                      失败伤害
+                      {t("gameplay.failureDamage")}
                       <input
                         min={0}
                         type="number"
@@ -978,7 +979,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                     <button
                       disabled={busy}
                       onClick={() =>
-                        void runAction("险境裁决", () =>
+                        void runAction(t("gameplay.actionHazard"), () =>
                           encounterCommand("hazard", {
                             participant_id: chaseDraft.participantId,
                             passed: chaseDraft.passed,
@@ -989,7 +990,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                       }
                       type="button"
                     >
-                      裁决险境
+                      {t("gameplay.resolveHazard")}
                     </button>
                   </div>
                 </div>
