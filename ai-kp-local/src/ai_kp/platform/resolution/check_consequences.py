@@ -415,8 +415,12 @@ def build_check_consequence_snapshot(
         )
     opposed_results = []
     for opposed in sorted(opposed_checks, key=lambda item: str(item["id"])):
-        if opposed["status"] not in {"resolved", "reroll_required"}:
-            raise ValueError("All linked opposed checks must be terminal")
+        if opposed["status"] != "resolved":
+            # 平局（reroll_required）必须先重掷出裁决者，后果不能基于"赢家未定"生成。
+            raise ValueError(
+                "All linked opposed checks must be resolved before a consequence "
+                f"can be generated (got status={opposed['status']})"
+            )
         opposed_results.append(
             {
                 "opposed_check_id": opposed["id"],

@@ -115,7 +115,11 @@ class AutoKpQueueService:
         opposed = self.repo.list_opposed_checks_for_action(action_id)
         if not checks or any(item["status"] == "requested" for item in checks):
             return None
-        if any(item["status"] == "pending" for item in opposed):
+        if any(
+            item["status"] in {"pending", "reroll_required"}
+            for item in opposed
+        ):
+            # 平局（reroll_required）必须先重掷出裁决者，避免后果基于未定结果生成。
             return None
         snapshot = build_check_consequence_snapshot(checks, opposed)
         campaign_id = str(action["campaign_id"])

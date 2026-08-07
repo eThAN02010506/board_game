@@ -12,10 +12,12 @@ type Props = {
   playerActions: PlayerActionRecord[];
   selectedPlayerActionId: string;
   autoKpEnabled: boolean;
+  autoConfirmAdjudication: boolean;
   autoKpJobs: AutoKpJob[];
   adjudication: ActionAdjudication | null;
   onPlayerActionChange: (value: string) => void;
   onProposalTextChange: (value: string) => void;
+  onAutoConfirmAdjudicationChange: (value: boolean) => void;
   onAutoKpEnabledChange: (value: boolean) => void;
   onSelectPlayerAction: (action: PlayerActionRecord) => void;
   onSearchMemory: () => void;
@@ -69,6 +71,16 @@ export function ActionPanel(props: Props) {
             />
             {t("actions.autoKpLabel")}
           </label>
+          {props.autoKpEnabled && (
+            <label className="checkbox-row">
+              <input
+                checked={props.autoConfirmAdjudication}
+                onChange={(event) => props.onAutoConfirmAdjudicationChange(event.target.checked)}
+                type="checkbox"
+              />
+              {t("actions.autoConfirmLabel")}
+            </label>
+          )}
           <button
             className="primary-button"
             disabled={props.loading}

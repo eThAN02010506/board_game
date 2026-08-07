@@ -53,6 +53,10 @@ class CheckConsequenceService:
             return existing
         self._require_ready_action(action)
         origin = self._require_approved_origin(action)
+        ceiling_value = (origin.get("action_ruling") or {}).get("maximum_effect")
+        effect_ceiling = (
+            str(ceiling_value)[:1000] if ceiling_value else None
+        )
         control = AiControlService(self.repo).authorize(
             str(action["campaign_id"]),
             "check consequence proposal",
@@ -65,6 +69,7 @@ class CheckConsequenceService:
             pc_id=action.get("pc_id"),
             location=action.get("location"),
             map_id=action.get("map_id"),
+            effect_ceiling=effect_ceiling,
         )
 
         self.repo.begin_immediate()

@@ -26,6 +26,7 @@ class CheckConsequenceDirector(Protocol):
         pc_id: str | None = None,
         location: str | None = None,
         map_id: str | None = None,
+        effect_ceiling: str | None = None,
     ) -> Any: ...
 
 

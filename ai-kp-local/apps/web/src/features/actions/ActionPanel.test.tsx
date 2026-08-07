@@ -61,6 +61,7 @@ function renderPanel(
     onSelectPlayerAction: vi.fn(),
     onSearchMemory: vi.fn(),
     onSubmitPlayerAction: vi.fn(),
+    onAutoConfirmAdjudicationChange: vi.fn(),
     onAutoKpEnabledChange: vi.fn(),
     onRefreshPlayerActions: vi.fn(),
     onRetryAutoKpJob: vi.fn(),
@@ -78,6 +79,7 @@ function renderPanel(
       playerActions={actions}
       proposalText=""
       selectedPlayerActionId="action_submitted"
+      autoConfirmAdjudication
       autoKpEnabled
       autoKpJobs={autoKpJobs}
       adjudication={adjudication}

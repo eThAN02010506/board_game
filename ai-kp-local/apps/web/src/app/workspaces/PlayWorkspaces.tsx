@@ -65,8 +65,10 @@ type CommonPlayProps = {
 
 type ActionDeskProps = {
   adjudication: ActionAdjudication | null;
+  autoConfirmAdjudication: boolean;
   autoKpEnabled: boolean;
   autoKpJobs: AutoKpJob[];
+  onAutoConfirmAdjudicationChange: (value: boolean) => void;
   onAutoKpEnabledChange: (value: boolean) => void;
   onCreateProposal: () => void;
   onGenerateAiProposal: () => void;
@@ -313,10 +315,12 @@ function ActionDesk(props: CommonPlayProps & ActionDeskProps) {
       <GameplayWorkbench campaign={props.activeCampaign} identity={props.authIdentity} />
       <ActionPanel
         adjudication={props.adjudication}
+        autoConfirmAdjudication={props.autoConfirmAdjudication}
         autoKpEnabled={props.autoKpEnabled}
         autoKpJobs={props.autoKpJobs}
         identity={props.authIdentity}
         loading={props.loading}
+        onAutoConfirmAdjudicationChange={props.onAutoConfirmAdjudicationChange}
         onAutoKpEnabledChange={props.onAutoKpEnabledChange}
         onCreateProposal={props.onCreateProposal}
         onConfirmAdjudication={props.onConfirmAdjudication}

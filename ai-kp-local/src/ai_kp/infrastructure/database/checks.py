@@ -891,7 +891,11 @@ class SkillCheckRepository(SQLiteRepository):
         if not checks or any(item["status"] == "requested" for item in checks):
             return
         opposed_checks = self.list_opposed_checks_for_action(str(action_id))
-        if any(item["status"] == "pending" for item in opposed_checks):
+        if any(
+            item["status"] in {"pending", "reroll_required"}
+            for item in opposed_checks
+        ):
+            # 平局（reroll_required）必须先重掷出裁决者，不能基于"赢家未定"发后果就绪。
             return
         snapshot = build_check_consequence_snapshot(checks, opposed_checks)
         self.append_realtime_event(

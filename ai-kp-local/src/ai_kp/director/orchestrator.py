@@ -101,6 +101,7 @@ class KpOrchestrator:
         pc_id: str | None = None,
         location: str | None = None,
         map_id: str | None = None,
+        effect_ceiling: str | None = None,
     ) -> KpTurnResult[KpTurnOutput]:
         skills = resolve_ai_skill_composition("check_consequence")
         hidden_batch = check_snapshot.get("has_hidden_checks") is True
@@ -110,6 +111,16 @@ class KpOrchestrator:
             label="已验证的确定性检定结果",
             snapshot=check_snapshot,
         )
+        additional_sources = [snapshot_source]
+        if effect_ceiling:
+            additional_sources.append(
+                _snapshot_source(
+                    kind="approved_action_ceiling",
+                    source_id="approved-action-ceiling",
+                    label="本次行动已确认的效果上限",
+                    snapshot={"maximum_effect": effect_ceiling},
+                )
+            )
         context = ContextBuilder(
             self.connection,
             max_context_tokens=CHECK_CONSEQUENCE_CONTEXT_BUDGET,
@@ -123,7 +134,7 @@ class KpOrchestrator:
             output_instructions=check_consequence_output_instructions(
                 hidden_batch=hidden_batch
             ),
-            additional_sources=(snapshot_source,),
+            additional_sources=tuple(additional_sources),
             skill_instructions=compose_ai_skill_instructions(skills),
         )
 

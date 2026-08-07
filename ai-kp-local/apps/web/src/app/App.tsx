@@ -204,6 +204,9 @@ export default function App() {
   >("player-view");
   const [playerActionTab, setPlayerActionTab] = useState<"actions" | "checks">("actions");
   const [autoKpEnabled, setAutoKpEnabled] = useState(true);
+  const [autoConfirmAdjudication, setAutoConfirmAdjudication] = useState(
+    () => localStorage.getItem("auto-confirm-adjudication") === "on"
+  );
   const {
     jobs: autoKpJobs,
     refresh: refreshAutoKpJobs,
@@ -861,6 +864,19 @@ export default function App() {
     setActionAdjudication(null);
     mergeAutoTurnResult(result, campaignId);
   }
+
+  const autoConfirmInFlight = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoConfirmAdjudication || !actionAdjudication) return;
+    const adjudication = actionAdjudication;
+    if (adjudication.mode === "roleplay_or_clarification") return;
+    if (adjudication.ruling?.feasibility === "impossible") return;
+    if (autoConfirmInFlight.current === adjudication.id) return;
+    autoConfirmInFlight.current = adjudication.id;
+    const defaultSkill =
+      adjudication.selected_skill ?? adjudication.skill_options[0]?.skill_name ?? null;
+    void confirmActionAdjudication(defaultSkill);
+  }, [autoConfirmAdjudication, actionAdjudication]);
 
   async function retryFailedAutoKpJob(jobId: string) {
     const result = await run("重新排入 Auto KP 任务", () => retryAutoKpJob(jobId));
@@ -1734,6 +1750,7 @@ export default function App() {
             activePc={activePc}
             activeProposal={activeProposal}
             authIdentity={authIdentity}
+            autoConfirmAdjudication={autoConfirmAdjudication}
             autoKpEnabled={autoKpEnabled}
             autoKpJobs={autoKpJobs}
             campaignTime={campaignTime}
@@ -1749,6 +1766,10 @@ export default function App() {
             moveTarget={moveTarget}
             npcReappearanceCandidates={npcReappearanceCandidates}
             onApprove={() => void approveProposal()}
+            onAutoConfirmAdjudicationChange={(value) => {
+              setAutoConfirmAdjudication(value);
+              localStorage.setItem("auto-confirm-adjudication", value ? "on" : "off");
+            }}
             onAutoKpEnabledChange={setAutoKpEnabled}
             onCancel={(checkId, reason) => void decideSkillCheck(checkId, "cancel", reason)}
             onConfirmWorldExpansion={(input) => void confirmWorldExpansionContact(input)}
@@ -1822,6 +1843,7 @@ export default function App() {
             activeMap={activeMap}
             activePc={activePc}
             authIdentity={authIdentity}
+            autoConfirmAdjudication={autoConfirmAdjudication}
             autoKpEnabled={autoKpEnabled}
             autoKpJobs={autoKpJobs}
             characterExpanded={characterExpanded}
@@ -1831,6 +1853,10 @@ export default function App() {
             members={sessionMembers}
             movableTokens={movableTokens}
             moveTarget={moveTarget}
+            onAutoConfirmAdjudicationChange={(value) => {
+              setAutoConfirmAdjudication(value);
+              localStorage.setItem("auto-confirm-adjudication", value ? "on" : "off");
+            }}
             onAutoKpEnabledChange={setAutoKpEnabled}
             onCancel={(checkId, reason) => void decideSkillCheck(checkId, "cancel", reason)}
             onCreate={(input) => void createSkillCheck(input)}
