@@ -27,7 +27,7 @@ class FakeConsequenceLlm:
         self.messages.append(messages)
         return json.dumps(
             {
-                "public_narration": "检定结果明确后，你在柜底找到一张撕碎的收据。",
+                "public_narration": "检定结果明确后，你翻遍柜底，没有找到任何撕碎的收据。",
                 "kp_notes": "严格依据已验证结果生成。",
                 "action_ruling": {
                     "goal": "搜索档案柜",
@@ -35,33 +35,13 @@ class FakeConsequenceLlm:
                     "target": "档案柜",
                     "feasibility": "possible",
                     "resolution": "automatic",
-                    "reason": "已验证检定结果支持发现线索。",
-                    "maximum_effect": "发现柜底的撕碎收据。",
+                    "reason": "已验证检定结果支持没有找到线索。",
+                    "maximum_effect": "未发现柜底的撕碎收据。",
                     "alternative": "",
                 },
                 "proposed_checks": [],
-                "proposed_events": [
-                    {
-                        "event_type": "check_consequence_effect",
-                        "summary": "调查员在档案柜底发现撕碎的收据。",
-                        "actor_type": "pc",
-                        "actor_id": None,
-                        "visibility": "table",
-                        "happened_at": None,
-                        "payload": {},
-                    }
-                ],
-                "proposed_memories": [
-                    {
-                        "text": "档案柜底藏着一张撕碎的收据。",
-                        "scope": "clue",
-                        "importance": 3,
-                        "visibility": "table",
-                        "pc_id": None,
-                        "npc_id": None,
-                        "happened_at": None,
-                    }
-                ],
+                "proposed_events": [],
+                "proposed_memories": [],
                 "proposed_npc_updates": [],
                 "proposed_map_moves": [],
             },
@@ -517,6 +497,7 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(approved.status_code, 200, approved.text)
 
+        # 检定失败时后果应为"没有找到"，不应产生"发现撕碎收据"的成功叙事或记忆。
         events = await self.client.get(
             f"/campaigns/{self.campaign['id']}/memory/search",
             headers=self.kp_headers,
@@ -531,7 +512,7 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
                     if "撕碎的收据" in item["text"]
                 ]
             ),
-            1,
+            0,
         )
 
     async def test_hidden_consequence_redacts_public_text_and_keeps_effects_kp_only(

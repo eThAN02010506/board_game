@@ -6,6 +6,7 @@ from ai_kp.application.ai_control_service import AiControlService
 from ai_kp.application.errors import KpSessionEndedError
 from ai_kp.application.ports.director import CheckConsequenceDirector
 from ai_kp.application.ports.repositories import TurnStore
+from ai_kp.director.check_consequence import enforce_failure_consistency
 from ai_kp.platform.resolution import (
     HIDDEN_CHECK_PUBLIC_NARRATION,
     build_check_consequence_snapshot,
@@ -114,6 +115,14 @@ class CheckConsequenceService:
         hidden_batch = current_snapshot["has_hidden_checks"] is True
         if hidden_batch:
             self._require_kp_only_hidden_effects(output)
+        any_check_passed = any(
+            bool(item.get("passed"))
+            for item in current_snapshot.get("effective_results", [])
+        )
+        output = enforce_failure_consistency(
+            output,
+            any_check_passed=any_check_passed,
+        )
         proposal = self.repo.create_turn_proposal(
             campaign_id=str(current_action["campaign_id"]),
             pc_id=current_action.get("pc_id"),

@@ -22,6 +22,9 @@ CHECK_CONSEQUENCE_OUTPUT_INSTRUCTIONS = """只返回一个 JSON 对象，不要 
 检定已经完成，因此 action_ruling.resolution 必须为 automatic；proposed_checks 和
 proposed_map_moves 必须为空。不得改变骰值、成功等级、规则来源或 KP 覆盖；不得把失败
 写成无代价成功。没有依据的效果必须省略。
+校验结果决定后果方向：如果 verified_check_batch 中任一检定 failed（passed=false），
+后果不得声称玩家成功发现、获得、说服或达成了任何东西；只能描述没有找到、没有达成、
+维持原状或暴露失败本身。只有全部相关检定 passed 时，才能叙述发现/获得/成功。
 proposed_facts 的 pc_id 只能用于 character_belief（某 PC 的认知）；canonical_fact、
 kp_secret、rumor、ai_hypothesis 都不能带 pc_id。需要记录某 PC 的检定结果时，用
 character_belief 或把该 PC 作为 subject 的文本，而不是给其他类别填 pc_id。
@@ -81,6 +84,64 @@ def enforce_check_consequence_privacy(
     )
 
 
+# 检定失败时，后果叙事不得把这些词当作已达成/已获得。
+# 只有当成功词以肯定语气出现（前面没有紧邻的否定词）才算声称成功，
+# 避免把"没有发现""没找到"这类正确的失败描述误判为违规。
+_SUCCESS_CLAIM_PATTERNS = (
+    ("发现了", "发现"),
+    ("发现", "发现"),
+    ("找到了", "找到"),
+    ("找到", "找到"),
+    ("获得了", "获得"),
+    ("拿到", "拿到"),
+    ("取得", "取得"),
+    ("成功", "成功"),
+    ("达成了", "达成"),
+    ("说服", "说服"),
+    ("吓走", "吓走"),
+    ("击退", "击退"),
+    ("打开了", "打开"),
+)
+_NEGATION_PREFIXES = ("没有", "没", "未", "无法", "未能", "并未", "不曾", "并不")
+
+
+def _claims_success(narration: str) -> bool:
+    import re
+
+    for word, _label in _SUCCESS_CLAIM_PATTERNS:
+        for match in re.finditer(re.escape(word), narration):
+            start = match.start()
+            if start == 0:
+                return True
+            # 检查成功词之前最近的一小段是否被否定。
+            preceding = narration[max(0, start - 3) : start]
+            if any(preceding.endswith(neg) for neg in _NEGATION_PREFIXES):
+                continue
+            return True
+    return False
+
+
+def enforce_failure_consistency(
+    output: KpTurnOutput,
+    *,
+    any_check_passed: bool,
+) -> KpTurnOutput:
+    """检定全部失败时，拒绝声称成功发现/获得/达成的后果叙事。
+
+    这是确定性兜底：模型可能忽略提示词里"失败不得写成成功"的要求，
+    因此这里检查叙事是否把失败写成了有奖励的结果。只有全部检定都
+    失败（无通过）时才启用；部分成功时由模型决定哪些成果成立。
+    """
+    if any_check_passed:
+        return output
+    if _claims_success(output.public_narration):
+        raise StructuredOutputError(
+            "A failed check consequence cannot claim the player succeeded, "
+            "found, or obtained something"
+        )
+    return output
+
+
 def parse_check_consequence_output(
     raw: str,
     *,
@@ -105,5 +166,6 @@ __all__ = [
     "CHECK_CONSEQUENCE_OUTPUT_INSTRUCTIONS",
     "check_consequence_output_instructions",
     "enforce_check_consequence_privacy",
+    "enforce_failure_consistency",
     "parse_check_consequence_output",
 ]
