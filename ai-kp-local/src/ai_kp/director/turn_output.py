@@ -201,6 +201,9 @@ feasibility=impossible、resolution=no_roll，解释原因并给出可选的目�
 靠检定生成。
 只有已经在当前场景中成立、并且值得作为长期真相区分检索的内容才进入 proposed_facts；
 传闻必须标为 rumor，角色个人认知必须标为 character_belief，推测必须标为 ai_hypothesis。
+proposed_facts 的 pc_id 只能用于 character_belief；canonical_fact、kp_secret、rumor、
+ai_hypothesis 都不能带 pc_id，否则整份草稿会被拒绝。需要表达某 PC 的状态或认知时，
+用 character_belief，或把该 PC 作为 subject 的文本，而不是给其他类别填 pc_id。
 如果 proposed_checks 非空，则 proposed_events、proposed_memories、proposed_npc_updates、
 proposed_map_moves 和 proposed_facts 必须全部为空；检定结果不得预写。
 """.strip()

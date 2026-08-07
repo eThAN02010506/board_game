@@ -22,6 +22,9 @@ CHECK_CONSEQUENCE_OUTPUT_INSTRUCTIONS = """只返回一个 JSON 对象，不要 
 检定已经完成，因此 action_ruling.resolution 必须为 automatic；proposed_checks 和
 proposed_map_moves 必须为空。不得改变骰值、成功等级、规则来源或 KP 覆盖；不得把失败
 写成无代价成功。没有依据的效果必须省略。
+proposed_facts 的 pc_id 只能用于 character_belief（某 PC 的认知）；canonical_fact、
+kp_secret、rumor、ai_hypothesis 都不能带 pc_id。需要记录某 PC 的检定结果时，用
+character_belief 或把该 PC 作为 subject 的文本，而不是给其他类别填 pc_id。
 """.strip()
 
 _HIDDEN_CHECK_OUTPUT_INSTRUCTIONS = f"""
