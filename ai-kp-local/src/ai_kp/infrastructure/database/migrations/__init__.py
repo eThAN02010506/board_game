@@ -57,6 +57,7 @@ from ai_kp.infrastructure.database.migrations import (
     v0050_action_adjudications,
     v0051_map_published_revision,
     v0052_module_campaign_imports,
+    v0053_map_location_awareness,
 )
 
 
@@ -317,6 +318,11 @@ MIGRATIONS = (
         v0052_module_campaign_imports.VERSION,
         v0052_module_campaign_imports.NAME,
         v0052_module_campaign_imports.migrate,
+    ),
+    Migration(
+        v0053_map_location_awareness.VERSION,
+        v0053_map_location_awareness.NAME,
+        v0053_map_location_awareness.migrate,
     ),
 )
 

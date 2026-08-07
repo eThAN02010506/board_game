@@ -174,6 +174,7 @@ EXPECTED_HTTP_ROUTES = {
     ("GET", "/campaigns/{campaign_id}/maps"),
     ("POST", "/campaigns/{campaign_id}/maps/generate"),
     ("GET", "/maps/{map_id}"),
+    ("GET", "/maps/{map_id}/awareness"),
     ("GET", "/maps/{map_id}/image-prompt"),
     ("POST", "/maps/{map_id}/image-assets/generate"),
     ("POST", "/maps/{map_id}/assets/{asset_id}/select"),

@@ -538,7 +538,7 @@ def move_map_token(
             raise HTTPException(status_code=404, detail="Map token not found")
         if not identity.pc_id or token["actor_type"] != "pc" or token["actor_id"] != identity.pc_id:
             raise HTTPException(status_code=403, detail="Players can only move their own PC token")
-    return MapService(repo).move_token(
+    moved = MapService(repo).move_token(
         token_id,
         campaign_id,
         identity.session_id,
@@ -551,6 +551,17 @@ def move_map_token(
             expected_version=payload.expected_version,
         ),
     )
+    # 玩家移动后刷新该玩家的位置感知（当前位置 + 相邻位置标记为已见）。
+    if identity.role == "player" and identity.player_profile_id:
+        map_id = moved.get("map_id") or token["map_id"]
+        dest_location_id = repo.find_map_location_id(map_id, payload.to_location_name)
+        repo.refresh_player_location_awareness(
+            map_id,
+            campaign_id,
+            identity.player_profile_id,
+            dest_location_id,
+        )
+    return moved
 
 
 @router.get("/map-tokens/{token_id}/moves")
@@ -588,3 +599,62 @@ def list_map_token_moves(
             for move in moves
         ]
     return moves
+
+
+@router.get("/maps/{map_id}/awareness")
+def get_map_awareness(
+    map_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    """Return the current player's location-awareness states for a map.
+
+    States: current (where the player is), seen (visited), unknown (unexplored),
+    destroyed (revealed to no longer exist). Players see only their own view.
+    """
+    campaign_id = repo.get_map(map_id)["campaign_id"]
+    require_campaign_role(identity, campaign_id)
+    if identity.role == "player":
+        require_approved_pc_binding(
+            repo,
+            campaign_id,
+            identity.pc_id,
+            owner_profile_id=identity.player_profile_id,
+        )
+        if not repo.is_map_published(map_id):
+            raise HTTPException(status_code=404, detail="Map not found")
+    player_profile_id = identity.player_profile_id
+    if player_profile_id is None:
+        return {"states": [], "current_location_id": None}
+    # 当前玩家 token 位置作为 current 的权威来源。
+    current_location_id = None
+    if identity.role == "player" and identity.pc_id:
+        token = repo.find_map_token_for_actor(map_id, "pc", identity.pc_id)
+        if token is not None:
+            current_location_id = token.get("location_id")
+    # 首次进入：若无任何 current 记录，以 token 位置为 current 并标记直接邻居为 seen。
+    states = repo.get_map_location_awareness(
+        map_id,
+        campaign_id,
+        player_profile_id,
+    )
+    if current_location_id is not None and not any(
+        s["state"] == "current" for s in states
+    ):
+        states = repo.refresh_player_location_awareness(
+            map_id,
+            campaign_id,
+            player_profile_id,
+            current_location_id,
+        )
+    # 补 unknown 只填无记录的槽位，绝不覆盖已有 current/seen/destroyed。
+    repo.ensure_map_location_unknown_rows(map_id, campaign_id, player_profile_id)
+    states = repo.get_map_location_awareness(
+        map_id,
+        campaign_id,
+        player_profile_id,
+    )
+    return {
+        "states": states,
+        "current_location_id": current_location_id,
+    }

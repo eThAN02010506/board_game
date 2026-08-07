@@ -538,7 +538,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 52
+    assert LATEST_SCHEMA_VERSION == 53
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -592,6 +592,7 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (50, "add_action_adjudications"),
         (51, "map_published_revision"),
         (52, "module_campaign_imports"),
+        (53, "map_location_awareness"),
     ]
 
 

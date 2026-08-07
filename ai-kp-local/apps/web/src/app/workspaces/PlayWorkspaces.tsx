@@ -25,6 +25,7 @@ import type {
 import { ActionPanel } from "../../features/actions/ActionPanel";
 import { CheckPanel } from "../../features/checks/CheckPanel";
 import { GameplayWorkbench } from "../../features/gameplay/GameplayWorkbench";
+import { AwarenessMap } from "../../features/maps/AwarenessMap";
 import { MapStage } from "../../features/maps/MapStage";
 import { RoutePlanPanel } from "../../features/maps/RoutePlanPanel";
 import { TokenPanel } from "../../features/maps/TokenPanel";
@@ -293,17 +294,25 @@ function CharacterSidebar(props: CommonPlayProps) {
 function PlayMapColumn(props: CommonPlayProps) {
   return (
     <div className="play-map-column">
-      <MapStage
-        activeMap={props.activeMap}
-        hasIdentity={Boolean(props.authIdentity)}
-        loading={props.loading}
-        maps={props.maps}
-        onOpenMap={props.onOpenMap}
-        onRefresh={props.onRefreshMaps}
-        onSetPublished={props.onSetMapPublished}
-        role={props.authIdentity.role}
-        showReviewControls={false}
-      />
+      {props.authIdentity.role === "player" ? (
+        <AwarenessMap
+          activeMap={props.activeMap}
+          loading={props.loading}
+          onRefresh={props.onRefreshMaps}
+        />
+      ) : (
+        <MapStage
+          activeMap={props.activeMap}
+          hasIdentity={Boolean(props.authIdentity)}
+          loading={props.loading}
+          maps={props.maps}
+          onOpenMap={props.onOpenMap}
+          onRefresh={props.onRefreshMaps}
+          onSetPublished={props.onSetMapPublished}
+          role={props.authIdentity.role}
+          showReviewControls={false}
+        />
+      )}
       <RoutePlanPanel map={props.activeMap} identity={props.authIdentity} />
     </div>
   );

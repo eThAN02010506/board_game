@@ -1171,3 +1171,167 @@ class MapRepository:
             params,
         ).fetchall()
         return [row_to_dict(row) for row in rows]
+
+    def list_map_location_ids(self, map_id: str) -> list[str]:
+        rows = self.connection.execute(
+            "SELECT id FROM map_locations WHERE map_id = ?",
+            (map_id,),
+        ).fetchall()
+        return [str(row["id"]) for row in rows]
+
+    def get_map_location_awareness(
+        self,
+        map_id: str,
+        campaign_id: str,
+        player_profile_id: str,
+    ) -> list[dict]:
+        """Return per-location awareness states for a player on a map."""
+        rows = self.connection.execute(
+            """
+            SELECT location_id, state, version
+            FROM map_location_awareness
+            WHERE map_id = ? AND campaign_id = ? AND player_profile_id = ?
+            """,
+            (map_id, campaign_id, player_profile_id),
+        ).fetchall()
+        return [
+            {
+                "location_id": str(row["location_id"]),
+                "state": str(row["state"]),
+                "version": int(row["version"]),
+            }
+            for row in rows
+        ]
+
+    def upsert_map_location_awareness(
+        self,
+        map_id: str,
+        campaign_id: str,
+        player_profile_id: str,
+        location_id: str,
+        state: str,
+    ) -> None:
+        """Set one location's awareness state for a player (idempotent)."""
+        row = self.connection.execute(
+            """
+            SELECT id FROM map_location_awareness
+            WHERE campaign_id = ? AND player_profile_id = ? AND location_id = ?
+            """,
+            (campaign_id, player_profile_id, location_id),
+        ).fetchone()
+        if row is None:
+            self.connection.execute(
+                """
+                INSERT INTO map_location_awareness
+                  (id, map_id, campaign_id, player_profile_id, location_id, state, version)
+                VALUES (?, ?, ?, ?, ?, ?, 0)
+                """,
+                (
+                    new_id("aware"),
+                    map_id,
+                    campaign_id,
+                    player_profile_id,
+                    location_id,
+                    state,
+                ),
+            )
+        else:
+            self.connection.execute(
+                """
+                UPDATE map_location_awareness
+                SET state = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (state, str(row["id"])),
+            )
+
+    def ensure_map_location_unknown_rows(
+        self,
+        map_id: str,
+        campaign_id: str,
+        player_profile_id: str,
+    ) -> None:
+        """Backfill unknown rows only for locations that have no record yet.
+
+        Never overwrites existing current/seen/destroyed states.
+        """
+        existing = {
+            str(row["location_id"])
+            for row in self.connection.execute(
+                """
+                SELECT location_id FROM map_location_awareness
+                WHERE campaign_id = ? AND player_profile_id = ?
+                """,
+                (campaign_id, player_profile_id),
+            ).fetchall()
+        }
+        for location_id in self.list_map_location_ids(map_id):
+            if location_id in existing:
+                continue
+            self.upsert_map_location_awareness(
+                map_id,
+                campaign_id,
+                player_profile_id,
+                location_id,
+                "unknown",
+            )
+
+    def refresh_player_location_awareness(
+        self,
+        map_id: str,
+        campaign_id: str,
+        player_profile_id: str,
+        current_location_id: str,
+    ) -> list[dict]:
+        """Mark the player's current location and its direct neighbors as seen.
+
+        Deterministic, based on map adjacency. The previous `current` location
+        becomes `seen` (it was visited), the new current location is marked
+        `current`, and its direct neighbors are marked `seen`. All other
+        locations keep their existing state (default `unknown`).
+        """
+        current_location = self.connection.execute(
+            "SELECT id, name FROM map_locations WHERE id = ? AND map_id = ?",
+            (current_location_id, map_id),
+        ).fetchone()
+        if current_location is None:
+            raise KeyError(f"Location not found on map {map_id}: {current_location_id}")
+
+        # 前一个 current 位置降级为 seen（它确实被访问过）。
+        self.connection.execute(
+            """
+            UPDATE map_location_awareness
+            SET state = 'seen', version = version + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE campaign_id = ? AND player_profile_id = ? AND state = 'current'
+            """,
+            (campaign_id, player_profile_id),
+        )
+
+        self.upsert_map_location_awareness(
+            map_id,
+            campaign_id,
+            player_profile_id,
+            current_location_id,
+            "current",
+        )
+        neighbors = self.connection.execute(
+            """
+            SELECT DISTINCT r.start_location_id AS neighbor_id
+            FROM map_routes r
+            WHERE r.map_id = ? AND r.end_location_id = ?
+            UNION
+            SELECT DISTINCT r.end_location_id AS neighbor_id
+            FROM map_routes r
+            WHERE r.map_id = ? AND r.start_location_id = ?
+            """,
+            (map_id, current_location_id, map_id, current_location_id),
+        ).fetchall()
+        for neighbor in neighbors:
+            self.upsert_map_location_awareness(
+                map_id,
+                campaign_id,
+                player_profile_id,
+                str(neighbor["neighbor_id"]),
+                "seen",
+            )
+        return self.get_map_location_awareness(map_id, campaign_id, player_profile_id)

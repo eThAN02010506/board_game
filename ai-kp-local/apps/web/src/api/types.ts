@@ -1369,6 +1369,7 @@ export type MapLocation = {
   visibility: string;
   x: number;
   y: number;
+  public_description?: string;
 };
 
 export type MapRoute = {
@@ -1389,6 +1390,17 @@ export type MapToken = {
   version: number;
   x: number;
   y: number;
+};
+
+export type MapAwarenessState = {
+  location_id: string;
+  state: "current" | "seen" | "unknown" | "destroyed";
+  version: number;
+};
+
+export type MapAwareness = {
+  states: MapAwarenessState[];
+  current_location_id: string | null;
 };
 
 export type DynamicBranchCondition = {
