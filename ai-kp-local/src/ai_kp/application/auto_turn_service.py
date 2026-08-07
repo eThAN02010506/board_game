@@ -158,19 +158,27 @@ class AutoTurnService:
             )
 
         identity = self._system_kp_identity(action)
-        try:
-            proposal = await CheckConsequenceService(self.repo).generate(
-                GenerateCheckConsequenceCommand(check_id=check_id),
-                identity,
-                director,
-                source_model=source_model,
-            )
-        except RECOVERABLE_AUTO_TURN_ERRORS as exc:
+        proposal: dict | None = None
+        last_error: str | None = None
+        for attempt in range(3):
+            try:
+                proposal = await CheckConsequenceService(self.repo).generate(
+                    GenerateCheckConsequenceCommand(check_id=check_id),
+                    identity,
+                    director,
+                    source_model=source_model,
+                )
+                break
+            except RECOVERABLE_AUTO_TURN_ERRORS as exc:
+                last_error = str(exc)
+                if attempt < 2:
+                    continue
+        if proposal is None:
             proposal = self._fallback_consequence(
                 action,
                 identity,
                 checks=checks,
-                reason=str(exc),
+                reason=last_error or "unknown",
             )
         try:
             approved = self.turns.approve(
