@@ -25,6 +25,9 @@ proposed_map_moves 必须为空。不得改变骰值、成功等级、规则来�
 proposed_facts 的 pc_id 只能用于 character_belief（某 PC 的认知）；canonical_fact、
 kp_secret、rumor、ai_hypothesis 都不能带 pc_id。需要记录某 PC 的检定结果时，用
 character_belief 或把该 PC 作为 subject 的文本，而不是给其他类别填 pc_id。
+proposed_npc_updates 只能包含上下文中确实出现的 NPC；没有明确 NPC 时必须返回空数组，
+不得编造或留空 npc_id（空 npc_id 会导致整份草稿被拒绝）。本场景的检定后果通常不需要
+NPC 更新，除非检定本身涉及对话或关系的具体 NPC。
 """.strip()
 
 _HIDDEN_CHECK_OUTPUT_INSTRUCTIONS = f"""
