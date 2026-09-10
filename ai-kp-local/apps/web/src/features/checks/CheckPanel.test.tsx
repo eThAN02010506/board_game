@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AuthIdentity, SessionMember, SkillCheck } from "../../api/types";
+import type { AuthIdentity, SessionMember, SkillCheck, VisibleSkillCheck } from "../../api/types";
 import { CheckPanel } from "./CheckPanel";
 
 const kpIdentity: AuthIdentity = {
@@ -102,11 +102,13 @@ function makeCheck(overrides: Partial<SkillCheck> = {}): SkillCheck {
 function renderPanel({
   identity = kpIdentity,
   checks = [],
-  loading = false
+  loading = false,
+  ownedCheckIds
 }: {
   identity?: AuthIdentity | null;
-  checks?: SkillCheck[];
+  checks?: VisibleSkillCheck[];
   loading?: boolean;
+  ownedCheckIds?: ReadonlySet<string>;
 } = {}) {
   const callbacks = {
     onRefresh: vi.fn(),
@@ -120,7 +122,8 @@ function renderPanel({
     onReplay: vi.fn(),
     onOverride: vi.fn(),
     onCancel: vi.fn(),
-    onPush: vi.fn()
+    onPush: vi.fn(),
+    onDeclinePush: vi.fn()
   };
 
   const view = render(
@@ -130,6 +133,7 @@ function renderPanel({
       identity={identity}
       loading={loading}
       members={members}
+      ownedCheckIds={ownedCheckIds}
       {...callbacks}
     />
   );
@@ -201,6 +205,7 @@ describe("CheckPanel", () => {
         onGenerateConsequence={vi.fn()}
         onOverride={vi.fn()}
         onPush={vi.fn()}
+        onDeclinePush={vi.fn()}
         onRefresh={vi.fn()}
         onReplay={vi.fn()}
         onResolveDigital={onResolveDigital}
@@ -212,6 +217,80 @@ describe("CheckPanel", () => {
 
     expect(screen.queryByRole("button", { name: "数字骰" })).not.toBeInTheDocument();
     expect(screen.queryByText("KP 裁定与状态操作")).not.toBeInTheDocument();
+  });
+
+  it("renders and resolves a member-scoped batch check without authority metadata", () => {
+    const safeCheck: VisibleSkillCheck = {
+      id: "safe-check",
+      skill_key: "coc7.listen",
+      skill_name: "聆听",
+      target: 45,
+      difficulty: "regular",
+      bonus_dice: 0,
+      visibility: "private",
+      allow_push: true,
+      pushed_from_check_id: null,
+      status: "requested",
+      input_method: null,
+      raw_dice: null,
+      selected_roll: null,
+      threshold: null,
+      success_level: null,
+      passed: null,
+      check_plan: {
+        scope: "辨认门后的动静",
+        automatic_information: ["门后确实有声音"]
+      },
+      resolved_at: null
+    };
+    const { onResolveDigital } = renderPanel({
+      identity: playerIdentity,
+      checks: [safeCheck],
+      ownedCheckIds: new Set([safeCheck.id])
+    });
+
+    expect(screen.getByText("辨认门后的动静")).toBeVisible();
+    expect(screen.getByText("门后确实有声音")).toBeVisible();
+    expect(screen.queryByText(/规则 .*书内/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "数字骰" }));
+    expect(onResolveDigital).toHaveBeenCalledWith("safe-check");
+  });
+
+  it("keeps the push decision available for an owned projected check", () => {
+    const failedSafeCheck: VisibleSkillCheck = {
+      id: "safe-failed-check",
+      skill_key: "coc7.listen",
+      skill_name: "聆听",
+      target: 45,
+      difficulty: "regular",
+      bonus_dice: 0,
+      visibility: "private",
+      allow_push: true,
+      pushed_from_check_id: null,
+      status: "resolved",
+      input_method: "digital",
+      raw_dice: { ones_digit: 8, tens_digits: [7], candidates: [78] },
+      selected_roll: 78,
+      threshold: 45,
+      success_level: "failure",
+      passed: false,
+      check_plan: {
+        failure_stakes: "声音来源暂时无法确认。",
+        pushed_failure_stakes: "你会暴露自己的位置。"
+      },
+      resolved_at: "2026-08-21T10:00:00Z"
+    };
+    const { onDeclinePush } = renderPanel({
+      identity: playerIdentity,
+      checks: [failedSafeCheck],
+      ownedCheckIds: new Set([failedSafeCheck.id])
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "接受普通失败" }));
+    expect(onDeclinePush).toHaveBeenCalledWith(
+      "safe-failed-check",
+      "玩家确认接受普通失败"
+    );
   });
 
   it("blocks repeated digital resolution while loading and parses physical dice input", () => {
@@ -267,7 +346,7 @@ describe("CheckPanel", () => {
     expect(screen.getByText("87", { selector: "b" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "重放校验" }));
     fireEvent.click(screen.getByText("KP 裁定与状态操作"));
-    fireEvent.change(screen.getByLabelText("理由或后果"), {
+    fireEvent.change(screen.getByLabelText("理由；若推动，请说明如何改变做法"), {
       target: { value: "线索仍然可见" }
     });
     fireEvent.change(screen.getByLabelText("覆盖结果"), {
@@ -318,6 +397,91 @@ describe("CheckPanel", () => {
     expect(result).toHaveTextContent("20");
     expect(result).toHaveTextContent("候选值 44 / 24 · 奖励骰取较小值");
     expect(result).toHaveTextContent("服务器数字骰");
+  });
+
+  it("lets the assigned player accept failure or choose a pushed roll", () => {
+    const failed = makeCheck({
+      status: "resolved",
+      selected_roll: 87,
+      threshold: 60,
+      success_level: "failure",
+      passed: false
+    });
+    const { onDeclinePush, onPush } = renderPanel({
+      identity: playerIdentity,
+      checks: [failed]
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "接受普通失败" }));
+    fireEvent.change(screen.getByLabelText("若要推动，请说明如何改变做法"), {
+      target: { value: "改从窗外攀爬并承担坠落风险" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建孤注一掷" }));
+
+    expect(onDeclinePush).toHaveBeenCalledWith("check_test", "玩家确认接受普通失败");
+    expect(onPush).toHaveBeenCalledWith("check_test", "改从窗外攀爬并承担坠落风险");
+  });
+
+  it("does not offer another push after the player accepted ordinary failure", () => {
+    renderPanel({
+      identity: playerIdentity,
+      checks: [makeCheck({
+        status: "resolved",
+        selected_roll: 87,
+        threshold: 60,
+        success_level: "failure",
+        passed: false,
+        push_decision: {
+          id: "decision-accepted",
+          actor_member_id: "member_player",
+          decision: "accept_failure",
+          reason: "玩家接受已公开的代价",
+          created_at: "2026-07-28T10:02:00Z"
+        }
+      })]
+    });
+
+    expect(screen.queryByRole("button", { name: "接受普通失败" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创建孤注一掷" })).toBeNull();
+  });
+
+  it("keeps push-method drafts isolated between failed checks", () => {
+    const first = makeCheck({
+      id: "check_first",
+      skill_name: "侦查",
+      status: "resolved",
+      selected_roll: 87,
+      threshold: 60,
+      success_level: "failure",
+      passed: false
+    });
+    const second = makeCheck({
+      id: "check_second",
+      skill_name: "心理学",
+      status: "resolved",
+      selected_roll: 85,
+      threshold: 10,
+      success_level: "failure",
+      passed: false
+    });
+    const { onDeclinePush } = renderPanel({
+      identity: playerIdentity,
+      checks: [first, second]
+    });
+    const firstCard = screen.getByText("侦查", { selector: "strong" }).closest("article");
+    const secondCard = screen.getByText("心理学", { selector: "strong" }).closest("article");
+    expect(firstCard).not.toBeNull();
+    expect(secondCard).not.toBeNull();
+
+    fireEvent.change(within(firstCard!).getByLabelText("若要推动，请说明如何改变做法"), {
+      target: { value: "改从窗外攀爬" }
+    });
+    fireEvent.click(within(secondCard!).getByRole("button", { name: "接受普通失败" }));
+
+    expect(onDeclinePush).toHaveBeenCalledWith(
+      "check_second",
+      "玩家确认接受普通失败"
+    );
   });
 
   it("labels a hidden KP result without changing its persisted dice", () => {

@@ -8,7 +8,7 @@ from typing import Any
 
 from ai_kp.platform.ports.llm import ChatMessage, LlmClient
 
-PROMPT_VERSION = "module-knowledge.v2"
+PROMPT_VERSION = "module-knowledge.v6"
 
 
 def _parse_json(text: str) -> Any:
@@ -48,6 +48,8 @@ class ModuleKnowledgeAgent:
     "confidence": 0.0,
     "visibility": "{chunk['visibility']}",
     "spoiler_tag": {json.dumps(chunk.get('spoiler_tag'), ensure_ascii=False)},
+    "entity_name": "该陈述所归属的实体主称呼，必须是来源中的短名词短语，不是陈述句；无明确实体时可省略",
+    "entity_type": "npc|location|clue|item|event|organization|anchor；与 entity_name 一同给出，无把握可省略",
     "citations": [{{
       "chunk_id": "{chunk['id']}",
       "asset_id": null,
@@ -56,6 +58,20 @@ class ModuleKnowledgeAgent:
   }}]
 }}
 最多 8 条，没有明确内容时返回 {{"candidates":[]}}。
+
+实体归属规则：
+- entity_name 是陈述指向的世界存在，不是行为、状态、属性值或章节标题。
+  同一主语的“受伤”和“保管某物”等陈述必须归到来源中的同一主称呼。
+- 关于同一实体的多条陈述必须使用完全相同的 entity_name 与 entity_type。
+- 属性/数据块也归属实体：角色列表的身份、年龄和数值属性，以及地点/物品描述，
+  只要明确属于某个实体，就使用来源对该实体的主称呼。
+- **归一到角色的主名**：角色的名字、年龄、属性和状态都是该角色的属性，必须归到
+  角色在正文中的主称呼；不要用年龄、数值或属性片段当 entity_name。
+- **角色的描述词不算实体名**：同一角色的描述性称呼与角色本身属于同一实体，应归到
+  来源中的主称呼。性格、意图和身份描述不应各自创建新实体。
+- 章节标题、列表标题（如「NPC列表」）不是世界实体，省略 entity_name/entity_type。
+- 原文没有清晰实体的候选（纯气氛、规则说明）可以省略 entity_name/entity_type。
+- entity_type 只能取自枚举，不能自造。
 
 来源位置：{chunk.get('source_locator') or ''}
 来源标题：{chunk['title']}

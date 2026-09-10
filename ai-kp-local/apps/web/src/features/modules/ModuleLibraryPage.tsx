@@ -530,7 +530,8 @@ export function ModuleLibraryPage({ campaign, identity }: Props) {
             type="file"
           />
           <small>
-            最多 64 MiB；旧式 .doc 会由本机 LibreOffice 在隔离进程中转换。图片默认仅 KP 可见。
+            最多 64 MiB；PDF/DOCX 统一由本地 MinerU 解析，旧式 .doc 会先由 LibreOffice
+            隔离转换后进入同一链路。图片默认仅 KP 可见。
           </small>
         </label>
         {!canManage && (

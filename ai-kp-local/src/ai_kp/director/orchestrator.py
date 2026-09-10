@@ -3,7 +3,7 @@
 import asyncio
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from typing import Generic, Protocol, TypeVar
@@ -13,13 +13,23 @@ from ai_kp.director.check_consequence import (
     parse_check_consequence_output,
 )
 from ai_kp.director.context_builder import ContextAssembly, ContextBuilder, estimate_tokens
+from ai_kp.director.encounter_intent import (
+    ConstrainedEncounterIntentAdapter,
+    EncounterIntentOutput,
+)
+from ai_kp.director.enemy_turn import ConstrainedEnemyTurnAdapter, EnemyTurnOutput
 from ai_kp.director.errors import CampaignAiCallCancelledError
+from ai_kp.director.human_kp_help import (
+    ConstrainedDirectorHelpAdapter,
+    DirectorHelpOutput,
+)
 from ai_kp.director.output_safety import remove_precommitted_world_effects
 from ai_kp.director.session_recap import (
     SessionRecapOutput,
     build_session_recap_context,
     parse_session_recap_output,
 )
+from ai_kp.director.session_safety_policy import CampaignSafetyPolicyLlm
 from ai_kp.director.skills import (
     compose_ai_skill_instructions,
     resolve_ai_skill_composition,
@@ -27,11 +37,42 @@ from ai_kp.director.skills import (
 from ai_kp.director.skills.contracts import AiSkillManifest
 from ai_kp.director.turn_output import KpTurnOutput, StructuredOutputError, parse_kp_turn_output
 from ai_kp.director.world_expansion import (
-    WORLD_EXPANSION_OUTPUT_INSTRUCTIONS,
     WorldExpansionOutput,
+    normalize_world_expansion_transport,
     parse_world_expansion_output,
+    validate_world_expansion_plan,
+    world_expansion_output_instructions,
 )
+from ai_kp.platform.facts import FactLedgerEntry, project_fact_heads
 from ai_kp.platform.ports.llm import ChatMessage, LlmClient
+from ai_kp.platform.resolution.contracts import (
+    ResolutionPreview,
+    ScenarioContract,
+    ScenarioSnapshot,
+)
+from ai_kp.platform.resolution.narrative_adapter import (
+    ConstrainedKernelNarrativeAdapter,
+    KernelNarrativeBundle,
+)
+from ai_kp.platform.resolution.semantic_adapter import (
+    ConstrainedSemanticAdapter,
+    SemanticSelectionResult,
+)
+from ai_kp.platform.resolution.tabletop_response import (
+    ConstrainedTabletopResponseAdapter,
+    TabletopConversationResponse,
+)
+from ai_kp.platform.resolution.tabletop_turn import (
+    ConstrainedTabletopTurnAdapter,
+    TabletopRoute,
+    TabletopTurnFrame,
+    TabletopTurnInterpretation,
+)
+from ai_kp.platform.resolution.world_expansion_authoring import (
+    ConstrainedWorldExpansionAuthoringAdapter,
+    WorldExpansionAuthoringResult,
+)
+from ai_kp.rulesets import get_ruleset
 
 CHECK_CONSEQUENCE_CONTEXT_BUDGET = 12000
 OutputT = TypeVar("OutputT")
@@ -60,7 +101,11 @@ class KpOrchestrator:
         call_registry: AiCallTracker | None = None,
     ):
         self.connection = connection
-        self.llm = llm
+        self.llm = (
+            llm
+            if isinstance(llm, CampaignSafetyPolicyLlm)
+            else CampaignSafetyPolicyLlm(connection, llm)
+        )
         self.call_registry = call_registry
 
     async def handle_player_action(
@@ -121,6 +166,16 @@ class KpOrchestrator:
                     snapshot={"maximum_effect": effect_ceiling},
                 )
             )
+        existing_facts = self._list_active_facts(campaign_id)
+        if existing_facts:
+            additional_sources.append(
+                _snapshot_source(
+                    kind="existing_world_facts",
+                    source_id="existing-world-facts",
+                    label="本团已确立的世界事实（避免重复写入）",
+                    snapshot={"facts": existing_facts},
+                )
+            )
         context = ContextBuilder(
             self.connection,
             max_context_tokens=CHECK_CONSEQUENCE_CONTEXT_BUDGET,
@@ -177,16 +232,32 @@ class KpOrchestrator:
             map_id=map_id,
             active_spoiler_tags=active_spoiler_tags,
             visibility_scope="kp",
-            output_instructions=WORLD_EXPANSION_OUTPUT_INSTRUCTIONS,
+            output_instructions=world_expansion_output_instructions(
+                str(analysis_snapshot.get("requested_expansion_kind", "environment"))
+            ),
             additional_sources=(analysis_source,),
             skill_instructions=compose_ai_skill_instructions(skills),
         )
-        return await self._complete_structured(
+
+        transport_repaired = False
+
+        def parse_and_validate(raw: str) -> WorldExpansionOutput:
+            nonlocal transport_repaired
+            normalized_raw, changed = normalize_world_expansion_transport(
+                raw, analysis_snapshot
+            )
+            transport_repaired = transport_repaired or changed
+            output = parse_world_expansion_output(normalized_raw)
+            validate_world_expansion_plan(output.candidate, analysis_snapshot)
+            return output
+
+        result = await self._complete_structured(
             campaign_id,
             context,
-            parse_world_expansion_output,
+            parse_and_validate,
             skills=skills,
         )
+        return replace(result, repaired=True) if transport_repaired else result
 
     async def handle_session_recap(
         self,
@@ -203,6 +274,161 @@ class KpOrchestrator:
             skills=skills,
         )
 
+    async def propose_encounter_action(
+        self,
+        *,
+        campaign_id: str,
+        snapshot: dict,
+        player_action: str,
+    ) -> EncounterIntentOutput:
+        return await self._tracked_model_call(
+            campaign_id,
+            lambda: ConstrainedEncounterIntentAdapter(self.llm).propose(
+                snapshot=snapshot,
+                player_action=player_action,
+            ),
+        )
+
+    async def select_enemy_turn(
+        self,
+        *,
+        campaign_id: str,
+        snapshot: dict,
+    ) -> EnemyTurnOutput:
+        skills = resolve_ai_skill_composition("enemy_turn")
+        return await self._tracked_model_call(
+            campaign_id,
+            lambda: ConstrainedEnemyTurnAdapter(self.llm).select(
+                snapshot=snapshot,
+                skill_instructions=compose_ai_skill_instructions(skills),
+            ),
+        )
+
+    async def select_kernel_action(
+        self,
+        *,
+        campaign_id: str,
+        contract: ScenarioContract,
+        snapshot: ScenarioSnapshot,
+        player_action: str,
+        profile: str,
+    ) -> SemanticSelectionResult:
+        return await self._tracked_model_call(
+            campaign_id,
+            lambda: ConstrainedSemanticAdapter(
+                self.llm, profile="large" if profile == "large" else "small"
+            ).select(contract, player_action, snapshot=snapshot),
+        )
+
+    async def interpret_tabletop_turn(
+        self,
+        *,
+        campaign_id: str,
+        contract: ScenarioContract,
+        snapshot: ScenarioSnapshot,
+        player_action: str,
+    ) -> TabletopTurnInterpretation:
+        return await self._tracked_model_call(
+            campaign_id,
+            lambda: ConstrainedTabletopTurnAdapter(self.llm).interpret(
+                contract, snapshot, player_action
+            ),
+        )
+
+    async def respond_tabletop_turn(
+        self,
+        *,
+        campaign_id: str,
+        contract: ScenarioContract,
+        snapshot: ScenarioSnapshot,
+        player_action: str,
+        frame: TabletopTurnFrame,
+        route: TabletopRoute,
+    ) -> TabletopConversationResponse:
+        return await self._tracked_model_call(
+            campaign_id,
+            lambda: ConstrainedTabletopResponseAdapter(self.llm).create(
+                contract, snapshot, player_action, frame, route
+            ),
+        )
+
+    async def author_kernel_world_expansion(
+        self,
+        *,
+        campaign_id: str,
+        contract: ScenarioContract,
+        snapshot: ScenarioSnapshot,
+        player_action: str,
+        proposal_id: str,
+        tabletop_frame: TabletopTurnFrame | None = None,
+    ) -> WorldExpansionAuthoringResult:
+        return await self._tracked_model_call(
+            campaign_id,
+            lambda: ConstrainedWorldExpansionAuthoringAdapter(
+                self.llm,
+                get_ruleset(contract.ruleset_id).scenario_check_catalog(),
+                get_ruleset(contract.ruleset_id).scenario_effect_catalog(),
+            ).author(
+                contract,
+                snapshot,
+                player_action,
+                proposal_id=proposal_id,
+                tabletop_frame=tabletop_frame,
+            ),
+        )
+
+    async def narrate_kernel_action(
+        self,
+        *,
+        campaign_id: str,
+        contract: ScenarioContract,
+        preview: ResolutionPreview,
+        snapshot: ScenarioSnapshot,
+        player_action: str,
+    ) -> KernelNarrativeBundle:
+        return await self._tracked_model_call(
+            campaign_id,
+            lambda: ConstrainedKernelNarrativeAdapter(self.llm).create(
+                contract, preview, player_action, snapshot=snapshot
+            ),
+        )
+
+    async def advise_human_kp(
+        self,
+        *,
+        campaign_id: str,
+        brief: dict,
+    ) -> DirectorHelpOutput:
+        """Answer one explicit KP question from an application-owned allowlist."""
+
+        return await self._tracked_model_call(
+            campaign_id,
+            lambda: ConstrainedDirectorHelpAdapter(self.llm).answer(
+                director_brief=brief["director_brief"],
+                evidence=brief["evidence"],
+                offered_candidate_ids=brief["offered_candidate_ids"],
+                offered_candidate_skills=brief["offered_candidate_skills"],
+                offered_skill_keys=brief["offered_skill_keys"],
+                offered_evidence_ids=brief["offered_evidence_ids"],
+            ),
+        )
+
+    async def _tracked_model_call(
+        self,
+        campaign_id: str,
+        callback: Callable[[], Awaitable[OutputT]],
+    ) -> OutputT:
+        try:
+            with self.llm.bind_campaign(campaign_id):
+                if self.call_registry is None:
+                    return await callback()
+                with self.call_registry.track(campaign_id):
+                    return await callback()
+        except asyncio.CancelledError as exc:
+            raise CampaignAiCallCancelledError(
+                "Campaign AI call was cancelled by safety pause or human KP takeover"
+            ) from exc
+
     async def _complete_structured(
         self,
         campaign_id: str,
@@ -211,23 +437,14 @@ class KpOrchestrator:
         *,
         skills: tuple[AiSkillManifest, ...],
     ) -> KpTurnResult[OutputT]:
-        if self.call_registry is None:
-            return await self._complete_structured_tracked(
-                context,
-                parser,
-                skills=skills,
-            )
-        try:
-            with self.call_registry.track(campaign_id):
-                return await self._complete_structured_tracked(
+        return await self._tracked_model_call(
+            campaign_id,
+            lambda: self._complete_structured_tracked(
                     context,
                     parser,
                     skills=skills,
-                )
-        except asyncio.CancelledError as exc:
-            raise CampaignAiCallCancelledError(
-                "Campaign AI call was cancelled by safety pause or human KP takeover"
-            ) from exc
+                ),
+        )
 
     async def _complete_structured_tracked(
         self,
@@ -245,7 +462,7 @@ class KpOrchestrator:
             return _turn_result(output, context, skills)
         except StructuredOutputError as first_error:
             repair_instruction = (
-                "上一次输出未通过 JSON 结构校验。"
+                "上一次输出未通过 JSON 结构或确定性语义校验。"
                 f"错误：{str(first_error)[:1200]}\n"
                 "请仅返回修正后的完整 JSON 对象，不得添加解释。"
             )
@@ -272,6 +489,40 @@ class KpOrchestrator:
             )
             return _turn_result(output, audited_context, skills, repaired=True)
 
+    def _list_active_facts(self, campaign_id: str) -> list[dict]:
+        rows = self.connection.execute(
+            """
+            SELECT * FROM events
+            WHERE campaign_id = ?
+              AND event_type IN ('world_fact.asserted', 'world_fact.retconned')
+            ORDER BY created_at, id
+            """,
+            (campaign_id,),
+        ).fetchall()
+        heads = project_fact_heads(
+            FactLedgerEntry.from_event(dict(row)) for row in rows
+        )
+        facts: list[dict] = []
+        for entry in heads:
+            fact = entry.fact
+            if not entry.active or fact.category not in {
+                "canonical_fact",
+                "kp_secret",
+                "character_belief",
+            }:
+                continue
+            facts.append(
+                {
+                    "subject": fact.subject,
+                    "predicate": fact.predicate,
+                    "object": fact.object_text,
+                    "category": fact.category,
+                }
+            )
+            if len(facts) >= 40:
+                break
+        return facts
+
 
 def _snapshot_source(
     *,
@@ -286,8 +537,7 @@ def _snapshot_source(
         "label": label,
         "content": json.dumps(snapshot, ensure_ascii=False, sort_keys=True),
         "visibility": "kp",
-        "required": True,
-    }
+        "required": True,    }
 
 
 def _turn_result(

@@ -11,6 +11,12 @@ from ai_kp.director.turn_output import (
     MemoryCandidate,
     NpcUpdateCandidate,
 )
+from ai_kp.platform.agents.entity_actor import ActorExecutionTrace
+from ai_kp.platform.resolution.contracts import SkillChoice, SourceRef
+from ai_kp.platform.scenes.setting_profiles import (
+    ConfiguredRegion,
+    SettingProfileDocument,
+)
 
 MAX_CHARACTER_SHEET_BYTES = 512 * 1024
 MAX_CHARACTER_JSON_DEPTH = 12
@@ -89,6 +95,7 @@ class CampaignResponse(BaseModel):
     character_schema_version: str
     event_schema_version: str
     current_time: str | None = None
+    session_zero_required: bool = False
     created_at: str
 
 
@@ -140,6 +147,7 @@ class SessionJoin(BaseModel):
 
     join_code: str = Field(min_length=12, max_length=20)
     display_name: str = Field(min_length=1, max_length=80)
+    role: Literal["player", "observer"] = "player"
 
 
 class SessionKpCredentialRecovery(BaseModel):
@@ -163,6 +171,114 @@ class SessionSeatClaim(BaseModel):
 
 class SessionSeatPcAssign(BaseModel):
     pc_id: str | None = None
+
+
+class CampaignSetupConfigInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+    ruleset_id: str = Field(min_length=1, max_length=120)
+    ruleset_version: str = Field(min_length=1, max_length=80)
+    worldview: str = Field(default="", max_length=4000)
+    hosting_mode: Literal["human_kp", "hybrid", "ai_kp"] = "ai_kp"
+    expected_player_count: int = Field(default=4, ge=1, le=12)
+    campaign_type: str = Field(default="ongoing", min_length=1, max_length=120)
+    starting_power: str = Field(default="standard", min_length=1, max_length=120)
+    allowed_character_options: tuple[str, ...] = ()
+    house_rules: tuple[str, ...] = ()
+    default_visibility: Literal["public", "party", "private_by_default"] = "party"
+    style: dict[str, int | str] = Field(default_factory=dict)
+    content_warnings: tuple[str, ...] = ()
+    lines: tuple[str, ...] = ()
+    veils: tuple[str, ...] = ()
+    safety_default: Literal["pause", "fade", "change", "rewind"] = "pause"
+    idle_policy: Literal["wait", "skip", "defend", "delegate", "pause"] = "wait"
+    idle_timeout_seconds: int = Field(default=300, ge=30, le=3600)
+    allow_player_whispers: bool = False
+
+
+class TableMessageCreateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    audience: Literal["table", "party", "announcement", "direct"]
+    content: str = Field(min_length=1, max_length=4000)
+    recipient_member_id: str | None = Field(default=None, min_length=1, max_length=120)
+    client_message_id: str = Field(min_length=8, max_length=200)
+
+
+class SessionEndInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_end_id: str = Field(min_length=8, max_length=200)
+
+
+class CampaignContinueInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_continue_id: str = Field(min_length=8, max_length=200)
+
+
+class CampaignEpisodeTransitionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: Literal["paused", "in_progress"]
+    expected_version: int = Field(ge=0)
+
+
+class SessionZeroPreferencesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    public_style: dict[str, int | str] = Field(default_factory=dict)
+    private_style: dict[str, int | str] = Field(default_factory=dict)
+    lines: tuple[str, ...] = ()
+    veils: tuple[str, ...] = ()
+
+
+class SessionZeroConfirmInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision_id: str = Field(min_length=1, max_length=120)
+    expected_version: int = Field(ge=1)
+
+
+class SessionSafetyTriggerInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    response_kind: Literal["pause", "fade", "change", "rewind"] = "pause"
+
+
+class SessionSafetyResolveInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resolution_kind: Literal["fade", "change", "rewind", "resume"]
+
+
+class CharacterLifecycleProposalInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    member_id: str = Field(min_length=1, max_length=120)
+    action: Literal[
+        "observe",
+        "replace",
+        "retire",
+        "temporary_leave",
+        "npc_control",
+        "return",
+        "resurrect",
+    ]
+    reason: str = Field(min_length=1, max_length=1000)
+    replacement_investigator_id: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )
+
+
+class CharacterLifecycleDecisionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["accept", "reject"]
+    reason: str = Field(min_length=1, max_length=1000)
+    expected_version: int = Field(ge=1)
 
 
 class SkillCheckCreate(BaseModel):
@@ -193,6 +309,8 @@ class Coc7EncounterParticipant(BaseModel):
     participant_id: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=160)
     investigator_id: str | None = Field(default=None, max_length=160)
+    npc_id: str | None = Field(default=None, max_length=160)
+    side: str | None = Field(default=None, min_length=1, max_length=80)
     dex: int = Field(default=50, ge=0, le=500)
     move: int = Field(default=8, ge=0, le=100)
     max_hp: int = Field(default=10, ge=1, le=10_000)
@@ -205,6 +323,8 @@ class Coc7EncounterParticipant(BaseModel):
         "fumble", "failure", "regular", "hard", "extreme", "critical"
     ] = "regular"
     location_index: int = Field(default=0, ge=0, le=1_000)
+    dodge_target: int = Field(default=25, ge=0, le=100)
+    action_profiles: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
 
 
 class Coc7ChaseLocation(BaseModel):
@@ -238,6 +358,7 @@ class Coc7GameplayCommand(BaseModel):
         "hazard",
         "complete",
         "cancel",
+        "take_turn",
         "major_wound_con",
         "dying_con",
         "first_aid",
@@ -252,6 +373,170 @@ class Coc7GameplayCommand(BaseModel):
     visibility: Literal["table", "kp", "player"] = "table"
 
 
+class EncounterActionPreviewInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_action_id: str = Field(min_length=8, max_length=120)
+    expected_encounter_version: int = Field(ge=0)
+    action_text: str = Field(min_length=1, max_length=4000)
+    action_key: str = Field(min_length=1, max_length=120)
+    target_id: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class EncounterActionConfirmInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+
+
+class EncounterActionAgentProposalInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+
+
+class EncounterActionCancelInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+
+
+class InventoryItemCreateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=120)
+    item_type: str = Field(min_length=1, max_length=80)
+    public_name: str = Field(min_length=1, max_length=200)
+    public_description: str = Field(default="", max_length=2000)
+    publicly_listed: bool = False
+    quantity: int = Field(default=1, ge=1, le=100_000)
+    is_unique: bool = False
+    holder_kind: Literal["investigator", "party", "npc", "location", "loot", "none"]
+    holder_id: str = Field(min_length=1, max_length=160)
+    weight_units: int = Field(default=0, ge=0, le=1_000_000_000)
+    unit_value_minor: int = Field(default=0, ge=0, le=10**15)
+    currency_code: str = Field(default="", max_length=24)
+    use_effect: dict[str, Any] = Field(default_factory=dict)
+    hidden_properties: dict[str, Any] = Field(default_factory=dict)
+    source_refs: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    reason: str = Field(default="", max_length=1000)
+
+
+class InventoryItemCommandInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=120)
+    command_type: Literal[
+        "pickup", "drop", "equip", "unequip", "consume", "damage", "lose", "reveal"
+    ]
+    expected_version: int = Field(ge=1)
+    quantity: int = Field(default=1, ge=1, le=100_000)
+    holder_kind: Literal["investigator", "party", "npc", "location", "loot", "none"] | None = None
+    holder_id: str | None = Field(default=None, min_length=1, max_length=160)
+    equipped_slot: str | None = Field(default=None, min_length=1, max_length=120)
+    reveal_member_id: str | None = Field(default=None, min_length=1, max_length=120)
+    reason: str = Field(default="", max_length=1000)
+
+
+class CampaignObjectiveCreateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=200)
+    title: str = Field(min_length=1, max_length=200)
+    public_description: str = Field(default="", max_length=2000)
+    kp_notes: str = Field(default="", max_length=4000)
+    visibility: Literal["table", "kp"] = "table"
+    source_refs: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+
+
+class CampaignObjectiveUpdateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=200)
+    expected_version: int = Field(ge=1)
+    status: Literal["open", "blocked", "completed", "failed", "abandoned"]
+    public_progress: str = Field(default="", max_length=2000)
+    kp_notes: str = Field(default="", max_length=4000)
+    source_refs: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+
+
+class CurrencyTransferInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=120)
+    from_kind: Literal["investigator", "party", "npc", "vendor"] | None = None
+    from_id: str | None = Field(default=None, min_length=1, max_length=160)
+    to_kind: Literal["investigator", "party", "npc", "vendor"]
+    to_id: str = Field(min_length=1, max_length=160)
+    currency_code: str = Field(min_length=1, max_length=24)
+    amount_minor: int = Field(gt=0, le=10**15)
+    expected_from_version: int | None = Field(default=None, ge=1)
+    expected_to_version: int | None = Field(default=None, ge=1)
+    reason: str = Field(default="", max_length=1000)
+
+
+class InventoryOfferCreateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=120)
+    item_id: str = Field(min_length=1, max_length=160)
+    expected_item_version: int = Field(ge=1)
+    quantity: int = Field(ge=1, le=100_000)
+    to_investigator_id: str = Field(min_length=1, max_length=160)
+    reason: str = Field(default="", max_length=1000)
+
+
+class InventoryOfferDecisionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=120)
+    expected_version: int = Field(ge=1)
+    decision: Literal["accept", "decline", "cancel"]
+    reason: str = Field(default="", max_length=1000)
+
+
+class InventoryTradeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=120)
+    direction: Literal["purchase", "sell"]
+    item_id: str = Field(min_length=1, max_length=160)
+    expected_item_version: int = Field(ge=1)
+    quantity: int = Field(ge=1, le=100_000)
+    investigator_id: str = Field(min_length=1, max_length=160)
+    counterparty_kind: Literal["npc", "vendor"]
+    counterparty_id: str = Field(min_length=1, max_length=160)
+    currency_code: str = Field(min_length=1, max_length=24)
+    expected_investigator_balance_version: int | None = Field(default=None, ge=1)
+    expected_counterparty_balance_version: int | None = Field(default=None, ge=1)
+    reason: str = Field(default="", max_length=1000)
+
+
+class InventoryRecipeCreateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=120)
+    public_name: str = Field(min_length=1, max_length=200)
+    inputs: list[dict[str, Any]] = Field(min_length=1, max_length=20)
+    output_template: dict[str, Any]
+    currency_cost_minor: int = Field(default=0, ge=0, le=10**15)
+    currency_code: str = Field(default="", max_length=24)
+    visibility: Literal["table", "kp"] = "table"
+    source_refs: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    reason: str = Field(default="", max_length=1000)
+
+
+class InventoryCraftInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command_id: str = Field(min_length=8, max_length=120)
+    recipe_id: str = Field(min_length=1, max_length=160)
+    investigator_id: str = Field(min_length=1, max_length=160)
+    expected_recipe_version: int = Field(ge=1)
+    expected_currency_version: int | None = Field(default=None, ge=1)
+    reason: str = Field(default="", max_length=1000)
+
+
 class SkillCheckOverride(BaseModel):
     success_level: Literal[
         "fumble", "failure", "regular", "hard", "extreme", "critical"
@@ -262,6 +547,8 @@ class SkillCheckOverride(BaseModel):
 
 class SkillCheckDecision(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
+    auto_advance: bool = False
+    background: bool = True
 
 
 class OpposedCheckSideCreate(BaseModel):
@@ -298,6 +585,7 @@ class ActionAdjudicationConfirm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_version: int = Field(ge=1)
+    expected_batch_version: int | None = Field(default=None, ge=1)
     selected_skill: str | None = Field(default=None, min_length=1, max_length=100)
 
 
@@ -305,13 +593,267 @@ class ActionAdjudicationRevise(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_version: int = Field(ge=1)
+    expected_batch_version: int | None = Field(default=None, ge=1)
     action_text: str = Field(min_length=1, max_length=4000)
     background: bool = True
 
 
 class ParallelActionSettlementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     action_ids: list[str] = Field(min_length=2, max_length=12)
-    auto_approve: bool = True
+
+
+class ParallelActionCommitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+
+
+class ParallelActionAttentionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class ParallelActionCoordinatorSummaryResponse(BaseModel):
+    """Minimal KP-only projection for recovering paused multiplayer work."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    status: Literal["needs_attention"]
+    version: int = Field(ge=1)
+    attention_reason: str = Field(min_length=1, max_length=2000)
+    updated_at: str
+    participant_count: int = Field(ge=2, le=12)
+    confirmed_count: int = Field(ge=0, le=12)
+    pending_check_count: int = Field(ge=0)
+    abandon_allowed: bool
+    abandon_block_reason: str
+
+
+class ParallelActionPlayerSkillOptionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: str
+    skill_key: str
+    target: int = Field(ge=0, le=100)
+    difficulty: Literal["regular", "hard", "extreme", "opposed"]
+    reason: str
+    bonus_dice: int = Field(default=0, ge=-2, le=2)
+    allow_push: bool = True
+    scope: str = ""
+    supporting_factors: list[str] = Field(default_factory=list)
+    automatic_information: list[str] = Field(default_factory=list)
+    failure_stakes: str = ""
+    pushed_failure_stakes: str = ""
+
+
+class ParallelActionPlayerRulingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str | None = None
+    method: str | None = None
+    target: str | None = None
+    feasibility: Literal["possible", "partial", "impossible"] | None = None
+    resolution: Literal["automatic", "check", "opposed", "no_roll"] | None = None
+    maximum_effect: str | None = None
+    alternative: str | None = None
+
+
+class PlayerTabletopAmbiguityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: Literal["goal", "method", "target", "scope", "duration"]
+    question: str
+    why_material: str
+
+
+class PlayerTabletopFrameResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal[
+        "out_of_character",
+        "world_question",
+        "npc_dialogue",
+        "action",
+        "multi_step_action",
+        "time_advance",
+        "result_assertion",
+    ]
+    goal: str
+    method: str
+    target_entity_ids: list[str]
+    dialogue: str
+    steps: list[str]
+    time_span: str
+    ambiguity: PlayerTabletopAmbiguityResponse | None = None
+    confidence: Literal["low", "medium", "high"]
+
+
+class PlayerTabletopActorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    public_narration: str
+    speaker_entity_ids: list[str]
+    source: Literal["model", "model_repaired", "deterministic"]
+    attempt_count: int = Field(ge=0, le=2)
+    actor_traces: list[ActorExecutionTrace] = Field(default_factory=list, max_length=8)
+
+
+class PlayerTabletopTurnResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["tabletop-turn.v1"]
+    route: Literal[
+        "conversation",
+        "information",
+        "roleplay",
+        "mechanical",
+        "clarification",
+    ]
+    attempt_count: int = Field(ge=0, le=2)
+    audit_count: int = Field(ge=0, le=1)
+    frame: PlayerTabletopFrameResponse
+    response: PlayerTabletopActorResponse | None = None
+
+
+class ParallelActionPlayerAdjudicationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    action_id: str
+    mode: Literal["direct_resolution", "skill_check", "roleplay_or_clarification"]
+    status: Literal["pending", "confirmed", "superseded"]
+    version: int = Field(ge=1)
+    reason: str
+    prompt: str
+    skill_options: list[ParallelActionPlayerSkillOptionResponse]
+    selected_skill: str | None = None
+    source_model: str
+    tabletop_turn: PlayerTabletopTurnResponse | None = None
+    updated_at: str
+    confirmed_at: str | None = None
+    ruling: ParallelActionPlayerRulingResponse
+
+
+class ParallelActionPlayerRawDiceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ones_digit: int = Field(ge=0, le=9)
+    tens_digits: list[int]
+    candidates: list[int]
+
+
+class ParallelActionPlayerCheckPlanResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope: str = ""
+    supporting_factors: list[str] = Field(default_factory=list)
+    automatic_information: list[str] = Field(default_factory=list)
+    failure_stakes: str = ""
+    pushed_failure_stakes: str = ""
+
+
+class ParallelActionPlayerPushDecisionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["accept_failure"]
+    reason: str
+    created_at: str
+
+
+class ParallelActionPlayerCheckResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    skill_key: str
+    skill_name: str
+    target: int = Field(ge=0, le=100)
+    difficulty: Literal["regular", "hard", "extreme"]
+    bonus_dice: int = Field(ge=-2, le=2)
+    visibility: Literal["public", "private"]
+    allow_push: bool
+    pushed_from_check_id: str | None = None
+    status: Literal["requested", "resolved", "overridden", "cancelled"]
+    input_method: Literal["digital", "physical"] | None = None
+    raw_dice: ParallelActionPlayerRawDiceResponse | None = None
+    selected_roll: int | None = Field(default=None, ge=1, le=100)
+    threshold: int | None = Field(default=None, ge=0, le=100)
+    success_level: Literal[
+        "fumble", "failure", "regular", "hard", "extreme", "critical"
+    ] | None = None
+    passed: bool | None = None
+    check_plan: ParallelActionPlayerCheckPlanResponse
+    push_decision: ParallelActionPlayerPushDecisionResponse | None = None
+    created_at: str
+    resolved_at: str | None = None
+
+
+class ParallelActionPlayerOwnItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action_id: str
+    adjudication: ParallelActionPlayerAdjudicationResponse
+    checks: list[ParallelActionPlayerCheckResponse]
+
+
+class ParallelActionPlayerBatchResponse(BaseModel):
+    """Response contract for a member-scoped parallel batch projection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    status: Literal[
+        "awaiting_confirmation",
+        "awaiting_checks",
+        "ready",
+        "committing",
+        "settled",
+        "needs_attention",
+        "superseded",
+    ]
+    version: int = Field(ge=1)
+    participant_count: int = Field(ge=2, le=12)
+    confirmed_count: int = Field(ge=0, le=12)
+    waiting_count: int = Field(ge=0, le=12)
+    self_phase: Literal[
+        "awaiting_confirmation",
+        "waiting_for_others",
+        "awaiting_check",
+        "awaiting_push_decision",
+        "waiting_for_checks",
+        "ready",
+        "settling",
+        "settled",
+        "needs_attention",
+        "superseded",
+    ]
+    own_item: ParallelActionPlayerOwnItemResponse
+    updated_at: str
+    settled_at: str | None = None
+    public_message: str
+
+
+class ParallelActionPlayerRegatherResponse(BaseModel):
+    """Member-scoped regrouping progress; contains no other player's action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    status: Literal["gathering", "queued"]
+    version: int = Field(ge=1)
+    participant_count: int = Field(ge=2, le=12)
+    submitted_count: int = Field(ge=0, le=12)
+    waiting_count: int = Field(ge=0, le=12)
+    self_phase: Literal[
+        "awaiting_submission", "waiting_for_others", "processing"
+    ]
+    own_action_id: str | None = None
+    updated_at: str
+    public_message: str
 
 
 class AutoKpJobCreate(BaseModel):
@@ -384,6 +926,7 @@ class ModelConfigurationUpdate(BaseModel):
     model: str = Field(default="", max_length=300)
     local_model_path: str | None = Field(default=None, max_length=2000)
     local_port: int = Field(default=8011, ge=1024, le=65535)
+    semantic_profile: Literal["small", "large"] = "small"
 
 
 class ImageModelConfigurationUpdate(BaseModel):
@@ -413,6 +956,31 @@ class ModuleKnowledgeReview(BaseModel):
         if self.decision == "rejected" and not (self.note or "").strip():
             raise ValueError("Rejected candidates require a review note")
         return self
+
+
+class ScenarioContractGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ruleset_id: str = Field(default="coc7", min_length=1, max_length=120)
+    source_scope_key: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class ScenarioContractCompileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract: dict[str, Any]
+
+
+class ScenarioContractPublishRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_row_version: int = Field(ge=1)
+
+
+class ScenarioContractBindRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version_id: str = Field(min_length=1, max_length=160)
 
 
 class ModuleRunStart(BaseModel):
@@ -469,6 +1037,152 @@ class ModuleRunEntityStateUpdate(BaseModel):
 
 class DirectorAnalysisRequest(BaseModel):
     player_intent: str = Field(min_length=1, max_length=1000)
+
+
+class DirectorHelpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("question")
+    @classmethod
+    def normalize_question(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Need Help question cannot be blank")
+        return normalized
+
+
+class DirectorHelpCitation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_id: str = Field(min_length=1, max_length=320)
+    source_type: str = Field(min_length=1, max_length=160)
+    authority: Literal["executable_contract", "source_context_only"]
+    visibility: Literal["player", "table", "kp", "secret"]
+    title: str = Field(min_length=1, max_length=500)
+    text: str = Field(max_length=1600)
+    source_locator: str | None = Field(default=None, max_length=1000)
+    source_refs: list[SourceRef] = Field(default_factory=list, max_length=16)
+    source_refs_total_count: int = Field(ge=0)
+    source_refs_truncated: bool
+
+
+class DirectorHelpAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str = Field(min_length=1, max_length=160)
+    kind: Literal["operator", "task_method"]
+    title: str = Field(min_length=1, max_length=240)
+    available: bool
+    reason: str = Field(max_length=2000)
+    policy: Literal[
+        "automatic",
+        "choice",
+        "required_check",
+        "optional_check",
+        "conditional_check",
+        "opposed_check",
+        "impossible",
+        "clarification",
+    ] | None = None
+    selected_skill_key: str | None = Field(default=None, max_length=160)
+    skill_choices: list[SkillChoice] = Field(default_factory=list, max_length=8)
+    skill_choices_total_count: int = Field(ge=0)
+    skill_choices_truncated: bool
+    automatic_information: list[str] = Field(default_factory=list, max_length=12)
+    maximum_effect: str = Field(default="", max_length=1000)
+    step_operator_ids: list[str] = Field(default_factory=list, max_length=8)
+    success_effects: list[str] = Field(default_factory=list, max_length=32)
+    success_effects_total_count: int = Field(ge=0)
+    success_effects_truncated: bool
+    failure_effects: list[str] = Field(default_factory=list, max_length=32)
+    failure_effects_total_count: int = Field(ge=0)
+    failure_effects_truncated: bool
+
+
+class DirectorHelpResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    run_version: int = Field(ge=0)
+    contract_id: str
+    contract_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scenario_version: int = Field(ge=1)
+    state_version: int = Field(ge=0)
+    basis_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    question: str = Field(min_length=1, max_length=2000)
+    status: Literal["answered", "partial", "clarify", "no_evidence", "refused"]
+    answer: str = Field(max_length=4000)
+    follow_up_question: str | None = Field(default=None, max_length=1000)
+    suggested_response: str = Field(max_length=2000)
+    suggested_response_audience: Literal["kp_review_only"]
+    next_steps: list[str] = Field(max_length=4)
+    confidence: Literal["low", "medium", "high"]
+    uncertainty_reasons: list[str] = Field(max_length=8)
+    assumptions: list[str] = Field(max_length=8)
+    citations: list[DirectorHelpCitation] = Field(max_length=8)
+    action: DirectorHelpAction | None = None
+    writes_performed: Literal[False]
+    can_execute: Literal[False]
+
+
+DirectorHelpAuditOutcome = Literal[
+    "requested",
+    "completed",
+    "failed",
+    "cancelled_client",
+    "cancelled_control",
+    "rejected_busy",
+]
+
+
+class DirectorHelpAuditItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=160)
+    run_id: str = Field(min_length=1, max_length=160)
+    requested_by_member_id: str | None = Field(default=None, max_length=160)
+    question: str = Field(min_length=1, max_length=2000)
+    outcome: DirectorHelpAuditOutcome
+    error_code: str | None = Field(default=None, max_length=160)
+    duration_ms: int | None = Field(default=None, ge=0)
+    created_at: str = Field(min_length=1, max_length=80)
+    completed_at: str | None = Field(default=None, max_length=80)
+    response_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    advice: DirectorHelpResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_outcome_payload(self) -> "DirectorHelpAuditItem":
+        if self.outcome == "requested":
+            if any(
+                value is not None
+                for value in (
+                    self.error_code,
+                    self.duration_ms,
+                    self.completed_at,
+                    self.response_hash,
+                    self.advice,
+                )
+            ):
+                raise ValueError("A requested Need Help audit cannot have a terminal payload")
+            return self
+        if self.duration_ms is None or self.completed_at is None:
+            raise ValueError("A terminal Need Help audit requires timing metadata")
+        if self.outcome == "completed":
+            if self.advice is None or self.response_hash is None or self.error_code is not None:
+                raise ValueError("A completed Need Help audit requires only advice and its hash")
+            return self
+        if self.error_code is None or self.advice is not None or self.response_hash is not None:
+            raise ValueError("A failed Need Help audit requires only a safe error code")
+        return self
+
+
+class DirectorHelpAuditPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[DirectorHelpAuditItem] = Field(max_length=50)
+    next_before_id: str | None = Field(default=None, max_length=160)
 
 
 class DirectorControlUpdate(BaseModel):
@@ -561,10 +1275,55 @@ class SimulationCaseCreate(BaseModel):
 
 
 class WorldExpansionProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_intent: str = Field(min_length=1, max_length=1000)
+    requested_expansion_kind: Literal[
+        "environment", "reactive_branch", "anchor_bridge"
+    ] = "environment"
     pc_id: str | None = Field(default=None, max_length=160)
     map_id: str | None = Field(default=None, max_length=160)
+    setting_pack_id: str | None = Field(default=None, min_length=1, max_length=80)
+    settlement_kind: Literal["city", "town", "village", "rural"] | None = None
     auto_materialize: bool = False
+
+
+class WorldEntityStateUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+    dimension: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    value: str | int | bool | None
+    visibility: Literal["table", "kp", "secret"] = "table"
+    idempotency_key: str = Field(min_length=8, max_length=200)
+    note: str = Field(default="", max_length=2000)
+    happened_at: str | None = Field(default=None, max_length=80)
+
+
+class SettingProfileCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=200)
+    setting_pack_id: str = Field(min_length=1, max_length=80)
+    regions: list[ConfiguredRegion] = Field(min_length=1, max_length=16)
+
+
+class SettingProfileUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=200)
+    document: SettingProfileDocument
+
+
+class RunSettingSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_run_version: int = Field(ge=0)
+    profile_id: str = Field(min_length=1, max_length=160)
+    profile_version: int = Field(ge=1)
+    settlement_id: str = Field(min_length=1, max_length=160)
+    reason: str = Field(min_length=1, max_length=2000)
 
 
 class ModuleReachabilityCheck(BaseModel):
@@ -967,3 +1726,8 @@ class TurnProposalCreate(BaseModel):
     proposed_map_moves: list[MapMoveCandidate] = Field(default_factory=list, max_length=12)
     proposed_facts: list[FactCandidate] = Field(default_factory=list, max_length=12)
     source_model: str = "manual-dev"
+
+
+class ManualKernelSelection(BaseModel):
+    operator_id: str = Field(min_length=1, max_length=160)
+    requested_skill_key: str | None = Field(default=None, min_length=1, max_length=120)

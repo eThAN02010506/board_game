@@ -1,0 +1,87 @@
+{
+  "contract_id": "fixture-open-investigation",
+  "schema_version": 1,
+  "source_version": 1,
+  "ruleset_id": "coc7",
+  "title": "Open investigation fixture",
+  "initial_scene_id": "briefing",
+  "locations": [
+    {"location_id": "briefing", "title": "Briefing", "source_refs": [{"source_block_id": "opening", "document_id": "fixture"}]},
+    {"location_id": "archive", "title": "Archive", "source_refs": [{"source_block_id": "opening", "document_id": "fixture"}]},
+    {"location_id": "witness", "title": "Witness", "source_refs": [{"source_block_id": "opening", "document_id": "fixture"}]},
+    {"location_id": "site", "title": "Site", "source_refs": [{"source_block_id": "opening", "document_id": "fixture"}]}
+  ],
+  "location_links": [
+    {"from_location_id": "briefing", "to_location_id": "archive", "source_refs": [{"source_block_id": "opening", "document_id": "fixture"}]},
+    {"from_location_id": "briefing", "to_location_id": "witness", "source_refs": [{"source_block_id": "opening", "document_id": "fixture"}]},
+    {"from_location_id": "briefing", "to_location_id": "site", "source_refs": [{"source_block_id": "opening", "document_id": "fixture"}]}
+  ],
+  "clues": [
+    {
+      "clue_id": "identity",
+      "title": "Subject identity",
+      "importance": "core",
+      "discovery_operator_ids": ["search-archive", "interview-witness"],
+      "fact_path": "facts.case.identity",
+      "fact_value": true,
+      "recoverable": true,
+      "public_content": ["The records identify the subject and provide the verified name."],
+      "source_refs": [{"source_block_id": "identity", "document_id": "fixture"}]
+    }
+  ],
+  "operators": [
+    {
+      "operator_id": "search-archive",
+      "title": "Search archive",
+      "policy": "required_check",
+      "skill_choices": [
+        {
+          "skill_key": "library_use",
+          "reason": "Locate the relevant records.",
+          "allow_push": false,
+          "failure_stakes": "The search is delayed and the investigator must use another route."
+        }
+      ],
+      "automatic_information": ["The records identify the subject and provide the verified name."],
+      "success_commands": [
+        {"kind": "set_fact", "path": "case.identity", "value": true}
+      ],
+      "failure_commands": [
+        {"kind": "set_fact", "path": "case.archive_delayed", "value": true}
+      ],
+      "source_refs": [{"source_block_id": "identity", "document_id": "fixture"}]
+    },
+    {
+      "operator_id": "interview-witness",
+      "title": "Interview witness",
+      "policy": "choice",
+      "automatic_information": ["The records identify the subject and provide the verified name."],
+      "success_commands": [
+        {"kind": "set_fact", "path": "case.identity", "value": true}
+      ],
+      "source_refs": [{"source_block_id": "identity", "document_id": "fixture"}]
+    },
+    {
+      "operator_id": "resolve-case",
+      "title": "Resolve the case",
+      "policy": "automatic",
+      "preconditions": [
+        {"path": "facts.case.identity", "operator": "eq", "value": true}
+      ],
+      "success_commands": [
+        {"kind": "set_fact", "path": "case.resolved", "value": true}
+      ],
+      "source_refs": [{"source_block_id": "resolution", "document_id": "fixture"}]
+    }
+  ],
+  "endings": [
+    {
+      "ending_id": "resolved",
+      "title": "Resolved",
+      "all_conditions": [
+        {"path": "facts.case.resolved", "operator": "eq", "value": true}
+      ],
+      "source_refs": [{"source_block_id": "resolution", "document_id": "fixture"}]
+    }
+  ]
+}

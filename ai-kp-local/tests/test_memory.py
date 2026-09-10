@@ -6,6 +6,7 @@ from ai_kp.core.db import db_session
 from ai_kp.core.repository import Repository
 from ai_kp.memory.npc_candidates import NpcCandidateService
 from ai_kp.memory.retrieval import MemoryRetriever
+from ai_kp.platform.memory.reranking import MemoryRerankUnavailable
 
 
 class MemoryTests(unittest.TestCase):
@@ -32,6 +33,105 @@ class MemoryTests(unittest.TestCase):
 
                 self.assertEqual(results[0].scope, "pc_major")
                 self.assertIn("周怀民", results[0].text)
+                self.assertEqual(
+                    {name for name, _ in results[0].score_components},
+                    {
+                        "weighted_lexical_overlap",
+                        "query_coverage",
+                        "importance_bonus",
+                        "lexical_rank",
+                        "fts_rank",
+                        "semantic_rank",
+                        "rrf_score",
+                    },
+                )
+
+    def test_semantic_ranker_can_recover_a_synonym_after_authorization(self) -> None:
+        class SynonymRanker:
+            def rank(self, query, candidates):
+                assert query == "寻找以前帮助过我的记者"
+                return tuple(
+                    candidate.memory_id
+                    for candidate in candidates
+                    if "报社线人" in candidate.text
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "semantic.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("语义召回")
+                expected = repo.add_memory(
+                    campaign_id=campaign["id"],
+                    scope="npc_relationship",
+                    visibility="table",
+                    text="周怀民是值得信任的报社线人。",
+                )
+                repo.add_memory(
+                    campaign_id=campaign["id"],
+                    scope="secret",
+                    visibility="kp",
+                    text="记者其实已经背叛了队伍。",
+                )
+
+                results = MemoryRetriever(
+                    connection,
+                    semantic_ranker=SynonymRanker(),
+                ).retrieve(
+                    "寻找以前帮助过我的记者",
+                    campaign_id=campaign["id"],
+                    visibility=("table",),
+                )
+
+                self.assertEqual([item.id for item in results], [expected["id"]])
+                self.assertEqual(dict(results[0].score_components)["semantic_rank"], 1.0)
+
+    def test_fts_can_recover_a_substring_without_exact_lexical_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "fts-substring.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("FTS 子串召回")
+                expected = repo.add_memory(
+                    campaign_id=campaign["id"],
+                    scope="clue",
+                    visibility="table",
+                    text="The docking records mention a midnight arrival.",
+                )
+
+                results = MemoryRetriever(connection).retrieve(
+                    "dock",
+                    campaign_id=campaign["id"],
+                    visibility=("table",),
+                )
+
+                self.assertEqual([item.id for item in results], [expected["id"]])
+                components = dict(results[0].score_components)
+                self.assertEqual(components["fts_only"], 1.0)
+                self.assertEqual(components["fts_rank"], 1.0)
+                self.assertEqual(components["lexical_rank"], 0.0)
+
+    def test_memory_retrieval_falls_back_when_semantic_ranker_is_unavailable(self) -> None:
+        class UnavailableRanker:
+            def rank(self, query, candidates):
+                raise MemoryRerankUnavailable("local model is not loaded")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "fallback.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("重排降级")
+                expected = repo.add_memory(
+                    campaign_id=campaign["id"],
+                    scope="clue",
+                    visibility="table",
+                    text="旧码头的钟声响了三次。",
+                )
+
+                results = MemoryRetriever(
+                    connection,
+                    semantic_ranker=UnavailableRanker(),
+                ).retrieve("旧码头钟声", campaign_id=campaign["id"])
+
+                self.assertEqual([item.id for item in results], [expected["id"]])
+                self.assertEqual(dict(results[0].score_components)["semantic_rank"], 0.0)
 
     def test_memory_retrieval_isolated_by_campaign_pc_and_visibility(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

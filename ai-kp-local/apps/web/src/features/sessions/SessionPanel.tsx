@@ -23,6 +23,7 @@ type Props = {
   seatInvitationInput: string;
   seatLabel: string;
   playerDisplayName: string;
+  joinRole: "player" | "observer";
   members: SessionMember[];
   seats: SessionSeat[];
   recoverableSeats: SessionSeat[];
@@ -31,7 +32,9 @@ type Props = {
   onSeatInvitationInputChange: (value: string) => void;
   onSeatLabelChange: (value: string) => void;
   onPlayerDisplayNameChange: (value: string) => void;
+  onJoinRoleChange: (value: "player" | "observer") => void;
   onRefreshIdentity: () => void;
+  onSwitchIdentity: () => void;
   onRotateJoinCode: () => void;
   onRefreshMembers: () => void;
   onRefreshSeats: () => void;
@@ -70,12 +73,14 @@ export function SessionPanel(props: Props) {
         <>
           <div className="identity-card">
             <span className={`role-badge ${props.identity.role}`}>
-              {props.identity.role === "kp" ? "KP" : t("common.playerRole")}
+              {props.identity.role === "kp" ? "KP" : props.identity.role === "observer" ? "观战者" : t("common.playerRole")}
             </span>
             <strong>{props.identity.display_name}</strong>
             <small>
               {t("sessions.sessionLabel")} {statusLabel(props.session.status)} · {t("sessions.investigatorLabel")}
-              {props.identity.pc_id ? t("sessions.pcBound") : t("sessions.pcPending")}
+              {props.identity.role === "observer"
+                ? "只读席位"
+                : props.identity.pc_id ? t("sessions.pcBound") : t("sessions.pcPending")}
             </small>
             {props.identity.seat_id && <small>{t("sessions.stableSeat")} {props.identity.seat_id}</small>}
             <small className={`realtime-note ${props.realtimeStatus}`}>{props.realtimeNote}</small>
@@ -84,9 +89,14 @@ export function SessionPanel(props: Props) {
             <RefreshCw size={16} />
             {t("sessions.refreshIdentity")}
           </button>
-          <button className="ghost-button" onClick={props.onOpenInvestigators} type="button">
-            {props.identity.role === "kp" ? t("sessions.goReviewBind") : t("sessions.goCreateSubmit")}
+          <button className="ghost-button" onClick={props.onSwitchIdentity} type="button">
+            {t("sessions.switchIdentity")}
           </button>
+          {props.identity.role !== "observer" && (
+            <button className="ghost-button" onClick={props.onOpenInvestigators} type="button">
+              {props.identity.role === "kp" ? t("sessions.goReviewBind") : t("sessions.goCreateSubmit")}
+            </button>
+          )}
 
           {props.identity.role === "kp" && (
             <>
@@ -257,6 +267,16 @@ export function SessionPanel(props: Props) {
             </small>
             <div className="session-divider">{t("sessions.legacyJoinDivider")}</div>
             <form onSubmit={props.onJoinSession}>
+              <label>
+                加入身份
+                <select
+                  value={props.joinRole}
+                  onChange={(event) => props.onJoinRoleChange(event.target.value as "player" | "observer")}
+                >
+                  <option value="player">玩家</option>
+                  <option value="observer">观战者（只读）</option>
+                </select>
+              </label>
               <label>
                 {t("sessions.joinCodeLabel")}
                 <input autoComplete="off" value={props.joinCodeInput} onChange={(event) => props.onJoinCodeInputChange(event.target.value)} />

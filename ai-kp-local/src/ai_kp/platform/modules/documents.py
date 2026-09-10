@@ -6,6 +6,7 @@ import hashlib
 import mimetypes
 import posixpath
 import re
+from collections import Counter
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePosixPath
@@ -15,14 +16,19 @@ from zipfile import BadZipFile, ZipFile
 
 from pypdf import PdfReader
 
+from ai_kp.platform.modules.section_ancestry import (
+    inferred_scene_key,
+    resolve_heading_level,
+)
 from ai_kp.platform.modules.structure import (
     infer_asset_role,
     infer_semantic_kind,
+    inherit_heading_semantics,
     looks_like_heading,
 )
 
 DocumentType = Literal["pdf", "docx"]
-PARSER_VERSION = "module-document.v4"
+PARSER_VERSION = "module-document.v9"
 MAX_MODULE_BYTES = 64 * 1024 * 1024
 OLE_CFB_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 MAX_PDF_PAGES = 1200
@@ -54,6 +60,26 @@ _A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 _R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _PR = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 _UNSAFE_XML = re.compile(br"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
+_PDF_PAGE_LABEL = re.compile(r"^\d{1,4}$")
+_PDF_COLON_HEADING = re.compile(
+    r"^(?:展示材料|附录\s*[A-Z一二三四五六七八九十0-9]*|"
+    r"给守秘人的建议|.+的启示)\s*[:：]",
+    re.IGNORECASE,
+)
+_PDF_ALWAYS_HEADINGS = {
+    "引言",
+    "战斗",
+    "技能",
+    "奖励",
+    "特殊能力",
+}
+
+
+@dataclass(frozen=True)
+class _PdfTextBlock:
+    text: str
+    is_heading: bool = False
+    layout_inferred_heading: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,6 +97,9 @@ class DocumentChunk:
     classification_confidence: float = 0
     style_annotations: tuple[str, ...] = ()
     review_flags: tuple[str, ...] = ()
+    heading_level: int | None = None
+    section_path: tuple[str, ...] = ()
+    scene_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -154,14 +183,8 @@ def _extract_pdf(
     if len(reader.pages) > MAX_PDF_PAGES:
         raise ValueError(f"KP 本超过 {MAX_PDF_PAGES} 页限制")
 
-    chunks: list[DocumentChunk] = []
-    assets: list[DocumentAsset] = []
-    extracted_characters = 0
-    asset_bytes = 0
-    image_pixels = 0
+    page_texts: list[str] = []
     pdf_content_bytes = 0
-    pdf_images_seen = 0
-    current_heading = title
     for page_number, page in enumerate(reader.pages, start=1):
         page_content_bytes = _pdf_page_content_bytes(page, page_number)
         if page_content_bytes > MAX_PDF_PAGE_CONTENT_BYTES:
@@ -175,14 +198,53 @@ def _extract_pdf(
             page_text = page.extract_text() or ""
         except Exception as exc:
             raise ValueError(f"第 {page_number} 页文本提取失败") from exc
-        for block in _split_pdf_text(page_text):
-            extracted_characters += len(block)
+        page_texts.append(page_text)
+
+    repeated_boundary_lines = _repeated_pdf_boundary_lines(page_texts)
+    numeric_boundary_edges = _numeric_pdf_boundary_edges(page_texts)
+    chunks: list[DocumentChunk] = []
+    assets: list[DocumentAsset] = []
+    extracted_characters = 0
+    asset_bytes = 0
+    image_pixels = 0
+    pdf_images_seen = 0
+    current_heading = title
+    section_headings: dict[int, str] = {}
+    structural_parent_level: int | None = None
+    for page_number, (page, page_text) in enumerate(
+        zip(reader.pages, page_texts, strict=True),
+        start=1,
+    ):
+        for block in _split_pdf_blocks(
+            page_text,
+            repeated_boundary_lines=repeated_boundary_lines,
+            numeric_boundary_edges=numeric_boundary_edges,
+        ):
+            extracted_characters += len(block.text)
             if extracted_characters > MAX_EXTRACTED_CHARACTERS:
                 raise ValueError("KP 本提取文本超过 1200 万字符限制")
-            possible_heading = _possible_heading(block)
-            if possible_heading:
-                current_heading = possible_heading
-            hint = infer_semantic_kind(block)
+            if block.is_heading:
+                current_heading = block.text[:200]
+            heading_level, structural_parent_level = resolve_heading_level(
+                title=block.text if block.is_heading else "",
+                is_heading=block.is_heading,
+                explicit_level=None,
+                structural_parent_level=structural_parent_level,
+            )
+            if heading_level is not None:
+                section_headings = {
+                    level: heading
+                    for level, heading in section_headings.items()
+                    if level < heading_level
+                }
+                section_headings[heading_level] = current_heading
+            section_path = tuple(section_headings[level] for level in sorted(section_headings))
+            hint = infer_semantic_kind(
+                block.text,
+                content_kind="heading" if block.is_heading else "text",
+                styled_heading=block.is_heading,
+            )
+            hint = inherit_heading_semantics(hint, current_heading)
             if len(chunks) >= MAX_DOCUMENT_CHUNKS:
                 raise ValueError(
                     f"KP 本提取文本块超过 {MAX_DOCUMENT_CHUNKS} 个限制"
@@ -190,14 +252,26 @@ def _extract_pdf(
             chunks.append(
                 DocumentChunk(
                     title=current_heading,
-                    text=block,
+                    text=block.text,
                     order_index=len(chunks),
+                    content_kind="heading" if block.is_heading else "text",
                     page_start=page_number,
                     page_end=page_number,
                     source_locator=f"pdf:page:{page_number}",
                     semantic_kind=hint.semantic_kind,
                     classification_confidence=hint.confidence,
-                    review_flags=hint.review_flags,
+                    review_flags=(
+                        "builtin_pdf_text_layer",
+                        *(
+                            ("pdf_layout_inferred_heading",)
+                            if block.layout_inferred_heading
+                            else ()
+                        ),
+                        *hint.review_flags,
+                    ),
+                    heading_level=heading_level if block.is_heading else None,
+                    section_path=section_path,
+                    scene_key=inferred_scene_key(section_path),
                 )
             )
         try:
@@ -254,7 +328,7 @@ def _extract_pdf(
                     nearby_heading=current_heading,
                     asset_role=role,
                     classification_confidence=confidence,
-                    review_flags=flags,
+                    review_flags=("builtin_pdf_asset_extraction", *flags),
                 )
             )
     if not chunks and not assets:
@@ -305,6 +379,9 @@ def _extract_docx(
         asset_bytes = 0
         image_pixels = 0
         current_heading = title
+        section_headings: dict[int, str] = {}
+        structural_parent_level: int | None = None
+        style_heading_levels = _docx_style_heading_levels(archive)
         paragraph_index = 0
         referenced_media: set[str] = set()
 
@@ -361,9 +438,36 @@ def _extract_docx(
                 text, style_annotations = _paragraph_text_and_styles(element)
                 style = element.find(f"./{_W}pPr/{_W}pStyle")
                 style_name = style.get(f"{_W}val", "") if style is not None else ""
-                styled_heading = _is_heading_style(style_name)
-                if text and looks_like_heading(text, styled_heading=styled_heading):
+                explicit_heading_level = _docx_paragraph_heading_level(
+                    element,
+                    style_id=style_name,
+                    style_heading_levels=style_heading_levels,
+                )
+                styled_heading = _is_heading_style(style_name) or _is_emphasized_heading(
+                    text,
+                    style_annotations,
+                )
+                is_heading = bool(
+                    text and looks_like_heading(text, styled_heading=styled_heading)
+                )
+                heading_level, structural_parent_level = resolve_heading_level(
+                    title=text,
+                    is_heading=is_heading,
+                    explicit_level=explicit_heading_level,
+                    structural_parent_level=structural_parent_level,
+                )
+                if is_heading:
                     current_heading = text[:200]
+                if text and heading_level is not None:
+                    section_headings = {
+                        level: heading
+                        for level, heading in section_headings.items()
+                        if level < heading_level
+                    }
+                    section_headings[heading_level] = text[:200]
+                section_path = tuple(
+                    section_headings[level] for level in sorted(section_headings)
+                )
                 if text:
                     extracted_characters += len(text)
                     if extracted_characters > MAX_EXTRACTED_CHARACTERS:
@@ -372,10 +476,15 @@ def _extract_docx(
                         text,
                         styled_heading=styled_heading,
                     )
+                    hint = inherit_heading_semantics(hint, current_heading)
                     if len(chunks) >= MAX_DOCUMENT_CHUNKS:
                         raise ValueError(
                             f"KP 本提取文本块超过 {MAX_DOCUMENT_CHUNKS} 个限制"
                         )
+                    table_section_path = tuple(
+                        section_headings[level]
+                        for level in sorted(section_headings)
+                    )
                     chunks.append(
                         DocumentChunk(
                             title=current_heading,
@@ -388,6 +497,9 @@ def _extract_docx(
                             classification_confidence=hint.confidence,
                             style_annotations=style_annotations,
                             review_flags=hint.review_flags,
+                            heading_level=heading_level,
+                            section_path=section_path,
+                            scene_key=inferred_scene_key(section_path),
                         )
                     )
                 for image_index, blip in enumerate(
@@ -431,6 +543,8 @@ def _extract_docx(
                             source_locator=f"docx:table:{paragraph_index}",
                             semantic_kind=hint.semantic_kind,
                             classification_confidence=hint.confidence,
+                            section_path=table_section_path,
+                            scene_key=inferred_scene_key(table_section_path),
                         )
                     )
                 for image_index, blip in enumerate(element.iter(f"{_A}blip"), start=1):
@@ -572,63 +686,266 @@ def _split_text(text: str) -> list[str]:
     return blocks
 
 
-def _split_pdf_text(text: str) -> list[str]:
-    """Keep page-local provenance while exposing headings and paragraph boundaries."""
+def _split_pdf_blocks(
+    text: str,
+    *,
+    repeated_boundary_lines: frozenset[str] = frozenset(),
+    numeric_boundary_edges: frozenset[str] = frozenset(),
+) -> list[_PdfTextBlock]:
+    """Split native text while retaining conservative, auditable headings."""
 
-    if not text.strip():
+    lines = _clean_pdf_lines(
+        text,
+        repeated_boundary_lines=repeated_boundary_lines,
+        numeric_boundary_edges=numeric_boundary_edges,
+    )
+    if not any(lines):
         return []
-    paragraphs: list[str] = []
+    heading_lines = _pdf_heading_lines(lines)
+    paragraphs: list[_PdfTextBlock] = []
     current: list[str] = []
-    for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
-        line = re.sub(r"[ \t\u00a0]+", " ", raw_line).strip()
+
+    def flush() -> None:
+        if current:
+            paragraphs.append(_PdfTextBlock("\n".join(current)))
+            current.clear()
+
+    for line_index, line in enumerate(lines):
         if not line:
-            if current:
-                paragraphs.append("\n".join(current))
-                current = []
+            flush()
             continue
-        if looks_like_heading(line):
-            if current:
-                paragraphs.append("\n".join(current))
-                current = []
-            paragraphs.append(line)
+        heading = heading_lines.get(line_index)
+        if heading is not None:
+            flush()
+            paragraphs.append(
+                _PdfTextBlock(
+                    line,
+                    is_heading=True,
+                    layout_inferred_heading=heading,
+                )
+            )
             continue
         current.append(line)
-    if current:
-        paragraphs.append("\n".join(current))
+    flush()
 
-    blocks: list[str] = []
+    blocks: list[_PdfTextBlock] = []
     pending: list[str] = []
     pending_size = 0
     target_size = min(MAX_CHUNK_CHARACTERS, 1400)
     for paragraph in paragraphs:
-        if looks_like_heading(paragraph):
+        if paragraph.is_heading:
             if pending:
-                blocks.append("\n\n".join(pending))
+                blocks.append(_PdfTextBlock("\n\n".join(pending)))
                 pending = []
                 pending_size = 0
             blocks.append(paragraph)
             continue
-        if pending and pending_size + len(paragraph) + 2 > target_size:
-            blocks.append("\n\n".join(pending))
+        if pending and pending_size + len(paragraph.text) + 2 > target_size:
+            blocks.append(_PdfTextBlock("\n\n".join(pending)))
             pending = []
             pending_size = 0
-        pending.append(paragraph)
-        pending_size += len(paragraph) + 2
+        pending.append(paragraph.text)
+        pending_size += len(paragraph.text) + 2
     if pending:
-        blocks.append("\n\n".join(pending))
-    return [block for block in blocks if block.strip()]
+        blocks.append(_PdfTextBlock("\n\n".join(pending)))
+    return [block for block in blocks if block.text.strip()]
 
 
-def _possible_heading(block: str) -> str | None:
-    first = block.splitlines()[0].strip()
-    if looks_like_heading(first):
-        return first
-    return None
+def _clean_pdf_lines(
+    text: str,
+    *,
+    repeated_boundary_lines: frozenset[str],
+    numeric_boundary_edges: frozenset[str],
+) -> list[str]:
+    lines = [
+        re.sub(r"[ \t\u00a0]+", " ", raw_line).strip()
+        for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    ]
+    nonempty = [index for index, line in enumerate(lines) if line]
+    leading = frozenset(nonempty[:3])
+    trailing = frozenset(nonempty[-3:])
+    for index in leading | trailing:
+        line = lines[index]
+        if line in repeated_boundary_lines or (
+            _PDF_PAGE_LABEL.fullmatch(line)
+            and (
+                (index in leading and "leading" in numeric_boundary_edges)
+                or (index in trailing and "trailing" in numeric_boundary_edges)
+            )
+        ):
+            lines[index] = ""
+    return lines
+
+
+def _pdf_heading_lines(lines: list[str]) -> dict[int, bool]:
+    nonempty = [index for index, line in enumerate(lines) if line]
+    result: dict[int, bool] = {}
+    for position, index in enumerate(nonempty):
+        line = lines[index]
+        if looks_like_heading(line):
+            result[index] = False
+            continue
+        previous = lines[nonempty[position - 1]] if position else ""
+        following = lines[nonempty[position + 1]] if position + 1 < len(nonempty) else ""
+        if _looks_like_pdf_layout_heading(
+            line,
+            previous=previous,
+            following=following,
+            starts_page=position == 0,
+            follows_blank=index > 0 and not lines[index - 1],
+        ):
+            result[index] = True
+    return result
+
+
+def _looks_like_pdf_layout_heading(
+    line: str,
+    *,
+    previous: str,
+    following: str,
+    starts_page: bool,
+    follows_blank: bool,
+) -> bool:
+    normalized = " ".join(line.split()).strip()
+    if not following or not 1 < len(normalized) <= 40:
+        return False
+    if _PDF_PAGE_LABEL.fullmatch(normalized):
+        return False
+    if normalized.startswith(("“", "‘", '"', "'", "（", "(")):
+        return False
+    if any(marker in normalized for marker in ("（", "）", "(", ")", "%")):
+        return False
+    if len(re.findall(r"\d+", normalized)) >= 2:
+        return False
+    if any(marker in normalized for marker in ("。", "！", "？", "?", "!", "；", ";", "，", ",")):
+        return False
+    if normalized.endswith(("、", "…")):
+        return False
+    normalized_folded = normalized.casefold()
+    if normalized_folded in _PDF_ALWAYS_HEADINGS:
+        return True
+    if normalized.endswith(("：", ":")) and not _PDF_COLON_HEADING.match(normalized):
+        return False
+    if _PDF_COLON_HEADING.match(normalized):
+        return True
+    previous_ends_sentence = previous.rstrip().endswith(
+        ("。", "！", "？", ".", "!", "?", "。”", "！”", "？”")
+    )
+    if not (starts_page or follows_blank or previous_ends_sentence):
+        return False
+    following_is_body = len(following) >= max(16, len(normalized) + 4) or any(
+        marker in following for marker in ("。", "，", ",", ".", "：", ":")
+    )
+    return following_is_body
+
+
+def _repeated_pdf_boundary_lines(page_texts: list[str]) -> frozenset[str]:
+    if len(page_texts) < 3:
+        return frozenset()
+    counts: Counter[str] = Counter()
+    for text in page_texts:
+        lines = [
+            re.sub(r"[ \t\u00a0]+", " ", raw).strip()
+            for raw in text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+            if raw.strip()
+        ]
+        counts.update({*lines[:3], *lines[-3:]})
+    threshold = max(3, (len(page_texts) * 3 + 4) // 5)
+    return frozenset(
+        line
+        for line, count in counts.items()
+        if line and not _PDF_PAGE_LABEL.fullmatch(line) and count >= threshold
+    )
+
+
+def _numeric_pdf_boundary_edges(page_texts: list[str]) -> frozenset[str]:
+    if len(page_texts) < 3:
+        return frozenset()
+    counts = Counter[str]()
+    for text in page_texts:
+        lines = [
+            re.sub(r"[ \t\u00a0]+", " ", raw).strip()
+            for raw in text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+            if raw.strip()
+        ]
+        counts["leading"] += int(any(_PDF_PAGE_LABEL.fullmatch(line) for line in lines[:3]))
+        counts["trailing"] += int(any(_PDF_PAGE_LABEL.fullmatch(line) for line in lines[-3:]))
+    threshold = max(3, (len(page_texts) * 3 + 4) // 5)
+    return frozenset(edge for edge, count in counts.items() if count >= threshold)
 
 
 def _is_heading_style(style: str) -> bool:
     normalized = style.casefold()
     return normalized.startswith(("heading", "title", "标题"))
+
+
+def _docx_paragraph_heading_level(
+    paragraph: ElementTree.Element,
+    *,
+    style_id: str,
+    style_heading_levels: dict[str, int],
+) -> int | None:
+    outline = paragraph.find(f"./{_W}pPr/{_W}outlineLvl")
+    if outline is not None:
+        value = outline.get(f"{_W}val", "")
+        if value.isdigit() and 0 <= int(value) <= 8:
+            return int(value) + 1
+    if style_id in style_heading_levels:
+        return style_heading_levels[style_id]
+    match = re.fullmatch(
+        r"(?:heading|标题)\s*([1-9])", style_id, re.IGNORECASE
+    )
+    return int(match.group(1)) if match else None
+
+
+def _docx_style_heading_levels(archive: ZipFile) -> dict[str, int]:
+    """Read only explicit Word outline metadata; visual guesses own no ancestry."""
+
+    if "word/styles.xml" not in archive.namelist():
+        return {}
+    root = _parse_safe_xml(_read_safe_xml(archive, "word/styles.xml"), "Word 样式")
+    levels: dict[str, int] = {}
+    based_on: dict[str, str] = {}
+    for style in root.findall(f".//{_W}style"):
+        style_id = style.get(f"{_W}styleId", "")
+        if not style_id:
+            continue
+        outline = style.find(f"./{_W}pPr/{_W}outlineLvl")
+        value = outline.get(f"{_W}val", "") if outline is not None else ""
+        if value.isdigit() and 0 <= int(value) <= 8:
+            levels[style_id] = int(value) + 1
+        else:
+            name = style.find(f"./{_W}name")
+            candidates = (style_id, name.get(f"{_W}val", "") if name is not None else "")
+            for candidate in candidates:
+                match = re.fullmatch(
+                    r"(?:heading|标题)\s*([1-9])", candidate, re.IGNORECASE
+                )
+                if match:
+                    levels[style_id] = int(match.group(1))
+                    break
+        parent = style.find(f"./{_W}basedOn")
+        if parent is not None and parent.get(f"{_W}val"):
+            based_on[style_id] = str(parent.get(f"{_W}val"))
+    for _ in range(len(based_on)):
+        changed = False
+        for style_id, parent_id in based_on.items():
+            if style_id not in levels and parent_id in levels:
+                levels[style_id] = levels[parent_id]
+                changed = True
+        if not changed:
+            break
+    return levels
+
+
+def _is_emphasized_heading(text: str, annotations: tuple[str, ...]) -> bool:
+    normalized = " ".join(text.split()).strip()
+    return bool(
+        "bold" in annotations
+        and 0 < len(normalized) <= 60
+        and "\n" not in text
+        and not normalized.endswith(("。", "！", "？", ".", "!", "?"))
+    )
 
 
 def _asset_mime(filename: str) -> str:

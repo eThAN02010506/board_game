@@ -1,12 +1,15 @@
 """KP-only module entity graph authoring and deterministic diagnostics."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from ai_kp.api.authz import require_campaign_role
 from ai_kp.api.dependencies import get_identity, get_repo
 from ai_kp.api.schemas import (
     ModuleImportConfirm,
     ModuleReachabilityCheck,
+    RunSettingSelectionRequest,
+    SettingProfileCreateRequest,
+    SettingProfileUpdateRequest,
 )
 from ai_kp.application.module_campaign_import_service import (
     ImportLocationChoice,
@@ -16,6 +19,12 @@ from ai_kp.application.module_campaign_import_service import (
     ModuleImportConfirmCommand,
 )
 from ai_kp.application.module_graph_service import ModuleGraphService
+from ai_kp.application.module_setting_analysis_service import (
+    CreateSettingProfileCommand,
+    ModuleSettingAnalysisService,
+    SelectRunSettingCommand,
+    UpdateSettingProfileCommand,
+)
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.modules.graph import ModuleEntityCreate, ModuleRelationCreate
 from ai_kp.platform.sessions.models import AuthenticatedMember
@@ -32,6 +41,26 @@ def _require_module_kp(
     require_campaign_role(identity, module["campaign_id"], ("kp",))
 
 
+def _require_setting_profile_kp(
+    repo: Repository,
+    identity: AuthenticatedMember,
+    profile_id: str,
+) -> dict:
+    profile = repo.get_module_setting_profile(profile_id)
+    _require_module_kp(repo, identity, str(profile["module_id"]))
+    return profile
+
+
+def _require_run_kp(
+    repo: Repository,
+    identity: AuthenticatedMember,
+    run_id: str,
+) -> dict:
+    run = repo.get_campaign_module_run(run_id)
+    require_campaign_role(identity, str(run["campaign_id"]), ("kp",))
+    return run
+
+
 @router.get("/modules/{module_id}/entities")
 def list_module_entities(
     module_id: str,
@@ -40,6 +69,116 @@ def list_module_entities(
 ) -> list[dict]:
     _require_module_kp(repo, identity, module_id)
     return repo.list_module_entities(module_id)
+
+
+@router.get("/modules/{module_id}/setting-profiles")
+def list_module_setting_profiles(
+    module_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    _require_module_kp(repo, identity, module_id)
+    return repo.list_module_setting_profiles(module_id)
+
+
+@router.post("/modules/{module_id}/setting-profiles")
+def create_module_setting_profile(
+    module_id: str,
+    payload: SettingProfileCreateRequest,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    _require_module_kp(repo, identity, module_id)
+    return ModuleSettingAnalysisService(repo).create_profile(
+        CreateSettingProfileCommand(
+            module_id=module_id,
+            title=payload.title,
+            setting_pack_id=payload.setting_pack_id,
+            regions=tuple(payload.regions),
+        ),
+        member_id=identity.member_id,
+    )
+
+
+@router.get("/setting-profiles/{profile_id}")
+def get_module_setting_profile(
+    profile_id: str,
+    version: int | None = Query(default=None, ge=1),
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    current = _require_setting_profile_kp(repo, identity, profile_id)
+    return (
+        current
+        if version is None
+        else repo.get_module_setting_profile(profile_id, version=version)
+    )
+
+
+@router.put("/setting-profiles/{profile_id}")
+def update_module_setting_profile(
+    profile_id: str,
+    payload: SettingProfileUpdateRequest,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    _require_setting_profile_kp(repo, identity, profile_id)
+    return ModuleSettingAnalysisService(repo).update_profile(
+        UpdateSettingProfileCommand(
+            profile_id=profile_id,
+            expected_version=payload.expected_version,
+            title=payload.title,
+            document=payload.document,
+        ),
+        member_id=identity.member_id,
+    )
+
+
+@router.get("/setting-profiles/{profile_id}/settlements/{settlement_id}/analysis")
+def analyze_profile_settlement(
+    profile_id: str,
+    settlement_id: str,
+    version: int | None = Query(default=None, ge=1),
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    _require_setting_profile_kp(repo, identity, profile_id)
+    return ModuleSettingAnalysisService(repo).analyze_profile_settlement(
+        profile_id=profile_id,
+        profile_version=version,
+        settlement_id=settlement_id,
+    )
+
+
+@router.get("/module-runs/{run_id}/setting-selection")
+def get_run_setting_selection(
+    run_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict | None:
+    _require_run_kp(repo, identity, run_id)
+    return repo.get_module_run_setting_selection(run_id)
+
+
+@router.put("/module-runs/{run_id}/setting-selection")
+def set_run_setting_selection(
+    run_id: str,
+    payload: RunSettingSelectionRequest,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    _require_run_kp(repo, identity, run_id)
+    return ModuleSettingAnalysisService(repo).select_for_run(
+        SelectRunSettingCommand(
+            run_id=run_id,
+            expected_run_version=payload.expected_run_version,
+            profile_id=payload.profile_id,
+            profile_version=payload.profile_version,
+            settlement_id=payload.settlement_id,
+            reason=payload.reason,
+        ),
+        member_id=identity.member_id,
+    )
 
 
 @router.post("/modules/{module_id}/entities")

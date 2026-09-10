@@ -4,6 +4,9 @@ import unittest
 from ai_kp.platform.resolution.check_consequences import (
     build_check_consequence_snapshot,
     check_consequence_fingerprint,
+    exact_kernel_outcome,
+    has_pending_push_decision,
+    project_public_check_consequences,
 )
 
 
@@ -46,6 +49,107 @@ def _check(check_id: str = "check-1", **overrides) -> dict:
 
 
 class CheckConsequenceFingerprintTests(unittest.TestCase):
+    def test_pending_push_requires_failed_pushable_leaf_without_acceptance(
+        self,
+    ) -> None:
+        failed = _check(
+            "check-root",
+            passed=False,
+            success_level="failure",
+            allow_push=True,
+            push_decision=None,
+        )
+
+        self.assertTrue(has_pending_push_decision([failed]))
+        self.assertFalse(
+            has_pending_push_decision([{**failed, "status": "requested"}])
+        )
+        self.assertFalse(
+            has_pending_push_decision([{**failed, "passed": True}])
+        )
+        self.assertFalse(
+            has_pending_push_decision([{**failed, "allow_push": False}])
+        )
+        self.assertFalse(
+            has_pending_push_decision(
+                [
+                    {
+                        **failed,
+                        "push_decision": {"decision": "accept_failure"},
+                    }
+                ]
+            )
+        )
+        child = _check(
+            "check-child",
+            pushed_from_check_id="check-root",
+            allow_push=False,
+        )
+        self.assertFalse(has_pending_push_decision([failed, child]))
+
+    def test_exact_kernel_outcome_requires_one_resolved_check_chain(self) -> None:
+        preview = {
+            "outcome_branches": [
+                {"outcome_key": "critical", "commands": [{}]},
+                {"outcome_key": "pushed_failure", "commands": [{}]},
+            ]
+        }
+        with self.assertRaisesRegex(ValueError, "At least one"):
+            exact_kernel_outcome(preview, [])
+        with self.assertRaisesRegex(ValueError, "Requested checks"):
+            exact_kernel_outcome(preview, [_check(status="requested")])
+        with self.assertRaisesRegex(ValueError, "Cancelled checks"):
+            exact_kernel_outcome(
+                preview,
+                [_check(
+                    status="cancelled",
+                    input_method=None,
+                    raw_dice=None,
+                    selected_roll=None,
+                    threshold=None,
+                    success_level=None,
+                    passed=None,
+                )],
+            )
+        with self.assertRaisesRegex(ValueError, "one independent"):
+            exact_kernel_outcome(
+                preview,
+                [_check("check-a"), _check("check-b")],
+            )
+
+        self.assertEqual(
+            exact_kernel_outcome(
+                preview,
+                [_check(
+                    status="overridden",
+                    success_level="critical",
+                    override_reason="The table accepted a verified correction.",
+                    original_result={
+                        "selected_roll": 44,
+                        "threshold": 60,
+                        "success_level": "regular",
+                        "passed": True,
+                    },
+                )],
+            ),
+            "critical",
+        )
+        failed = _check(
+            "check-root",
+            passed=False,
+            success_level="failure",
+        )
+        pushed_failure = _check(
+            "check-push",
+            passed=False,
+            success_level="failure",
+            pushed_from_check_id="check-root",
+        )
+        self.assertEqual(
+            exact_kernel_outcome(preview, [failed, pushed_failure]),
+            "pushed_failure",
+        )
+
     def test_rejects_empty_pending_and_unknown_statuses(self) -> None:
         with self.assertRaisesRegex(ValueError, "At least one"):
             check_consequence_fingerprint([])
@@ -139,6 +243,16 @@ class CheckConsequenceFingerprintTests(unittest.TestCase):
             },
             success_level="failure",
             passed=False,
+            check_plan={
+                "failure_stakes": "The archive closes for the afternoon.",
+                "pushed_failure_stakes": "Security removes the investigator.",
+            },
+            actions=[
+                {
+                    "action_type": "pushed",
+                    "reason": "I stay past closing and search the restricted shelves.",
+                }
+            ],
         )
         leaf = _check(
             "check-push",
@@ -163,12 +277,45 @@ class CheckConsequenceFingerprintTests(unittest.TestCase):
             snapshot["effective_results"][0]["push_chain_ids"],
             ["check-root", "check-push"],
         )
+        result = snapshot["effective_results"][0]
+        self.assertEqual(result["outcome"], "success")
+        self.assertIn("restricted shelves", result["push_approach"])
         mutated_root = copy.deepcopy(root)
         mutated_root["raw_dice"]["candidates"] = [85]
         self.assertNotEqual(
             snapshot["result_fingerprint"],
             check_consequence_fingerprint([mutated_root, leaf]),
         )
+
+    def test_failed_push_exposes_precommitted_stakes_to_consequence_generation(self) -> None:
+        root = _check(
+            "check-root",
+            passed=False,
+            success_level="failure",
+            check_plan={
+                "failure_stakes": "Lose the remaining archive time.",
+                "pushed_failure_stakes": "Security expels the investigator.",
+            },
+            actions=[
+                {
+                    "action_type": "pushed",
+                    "reason": "Enter the staff archive after being refused.",
+                }
+            ],
+        )
+        leaf = _check(
+            "check-push",
+            pushed_from_check_id="check-root",
+            passed=False,
+            success_level="failure",
+            check_plan=root["check_plan"],
+        )
+
+        result = build_check_consequence_snapshot([root, leaf])["effective_results"][0]
+
+        self.assertEqual(result["outcome"], "pushed_failure")
+        self.assertEqual(result["accepted_stakes"], "Security expels the investigator.")
+        self.assertIn("staff archive", result["push_approach"])
 
     def test_snapshot_is_stably_sorted_and_omits_audit_payloads(self) -> None:
         second = _check("check-b", skill_name="Listen")
@@ -222,6 +369,40 @@ class CheckConsequenceFingerprintTests(unittest.TestCase):
                 [{**public_check, "hidden": True}]
             ),
         )
+
+    def test_public_projection_keeps_observable_effects_without_blind_roll_metadata(
+        self,
+    ) -> None:
+        hidden_failure = _check(
+            "check-hidden",
+            hidden=True,
+            skill_key="psychology",
+            skill_name="Psychology",
+            selected_roll=96,
+            threshold=40,
+            success_level="fumble",
+            passed=False,
+            check_plan={
+                "failure_stakes": "The witness ends the interview.",
+                "automatic_information": ["The witness is visibly trembling."],
+            },
+        )
+
+        public = project_public_check_consequences(
+            build_check_consequence_snapshot([hidden_failure])
+        )
+
+        self.assertEqual(
+            public["automatic_information"],
+            ["The witness is visibly trembling."],
+        )
+        self.assertEqual(
+            public["accepted_stakes"][0]["text"],
+            "The witness ends the interview.",
+        )
+        serialized = repr(public)
+        for secret in ("96", "40", "fumble", "Psychology", "psychology"):
+            self.assertNotIn(secret, serialized)
 
     def test_override_and_push_fields_are_validated(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires override audit data"):

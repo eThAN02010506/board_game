@@ -24,22 +24,53 @@ def test_debug_dashboard_and_diagnostics_are_admin_only(tmp_path: Path) -> None:
 
     with TestClient(app) as client:
         denied = client.get("/")
+        denied_runtime_identity = client.get("/debug/runtime-identity")
         dashboard = client.get("/", headers=headers)
         diagnostics = client.get("/debug/diagnostics", headers=headers)
+        runtime_identity = client.get("/debug/runtime-identity", headers=headers)
 
     assert denied.status_code == 403
+    assert denied_runtime_identity.status_code == 403
     assert dashboard.status_code == 200
     assert "AI KP Debug Console" in dashboard.text
     assert dashboard.headers["cache-control"] == "no-store"
     assert "frame-ancestors 'none'" in dashboard.headers["content-security-policy"]
 
     assert diagnostics.status_code == 200
+    assert runtime_identity.status_code == 200
+    assert runtime_identity.json()["status"] == "ready"
+    assert runtime_identity.json()["os_pid"] > 0
+    assert runtime_identity.json()["process_instance_id"].startswith("process_")
+    assert runtime_identity.json()["persistent_store_id"].startswith("store_")
     payload = diagnostics.json()
     assert payload["service"]["status"] == "ok"
     assert payload["database"]["latest_supported_schema"] == LATEST_SCHEMA_VERSION
     assert payload["settings"]["llm_api_key_configured"] is True
     assert "must-not-leak" not in diagnostics.text
     assert any(route["path"] == "/debug/diagnostics" for route in payload["routes"])
+
+
+def test_runtime_identity_changes_process_instance_but_preserves_store(
+    tmp_path: Path,
+) -> None:
+    headers = {"X-AI-KP-Admin-Token": "debug-admin"}
+    with TestClient(_app(tmp_path)) as first_client:
+        first = first_client.get("/debug/runtime-identity", headers=headers).json()
+    with TestClient(_app(tmp_path)) as restarted_client:
+        restarted = restarted_client.get(
+            "/debug/runtime-identity", headers=headers
+        ).json()
+
+    assert first["process_instance_id"] != restarted["process_instance_id"]
+    assert first["persistent_store_id"] == restarted["persistent_store_id"]
+    assert first["schema_version"] == LATEST_SCHEMA_VERSION
+    assert restarted["schema_version"] == LATEST_SCHEMA_VERSION
+
+    other_path = tmp_path / "other"
+    other_path.mkdir()
+    with TestClient(_app(other_path)) as other_client:
+        other = other_client.get("/debug/runtime-identity", headers=headers).json()
+    assert other["persistent_store_id"] != first["persistent_store_id"]
 
 
 def test_debug_database_preview_redacts_credentials(tmp_path: Path) -> None:

@@ -59,4 +59,5 @@ def test_campaigns_store_the_canonical_installed_ruleset_slug() -> None:
         "ruleset_version": "2002c",
         "character_schema_version": "coc7-investigator-v1",
         "event_schema_version": "coc7-event-v1",
+        "session_zero_required": True,
     }

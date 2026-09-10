@@ -2,59 +2,19 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+from ai_kp.application.auto_kp_queue_service import AutoKpQueueService
 from ai_kp.application.auto_world_expansion_service import AutoWorldExpansionService
 from ai_kp.application.module_run_service import (
     AutomationLevelCommand,
     ModuleRunService,
 )
-from ai_kp.application.parallel_action_settlement_service import (
-    ParallelActionSettlementCommand,
-    ParallelActionSettlementService,
-)
 from ai_kp.application.session_service import SessionService
 from ai_kp.application.turn_service import TurnService, WorldExpansionCommand
 from ai_kp.director.context_builder import ContextAssembly
-from ai_kp.director.orchestrator import KpTurnResult
-from ai_kp.director.turn_output import KpTurnOutput
 from ai_kp.director.world_expansion import WorldExpansionOutput
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.schema import connect, init_db
 from ai_kp.platform.modules.ingestion import ModuleChunk
-
-
-class RoutineParallelDirector:
-    async def handle_player_action(self, **kwargs):
-        return KpTurnResult(
-            output=KpTurnOutput.model_validate(
-                {
-                    "public_narration": "两名调查员同时行动：巷口无人埋伏，后门可以打开。",
-                    "kp_notes": "无检定、无隐藏副作用。",
-                    "action_ruling": {
-                        "goal": kwargs["player_action"],
-                        "method": "统一并行动作结算",
-                        "target": "当前场景",
-                        "feasibility": "possible",
-                        "resolution": "automatic",
-                        "reason": "两个行动互不冲突，且都不需要随机检定。",
-                        "maximum_effect": "只推进公开场景描述。",
-                        "alternative": "",
-                    },
-                    "proposed_checks": [],
-                    "proposed_events": [],
-                    "proposed_memories": [],
-                    "proposed_npc_updates": [],
-                    "proposed_map_moves": [],
-                    "proposed_facts": [],
-                }
-            ),
-            context=ContextAssembly(
-                messages=[],
-                included_sources=[],
-                excluded_sources=[],
-                token_estimate=0,
-                visibility_scope="kp",
-            ),
-        )
 
 
 class EnvironmentGapDirector:
@@ -153,24 +113,24 @@ def test_no_kp_replay_e2e_covers_parallel_world_expansion_and_jobs(
             action_text="我守住巷口。",
             client_action_id="replay-action-0001",
         )
+        first_job = AutoKpQueueService(repo).enqueue_player_action(
+            first_action["id"]
+        )
         second_action = turns.submit_player_action(
             second_identity,
             action_text="我检查后门。",
             client_action_id="replay-action-0002",
         )
-        parallel = asyncio.run(
-            ParallelActionSettlementService(repo).settle(
-                campaign["id"],
-                kp_identity,
-                ParallelActionSettlementCommand(
-                    action_ids=(first_action["id"], second_action["id"]),
-                ),
-                RoutineParallelDirector(),
-                source_model="replay-fake",
-            )
+        parallel_job = AutoKpQueueService(repo).enqueue_player_action(
+            second_action["id"]
         )
-        assert parallel.status == "approved"
-        assert [item["status"] for item in parallel.actions] == ["resolved", "resolved"]
+        assert repo.get_auto_kp_job(first_job["id"])["status"] == "cancelled"
+        assert parallel_job["job_type"] == "parallel_actions"
+        assert parallel_job["payload"]["phase"] == "prepare"
+        assert [
+            repo.get_player_action(first_action["id"])["status"],
+            repo.get_player_action(second_action["id"])["status"],
+        ] == ["submitted", "submitted"]
 
         world = asyncio.run(
             AutoWorldExpansionService(repo).create_and_maybe_materialize(
@@ -190,23 +150,22 @@ def test_no_kp_replay_e2e_covers_parallel_world_expansion_and_jobs(
             for item in repo.list_fact_heads(campaign["id"])
         ] == [("小镇警务办公室", "存在或成立")]
 
-        job = repo.enqueue_auto_kp_job(
-            campaign_id=campaign["id"],
-            run_id=run["id"],
-            job_type="parallel_actions",
-            resource_id=str(parallel.proposal["id"]),
-            idempotency_key="replay-parallel-job-0001",
-            payload={"action_ids": [first_action["id"], second_action["id"]]},
+        connection.execute(
+            "UPDATE auto_kp_jobs SET next_run_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (parallel_job["id"],),
         )
         claimed = repo.claim_next_auto_kp_job(worker_id="replay-worker")
         assert claimed is not None
-        assert claimed["id"] == job["id"]
+        assert claimed["id"] == parallel_job["id"]
         completed = repo.complete_auto_kp_job(
             claimed["id"],
             expected_attempt=claimed["attempt_count"],
-            result={"proposal_id": parallel.proposal["id"]},
+            result={"phase": "prepare", "action_count": 2},
         )
         assert completed["status"] == "succeeded"
-        assert repo.list_auto_kp_jobs(campaign["id"])[0]["result"]["proposal_id"] == parallel.proposal["id"]
+        assert repo.get_auto_kp_job(parallel_job["id"])["result"] == {
+            "phase": "prepare",
+            "action_count": 2,
+        }
     finally:
         connection.close()

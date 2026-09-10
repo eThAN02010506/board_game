@@ -14,6 +14,10 @@ from ai_kp.infrastructure.knowledge.pdf_ingestion import MAX_PDF_BYTES
 from ai_kp.infrastructure.knowledge.rulebook_sandbox import (
     extract_rulebook_pdf_isolated,
 )
+from ai_kp.infrastructure.llm.model_execution import (
+    ModelExecutionSnapshot,
+    ModelExecutionSuperseded,
+)
 from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.platform.sessions.models import AuthenticatedMember
 from ai_kp.rule_authoring.models import RuleReviewSubmission, RuleStatus
@@ -148,23 +152,30 @@ async def extract_rulebook_rules(
     retry_failed: bool = Query(default=False),
     _admin: None = Depends(require_local_admin),
     settings: Settings = Depends(get_app_settings),
+    repo: Repository = Depends(get_repo),
     service: RulebookService = Depends(get_rulebook_service),
 ) -> dict:
+    model_execution = ModelExecutionSnapshot.capture(repo, settings)
+    execution_settings = model_execution.settings
     llm = OpenAICompatibleClient(
-        settings.llm_base_url,
-        settings.llm_api_key,
-        settings.llm_model,
+        execution_settings.llm_base_url,
+        execution_settings.llm_api_key,
+        execution_settings.llm_model,
         max_tokens=8192,
         client=getattr(request.app.state, "http_client", None),
     )
     try:
-        return await service.extract_rules(
+        result = await service.extract_rules(
             source_id,
             llm,
-            model_name=settings.llm_model,
+            model_name=execution_settings.llm_model,
             limit=limit,
             retry_failed=retry_failed,
         )
+        model_execution.revalidate(repo)
+        return result
+    except ModelExecutionSuperseded as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

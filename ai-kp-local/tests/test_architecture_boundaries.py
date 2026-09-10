@@ -9,16 +9,29 @@ from ai_kp.api import main as compatibility_main
 from ai_kp.application.world_service import WorldService
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.action_adjudications import ActionAdjudicationRepository
+from ai_kp.infrastructure.database.action_resolution_previews import (
+    ActionResolutionPreviewRepository,
+)
 from ai_kp.infrastructure.database.auto_kp_jobs import AutoKpJobRepository
+from ai_kp.infrastructure.database.campaign_objectives import CampaignObjectiveRepository
+from ai_kp.infrastructure.database.character_lifecycle import CharacterLifecycleRepository
 from ai_kp.infrastructure.database.character_timelines import CharacterTimelineRepository
 from ai_kp.infrastructure.database.checks import SkillCheckRepository
 from ai_kp.infrastructure.database.context_assemblies import ContextAssemblyRepository
+from ai_kp.infrastructure.database.director_help_audits import DirectorHelpAuditRepository
 from ai_kp.infrastructure.database.dynamic_branches import DynamicBranchRepository
+from ai_kp.infrastructure.database.encounter_actions import EncounterActionRepository
+from ai_kp.infrastructure.database.encounter_automation import (
+    EncounterAutomationRepository,
+)
 from ai_kp.infrastructure.database.evaluations import EvaluationRepository
 from ai_kp.infrastructure.database.facts import FactRepository
 from ai_kp.infrastructure.database.gameplay import GameplayRepository
 from ai_kp.infrastructure.database.handouts import HandoutRepository
+from ai_kp.infrastructure.database.inventory_economy import InventoryEconomyRepository
+from ai_kp.infrastructure.database.inventory_items import InventoryItemRepository
 from ai_kp.infrastructure.database.investigators import InvestigatorRepository
+from ai_kp.infrastructure.database.kernel_plans import KernelPlanRepository
 from ai_kp.infrastructure.database.map_route_plans import MapRoutePlanRepository
 from ai_kp.infrastructure.database.maps import MapRepository
 from ai_kp.infrastructure.database.memory_timeline import MemoryTimelineRepository
@@ -28,26 +41,65 @@ from ai_kp.infrastructure.database.module_graph import ModuleGraphRepository
 from ai_kp.infrastructure.database.module_imports import ModuleImportRepository
 from ai_kp.infrastructure.database.module_knowledge import ModuleKnowledgeRepository
 from ai_kp.infrastructure.database.module_runs import ModuleRunRepository
+from ai_kp.infrastructure.database.module_setting_profiles import (
+    ModuleSettingProfileRepository,
+)
 from ai_kp.infrastructure.database.npc_reappearances import NpcReappearanceRepository
+from ai_kp.infrastructure.database.parallel_action_batches import (
+    ParallelActionBatchRepository,
+)
+from ai_kp.infrastructure.database.parallel_action_regathers import (
+    ParallelActionRegatherRepository,
+)
 from ai_kp.infrastructure.database.private_random_resolutions import (
     PrivateRandomResolutionRepository,
 )
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.rulebooks import RulebookRepository
+from ai_kp.infrastructure.database.scenario_contract_jobs import (
+    ScenarioContractJobRepository,
+)
+from ai_kp.infrastructure.database.scenario_contract_overlays import (
+    ScenarioContractOverlayRepository,
+)
+from ai_kp.infrastructure.database.scenario_contracts import ScenarioContractRepository
+from ai_kp.infrastructure.database.scenario_run_states import ScenarioRunStateRepository
 from ai_kp.infrastructure.database.schema import connect
 from ai_kp.infrastructure.database.security import SecurityRepository
+from ai_kp.infrastructure.database.session_continuity import (
+    SessionContinuityRepository,
+)
 from ai_kp.infrastructure.database.session_recaps import SessionRecapRepository
 from ai_kp.infrastructure.database.session_seats import SessionSeatRepository
+from ai_kp.infrastructure.database.session_zero import SessionZeroRepository
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
+from ai_kp.infrastructure.database.table_messages import TableMessageRepository
 from ai_kp.infrastructure.database.travel_graph import TravelGraphRepository
 from ai_kp.infrastructure.database.turns import TurnRepository
 from ai_kp.infrastructure.database.world import WorldRepository
+from ai_kp.infrastructure.database.world_entities import WorldEntityRepository
 from ai_kp.infrastructure.database.world_expansion_materializations import (
     WorldExpansionMaterializationRepository,
 )
 from ai_kp.infrastructure.realtime.outbox import RealtimeRepository
+from ai_kp.platform.resolution.automation_state_machine import (
+    AutomationJobStateMachine,
+)
+from ai_kp.platform.resolution.parallel_batch_state import (
+    ParallelBatchStateMachine,
+)
 
 PROJECT_ROOT = Path(__file__).parents[1]
+
+
+def test_composed_repository_keeps_domain_state_machines_separate() -> None:
+    """Multiple repository mixins must not override another domain's machine."""
+
+    assert isinstance(Repository._state_machine, AutomationJobStateMachine)
+    assert isinstance(
+        Repository._parallel_batch_state_machine,
+        ParallelBatchStateMachine,
+    )
 
 
 def test_rules_reference_declares_source_identity_and_ai_boundary() -> None:
@@ -92,6 +144,34 @@ def _imports(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module)
     return imported
+
+
+def test_auto_kp_worker_keeps_parallel_phase_execution_in_its_own_module() -> None:
+    worker_imports = _imports(
+        PROJECT_ROOT / "src" / "ai_kp" / "infrastructure" / "auto_kp_worker.py"
+    )
+    parallel_imports = _imports(
+        PROJECT_ROOT
+        / "src"
+        / "ai_kp"
+        / "infrastructure"
+        / "auto_kp_parallel_worker.py"
+    )
+
+    assert "ai_kp.application.auto_kp_job_authority" in worker_imports
+    assert "ai_kp.infrastructure.auto_kp_parallel_worker" in worker_imports
+    assert {
+        "ai_kp.application.auto_kp_queue_service",
+        "ai_kp.application.check_service",
+        "ai_kp.application.parallel_action_planning_service",
+        "ai_kp.application.parallel_action_workflow_service",
+    }.isdisjoint(worker_imports)
+    assert {
+        "ai_kp.application.auto_kp_queue_service",
+        "ai_kp.application.check_service",
+        "ai_kp.application.parallel_action_planning_service",
+        "ai_kp.application.parallel_action_workflow_service",
+    } <= parallel_imports
 
 
 def test_source_tree_has_no_comment_only_leaf_placeholders() -> None:
@@ -460,12 +540,23 @@ def test_mutating_http_routes_delegate_to_application_services() -> None:
 def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     assert Repository.__bases__ == (
         WorldRepository,
+        WorldEntityRepository,
+        ScenarioContractRepository,
+        ScenarioContractJobRepository,
+        ScenarioContractOverlayRepository,
+        ScenarioRunStateRepository,
+        ParallelActionBatchRepository,
+        ParallelActionRegatherRepository,
+        KernelPlanRepository,
+        ActionResolutionPreviewRepository,
         ActionAdjudicationRepository,
         AutoKpJobRepository,
         EvaluationRepository,
         FactRepository,
         HandoutRepository,
         GameplayRepository,
+        EncounterActionRepository,
+        EncounterAutomationRepository,
         DynamicBranchRepository,
         TurnRepository,
         MapRepository,
@@ -474,13 +565,19 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         SecurityRepository,
         RealtimeRepository,
         InvestigatorRepository,
+        InventoryItemRepository,
+        InventoryEconomyRepository,
         SessionSeatRepository,
+        SessionZeroRepository,
+        SessionContinuityRepository,
+        TableMessageRepository,
         SkillCheckRepository,
         RulebookRepository,
         ModuleImportRepository,
         ModuleKnowledgeRepository,
         ModuleGraphRepository,
         ModuleRunRepository,
+        ModuleSettingProfileRepository,
         ModelConfigurationRepository,
         WorldExpansionMaterializationRepository,
         NpcReappearanceRepository,
@@ -489,10 +586,33 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
         MemoryTimelineRepository,
         SessionRecapRepository,
         CharacterTimelineRepository,
+        CharacterLifecycleRepository,
+        CampaignObjectiveRepository,
+        DirectorHelpAuditRepository,
     )
     assert Repository.__mro__.count(SQLiteRepository) == 1
     assert Repository.create_campaign is WorldRepository.create_campaign
     assert Repository.append_fact_entry is FactRepository.append_fact_entry
+    assert (
+        Repository.create_scenario_contract_version
+        is ScenarioContractRepository.create_scenario_contract_version
+    )
+    assert (
+        Repository.save_scenario_contract_overlay
+        is ScenarioContractOverlayRepository.save_scenario_contract_overlay
+    )
+    assert (
+        Repository.create_action_resolution_preview
+        is ActionResolutionPreviewRepository.create_action_resolution_preview
+    )
+    assert (
+        Repository.commit_parallel_scenario_batch
+        is ScenarioRunStateRepository.commit_parallel_scenario_batch
+    )
+    assert (
+        Repository.create_parallel_action_batch
+        is ParallelActionBatchRepository.create_parallel_action_batch
+    )
     assert Repository.create_coc7_encounter is GameplayRepository.create_coc7_encounter
     assert (
         Repository.create_dynamic_branch_run
@@ -528,8 +648,20 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
     )
     assert Repository.create_rule_source is RulebookRepository.create_rule_source
     assert (
+        Repository.create_campaign_objective
+        is CampaignObjectiveRepository.create_campaign_objective
+    )
+    assert (
+        Repository.append_director_help_audit_event
+        is DirectorHelpAuditRepository.append_director_help_audit_event
+    )
+    assert (
         Repository.save_model_configuration
         is ModelConfigurationRepository.save_model_configuration
+    )
+    assert (
+        Repository.create_module_setting_profile
+        is ModuleSettingProfileRepository.create_module_setting_profile
     )
     assert (
         Repository.save_image_model_configuration
@@ -538,7 +670,7 @@ def test_repository_facade_has_the_intended_mro_and_no_method_copies() -> None:
 
 
 def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
-    assert LATEST_SCHEMA_VERSION == 53
+    assert LATEST_SCHEMA_VERSION == 91
     assert [(item.version, item.name) for item in MIGRATIONS] == [
         (1, "add_proposed_checks_to_turn_proposals"),
         (2, "add_player_action_idempotency"),
@@ -593,6 +725,44 @@ def test_formal_migration_registry_keeps_ordered_legacy_upgrades() -> None:
         (51, "map_published_revision"),
         (52, "module_campaign_imports"),
         (53, "map_location_awareness"),
+        (54, "module_entity_candidates"),
+        (55, "action_resolution_previews"),
+        (56, "scenario_contract_versions"),
+        (57, "scenario_run_state"),
+        (58, "scenario_contract_overlays"),
+        (59, "model_capability_profile"),
+        (60, "scenario_contract_compilation_jobs"),
+        (61, "scenario_contract_record_repairs"),
+        (62, "scenario_contract_job_schema_repair"),
+        (63, "scenario_contract_coverage_supplements"),
+        (64, "durable_kernel_plans"),
+        (65, "scenario_contract_supplement_cycles"),
+        (66, "add_check_plans"),
+        (67, "skill_check_push_decisions"),
+        (68, "parallel_action_batches"),
+        (69, "parallel_batch_run_authority"),
+        (70, "parallel_batch_recovery_index"),
+        (71, "parallel_action_regathers"),
+        (72, "session_zero_safety"),
+        (73, "observers_and_table_messages"),
+        (74, "private_message_history_boundary"),
+        (75, "session_continuity"),
+        (76, "encounter_action_requests"),
+        (77, "inventory_economy"),
+        (78, "character_lifecycle"),
+        (79, "encounter_automation"),
+        (80, "campaign_objectives"),
+        (81, "model_execution_fence"),
+        (82, "scenario_contract_model_generation"),
+        (83, "module_chunk_section_ancestry"),
+        (84, "persistent_store_identity"),
+        (85, "director_help_audit_events"),
+        (86, "kernel_authority_basis"),
+        (87, "module_setting_profiles"),
+        (88, "campaign_world_entities"),
+        (89, "campaign_world_entity_states"),
+        (90, "add_proposed_world_entity_states"),
+        (91, "world_state_rules_source"),
     ]
 
 

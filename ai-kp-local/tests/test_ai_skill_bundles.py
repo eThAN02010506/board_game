@@ -25,6 +25,7 @@ RUNTIME_BUNDLES = (
     "expand-world",
     "curate-session-memory",
     "review-output-safety",
+    "select-enemy-turn",
 )
 
 
@@ -106,6 +107,7 @@ def test_workflow_compositions_are_centralized_and_keep_primary_skill_compatibil
         "check_consequence": "platform.check_consequence_narration",
         "world_expansion": "platform.world_expansion",
         "session_recap": "platform.session_recap",
+        "enemy_turn": "platform.enemy_turn_selection",
     }
 
     for workflow, primary_skill_id in expected_primary.items():
@@ -121,7 +123,7 @@ def test_skill_catalogue_exposes_bundle_hashes_without_granting_authority() -> N
     catalogue = list_ai_skills()
     bundled = [item for item in catalogue if item["bundle_name"] is not None]
 
-    assert len(bundled) == 8
+    assert len(bundled) == 9
     assert all(len(item["bundle_hash"]) == 64 for item in bundled)
     assert all(item["authority"] == "proposal_only" for item in catalogue)
     assert all("state.write" not in item["allowed_tools"] for item in catalogue)

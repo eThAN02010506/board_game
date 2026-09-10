@@ -173,6 +173,38 @@ function renderPanel({
 }
 
 describe("ProposalPanel", () => {
+  it("shows the KP a safe per-entity Actor execution trace", () => {
+    renderPanel({
+      activeProposal: {
+        ...draftProposal,
+        tabletop_turn: {
+          schema_version: "tabletop-turn.v1",
+          route: "roleplay",
+          attempt_count: 1,
+          audit_count: 0,
+          frame: {
+            kind: "npc_dialogue", goal: "询问", method: "交谈",
+            target_entity_ids: ["guard"], dialogue: "你看到了什么？",
+            steps: [], time_span: "", ambiguity: null, confidence: "high"
+          },
+          response: {
+            public_narration: "警员回避了你的目光。",
+            speaker_entity_ids: ["guard"], source: "model", attempt_count: 1,
+            actor_traces: [{
+              schema_version: "entity-actor-trace.v1",
+              entity_id: "guard", entity_title: "值班警员", execution: "model",
+              generation_attempt_count: 1, error_codes: []
+            }]
+          }
+        }
+      }
+    });
+
+    expect(screen.getByText("角色代理执行状态")).toBeVisible();
+    expect(screen.getByText("值班警员")).toBeInTheDocument();
+    expect(screen.getByText(/Actor 模型 · 生成尝试 1 次/)).toBeInTheDocument();
+  });
+
   it("selects proposal records and renders the active draft effects", () => {
     const { onSelectProposal } = renderPanel();
 
@@ -392,6 +424,101 @@ describe("ProposalPanel", () => {
         location_name: "镇中心"
       }
     });
+  });
+
+  it("requires concrete identities for every approved typed entity candidate", () => {
+    const typedExpansion: TurnProposal = {
+      ...worldExpansionProposal,
+      id: "proposal_typed_world",
+      status: "approved",
+      world_expansion: {
+        ...worldExpansionProposal.world_expansion!,
+        candidate: {
+          ...worldExpansionProposal.world_expansion!.candidate,
+          template_binding: {
+            setting_pack_id: "us.1920s",
+            settlement_kind: "town",
+            slot_id: "law_enforcement",
+            building_variant: "治安官办公室",
+            profession_ids: ["law_officer"],
+            source_entity_ids: [],
+            entity_bindings: [
+              {
+                local_ref: "duty_officer",
+                archetype_id: "public_safety_officer",
+                entity_kind: "npc",
+                label_variant: "巡警",
+                profession_ids: ["law_officer"],
+                relation_bindings: [
+                  {
+                    relation_slot_id: "agency",
+                    target_source: "candidate",
+                    target_ref: "local_agency"
+                  }
+                ]
+              },
+              {
+                local_ref: "local_agency",
+                archetype_id: "public_safety_agency",
+                entity_kind: "organization",
+                label_variant: "警长办公室",
+                profession_ids: [],
+                relation_bindings: []
+              }
+            ]
+          }
+        }
+      }
+    };
+    const onConfirmWorldExpansion = vi.fn();
+
+    render(
+      <ProposalPanel
+        activeMap={null}
+        activeProposal={typedExpansion}
+        campaignTime="1928-10-03 22:15"
+        loading={false}
+        onApprove={vi.fn()}
+        onConfirmWorldExpansion={onConfirmWorldExpansion}
+        onInspectContext={vi.fn()}
+        onOverrideTextChange={vi.fn()}
+        onRefresh={vi.fn()}
+        onReject={vi.fn()}
+        onSelectProposal={vi.fn()}
+        overrideText=""
+        proposalContext={null}
+        proposals={[typedExpansion]}
+      />
+    );
+
+    expect(screen.getByText("获批模板实体的具体身份")).toBeVisible();
+    expect(screen.getByText("巡警 · npc")).toBeVisible();
+    expect(screen.getByText("警长办公室 · organization")).toBeVisible();
+    expect(
+      screen.queryByLabelText("这次接触中出现了需要长期记录的 NPC")
+    ).not.toBeInTheDocument();
+    const names = screen.getAllByLabelText("具体名称");
+    fireEvent.change(names[0], { target: { value: "约瑟夫·贝尔" } });
+    fireEvent.change(names[1], { target: { value: "黑溪镇警长办公室" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "确认实际接触并原子落地" })
+    );
+
+    expect(onConfirmWorldExpansion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entities: [
+          expect.objectContaining({
+            local_ref: "duty_officer",
+            name: "约瑟夫·贝尔"
+          }),
+          expect.objectContaining({
+            local_ref: "local_agency",
+            name: "黑溪镇警长办公室"
+          })
+        ],
+        npc: null
+      })
+    );
   });
 
   it("only offers server-authorized prior NPCs and submits stable investigator evidence", () => {

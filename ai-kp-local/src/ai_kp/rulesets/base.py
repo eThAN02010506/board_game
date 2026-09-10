@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass
 from typing import Any, Literal, Protocol
 
 from ai_kp.platform.randomness import DiceRollRequest, DiceRollResult
+from ai_kp.platform.resolution.check_catalog import ScenarioCheckCatalog
+from ai_kp.platform.resolution.effect_catalog import ScenarioEffectCatalog
 from ai_kp.rulesets.sdk.characters import CharacterSheetValidation
 
 RulesetSupportLevel = Literal[
@@ -115,11 +117,31 @@ class RulesetManifest:
         return result
 
 
+@dataclass(frozen=True)
+class RulesetEffectFollowUp:
+    """Plugin-owned conditional transition after the primary effect result."""
+
+    result_flag: str
+    command_type: str
+    payload: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class RulesetEffectTransition:
+    """Plugin-selected character transition for one validated scenario effect."""
+
+    command_type: str
+    payload: Mapping[str, Any]
+    follow_ups: tuple[RulesetEffectFollowUp, ...] = ()
+
+
 class Ruleset(Protocol):
     """Narrow port used by application services.
 
-    The current public check payload remains CoC-shaped. A future non-CoC plugin
-    can extend the port only when its real rulebook and acceptance cases exist.
+    Ruleset-neutral conversation framing happens before this port. The current
+    public mechanical check payload remains CoC-shaped because CoC7 is the only
+    executable plugin; a future system must bring real rulebook acceptance cases
+    before the mechanical port is generalized around its actual differences.
     """
 
     manifest: RulesetManifest
@@ -135,6 +157,14 @@ class Ruleset(Protocol):
     def import_character_xlsx(self, data: bytes, filename: str) -> dict[str, Any]: ...
 
     def list_skill_catalog(self) -> list[dict[str, Any]]: ...
+
+    def scenario_check_catalog(self) -> ScenarioCheckCatalog: ...
+
+    def scenario_effect_catalog(self) -> ScenarioEffectCatalog: ...
+
+    def translate_scenario_effect(
+        self, effect_key: str, payload: Mapping[str, Any]
+    ) -> RulesetEffectTransition: ...
 
     def recommend_skill_points(self, **payload: Any) -> dict[str, Any]: ...
 
@@ -174,4 +204,10 @@ class Ruleset(Protocol):
     ) -> dict[str, Any]: ...
 
 
-__all__ = ["Ruleset", "RulesetManifest", "RulesetSupportLevel"]
+__all__ = [
+    "Ruleset",
+    "RulesetEffectFollowUp",
+    "RulesetEffectTransition",
+    "RulesetManifest",
+    "RulesetSupportLevel",
+]

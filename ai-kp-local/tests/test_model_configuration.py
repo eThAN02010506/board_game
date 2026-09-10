@@ -71,6 +71,7 @@ def test_model_configuration_persists_and_replaces_runtime_settings(
         )
         assert saved.status_code == 200
         assert saved.json()["model"] == "test-mlx-model"
+        assert saved.json()["version"] == 1
         assert saved.json()["local_model_path"] == str(model_path.resolve())
         assert app.state.settings.llm_base_url == "http://127.0.0.1:8111/v1"
         assert app.state.settings.llm_model == "test-mlx-model"
@@ -80,6 +81,7 @@ def test_model_configuration_persists_and_replaces_runtime_settings(
         loaded = client.get("/model-settings", headers=headers)
         assert loaded.status_code == 200
         assert loaded.json()["provider_type"] == "local_mlx"
+        assert loaded.json()["version"] == 1
         assert restarted.state.settings.llm_base_url == "http://127.0.0.1:8111/v1"
 
 
@@ -96,14 +98,17 @@ def test_remote_model_configuration_redacts_api_key(tmp_path: Path) -> None:
                 "base_url": "http://192.168.1.97:8001",
                 "api_key": "new-secret",
                 "model": "gpt-oss-20b",
+                "semantic_profile": "large",
             },
         )
         loaded = client.get("/model-settings", headers=headers)
 
     assert saved.status_code == 200
+    assert saved.json()["version"] == 1
     assert app.state.settings.llm_base_url == "http://192.168.1.97:8001/v1"
     assert app.state.settings.llm_api_key == "new-secret"
     assert loaded.json()["api_key_configured"] is True
+    assert loaded.json()["semantic_profile"] == "large"
     assert "api_key" not in loaded.json()
 
 

@@ -14,6 +14,7 @@ import { requestJson } from "../../api/client";
 import { ImageModelSettingsPanel } from "./ImageModelSettingsPanel";
 
 type ProviderType = "openai_compatible" | "local_mlx";
+type SemanticProfile = "small" | "large";
 
 type RuntimeStatus = {
   state: "stopped" | "running" | "exited";
@@ -31,8 +32,10 @@ type ModelSettings = {
   model: string;
   local_model_path: string | null;
   local_port: number;
+  semantic_profile: SemanticProfile;
   api_key_configured: boolean;
   persisted: boolean;
+  version: number;
   updated_at?: string;
   runtime: RuntimeStatus;
 };
@@ -63,6 +66,8 @@ export function ModelSettingsPage() {
   const [model, setModel] = useState("");
   const [localModelPath, setLocalModelPath] = useState("");
   const [localPort, setLocalPort] = useState("8011");
+  const [semanticProfile, setSemanticProfile] = useState<SemanticProfile>("small");
+  const [configurationVersion, setConfigurationVersion] = useState(0);
   const [models, setModels] = useState<string[]>([]);
   const [pathInfo, setPathInfo] = useState<DiscoveryResult["model_path"]>();
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
@@ -75,8 +80,9 @@ export function ModelSettingsPage() {
     api_key: apiKey.trim() || null,
     model: model.trim(),
     local_model_path: providerType === "local_mlx" ? localModelPath.trim() : null,
-    local_port: Number(localPort || 8011)
-  }), [apiKey, baseUrl, localModelPath, localPort, model, providerType]);
+    local_port: Number(localPort || 8011),
+    semantic_profile: semanticProfile
+  }), [apiKey, baseUrl, localModelPath, localPort, model, providerType, semanticProfile]);
 
   function applySettings(settings: ModelSettings) {
     setProviderType(settings.provider_type);
@@ -84,6 +90,8 @@ export function ModelSettingsPage() {
     setModel(settings.model || "");
     setLocalModelPath(settings.local_model_path || "");
     setLocalPort(String(settings.local_port || 8011));
+    setSemanticProfile(settings.semantic_profile || "small");
+    setConfigurationVersion(settings.version);
     setApiKeyConfigured(settings.api_key_configured);
     setApiKey("");
     setRuntime(settings.runtime);
@@ -213,7 +221,7 @@ export function ModelSettingsPage() {
   return <div className="model-settings-page">
     <section className="page-card model-settings-main">
       <div className="page-intro">
-        <div><p className="eyebrow">运行时可切换</p><h2>模型来源与连接</h2><p>设置只保存在这台后端的 SQLite 中，保存后立即用于新发起的 AI KP 和规则抽取请求。</p></div>
+        <div><p className="eyebrow">运行时可切换</p><h2>模型来源与连接</h2><p>设置只保存在这台后端的 SQLite 中，保存后立即用于新发起的 AI KP、模组作者化和规则抽取 Agent。</p></div>
         <Cpu size={28} />
       </div>
 
@@ -232,6 +240,10 @@ export function ModelSettingsPage() {
         <label>模型 ID（可选）<input placeholder="留空则使用目录名" value={model} onChange={(event) => setModel(event.target.value)} /></label>
       </div>}
 
+      <div className="model-settings-form">
+        <label>语义能力档位<select value={semanticProfile} onChange={(event) => setSemanticProfile(event.target.value as SemanticProfile)}><option value="small">小模型：只选择已有原子行动</option><option value="large">大模型：允许有界计划与扩展候选</option></select><small>档位只改变模型可提出的候选范围，不改变规则、事实和结局权限。</small></label>
+      </div>
+
       {pathInfo && <div className="model-path-result"><CheckCircle2 size={18} /><div><strong>{pathInfo.model_name}</strong><span>{pathInfo.weight_files} 个权重文件 · {formatBytes(pathInfo.size_bytes)}</span><code>{pathInfo.resolved_path}</code></div></div>}
       {models.length > 0 && <div className="discovered-model-list"><strong>服务返回的模型</strong>{models.map((item) => <button className={model === item ? "active" : ""} key={item} onClick={() => setModel(item)} type="button">{item}</button>)}</div>}
 
@@ -242,6 +254,10 @@ export function ModelSettingsPage() {
         {providerType === "local_mlx" && runtime?.state === "running" && <button className="danger-button" disabled={busy} onClick={() => void stopLocalModel()} type="button"><Square size={15} />停止本地模型</button>}
       </div>
       <p className="inline-message">{message}</p>
+      <p className="permission-hint">
+        当前执行世代：{configurationVersion > 0 ? `v${configurationVersion}` : "环境默认"}。
+        保存新配置后，旧世代的在途 Agent 输出会被拒绝落库；后台契约会从不可变来源重新作者化。
+      </p>
     </section>
 
     <aside className="page-card model-runtime-card">

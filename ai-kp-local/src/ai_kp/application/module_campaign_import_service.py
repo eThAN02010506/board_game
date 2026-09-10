@@ -200,6 +200,7 @@ class ModuleCampaignImportService:
         member_id: str,
     ) -> dict:
         self._require_campaign_module(campaign_id, module_id)
+        self._validate_confirm_command(command)
         self.repo.begin_immediate()
         # Revalidate the graph inside the write transaction so stale or unapproved
         # sources fail closed instead of racing into the campaign facts.
@@ -270,9 +271,11 @@ class ModuleCampaignImportService:
                     f"{relation.get('source_name')} → {relation.get('target_name')}"
                 )
                 continue
-            travel_minutes = choice.travel_minutes or _DEFAULT_ROUTE_MINUTES[
-                str(relation["predicate"])
-            ]
+            travel_minutes = (
+                choice.travel_minutes
+                if choice.travel_minutes is not None
+                else _DEFAULT_ROUTE_MINUTES[str(relation["predicate"])]
+            )
             travel.create_route(
                 campaign_id,
                 TravelRouteCommand(
@@ -445,6 +448,32 @@ class ModuleCampaignImportService:
             self.repo.list_module_entities(module_id),
             self.repo.list_module_relations(module_id),
         )
+
+    @staticmethod
+    def _validate_confirm_command(command: ModuleImportConfirmCommand) -> None:
+        collections = (
+            (
+                "地点",
+                (choice.module_entity_id for choice in command.locations),
+            ),
+            (
+                "路线",
+                (choice.module_relation_id for choice in command.routes),
+            ),
+            (
+                "NPC",
+                (choice.module_entity_id for choice in command.npcs),
+            ),
+        )
+        for label, identifiers in collections:
+            seen: set[str] = set()
+            for identifier in identifiers:
+                if identifier in seen:
+                    raise ValueError(f"同一次导入不能重复选择{label}：{identifier}")
+                seen.add(identifier)
+        for choice in command.routes:
+            if choice.travel_minutes is not None and choice.travel_minutes <= 0:
+                raise ValueError("路线耗时必须大于 0 分钟")
 
     @staticmethod
     def _entity_by_id(entities: list[dict], entity_id: str) -> dict | None:

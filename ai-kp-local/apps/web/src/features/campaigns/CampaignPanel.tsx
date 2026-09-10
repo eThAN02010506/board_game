@@ -24,7 +24,7 @@ export function CampaignPanel(props: Props) {
         <h2>团与时间</h2>
         <Check size={18} />
       </div>
-      {props.role !== "player" && (
+      {props.role !== "player" && props.role !== "observer" && (
         <form onSubmit={props.onCreateCampaign}>
           <label>
             管理员口令（LAN/HTTPS 部署时使用）
@@ -54,7 +54,7 @@ export function CampaignPanel(props: Props) {
           </label>
           <button className="primary-button" type="submit">
             <Plus size={16} />
-            创建测试团
+            创建 Campaign
           </button>
         </form>
       )}

@@ -4,8 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   analyzeModuleRunIntent,
+  getRunSettingSelection,
+  getScenarioContractBinding,
   generateWorldExpansionProposal,
   getModuleRunDirectorState,
+  listScenarioContracts,
+  listModuleSettingProfiles,
+  listSettingCatalogs,
+  requestJson,
   transitionModuleRunScene,
   updateModuleRunEntityState
 } from "../../api/client";
@@ -22,8 +28,14 @@ vi.mock("../../api/client", async (importOriginal) => {
   return {
     ...actual,
     analyzeModuleRunIntent: vi.fn(),
+    getRunSettingSelection: vi.fn(),
+    getScenarioContractBinding: vi.fn(),
     generateWorldExpansionProposal: vi.fn(),
     getModuleRunDirectorState: vi.fn(),
+    listScenarioContracts: vi.fn(),
+    listModuleSettingProfiles: vi.fn(),
+    listSettingCatalogs: vi.fn(),
+    requestJson: vi.fn(),
     transitionModuleRunScene: vi.fn(),
     updateModuleRunEntityState: vi.fn()
   };
@@ -189,6 +201,12 @@ const worldExpansionProposal: TurnProposal = {
 
 describe("SceneDirectorPanel", () => {
   beforeEach(() => {
+    vi.mocked(requestJson).mockResolvedValue([]);
+    vi.mocked(listSettingCatalogs).mockResolvedValue([]);
+    vi.mocked(listModuleSettingProfiles).mockResolvedValue([]);
+    vi.mocked(getRunSettingSelection).mockResolvedValue(null);
+    vi.mocked(listScenarioContracts).mockResolvedValue([]);
+    vi.mocked(getScenarioContractBinding).mockResolvedValue(null);
     vi.mocked(getModuleRunDirectorState).mockResolvedValue(directorState);
     vi.mocked(analyzeModuleRunIntent).mockResolvedValue(analysis);
     vi.mocked(generateWorldExpansionProposal).mockResolvedValue(worldExpansionProposal);
@@ -317,4 +335,38 @@ describe("SceneDirectorPanel", () => {
       "/play"
     );
   });
+
+  it("lets the KP review and activate a run-scoped contract overlay", async () => {
+    const user = userEvent.setup();
+    vi.mocked(requestJson).mockImplementation(async (url, init) => {
+      if (init?.method === "POST") return { status: "active" };
+      if (String(url).includes("scenario-overlays")) {
+        return [{
+          id: "overlay_1",
+          proposal_key: "side_route",
+          sequence_no: 1,
+          status: "review_required",
+          proposal: {
+            confidence: "high",
+            assumptions: ["A courier exists."],
+            rationale: "Adds a costly courier route."
+          },
+          decision: { blockers: ["automation_level:balanced"] },
+          activated_at: null
+        }];
+      }
+      return [];
+    });
+    render(<SceneDirectorPanel onRunChanged={vi.fn()} run={run} />);
+
+    expect(await screen.findByText("side_route")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "审核并激活" }));
+
+    await waitFor(() => expect(requestJson).toHaveBeenCalledWith(
+      "/scenario-overlays/overlay_1/approve",
+      { method: "POST" }
+    ));
+    expect(await screen.findByText("运行级契约扩展已审核并原子激活。")).toBeVisible();
+  });
+
 });

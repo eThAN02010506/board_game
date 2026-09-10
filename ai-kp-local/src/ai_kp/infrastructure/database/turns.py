@@ -12,7 +12,12 @@ from ai_kp.director.turn_output import (
     MapMoveCandidate,
     MemoryCandidate,
     NpcUpdateCandidate,
+    WorldEntityStateCandidate,
     dump_candidates,
+)
+from ai_kp.infrastructure.database.parallel_proposal_authority import (
+    ParallelProposalApprovalPhase,
+    ParallelProposalAuthority,
 )
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
@@ -28,16 +33,29 @@ PROPOSAL_JSON_FIELDS = (
     "proposed_npc_updates",
     "proposed_map_moves",
     "proposed_facts",
+    "proposed_world_entity_states",
 )
 CHECK_CONSEQUENCE_ACTION_TYPE = "check_consequence_basis"
 WORLD_EXPANSION_ACTION_TYPE = "world_expansion_basis"
 WORLD_EXPANSION_MATERIALIZED_ACTION_TYPE = "world_expansion_materialized"
 PROPOSED_FACTS_APPLIED_ACTION_TYPE = "proposed_facts_applied"
 ACTION_RULING_ACTION_TYPE = "action_ruling"
+TABLETOP_TURN_ACTION_TYPE = "tabletop_turn"
 
 
 class TurnRepository(SQLiteRepository):
     """Persistence and atomic application of KP turn proposals."""
+
+    def begin_proposal_application(self) -> None:
+        self.begin_immediate()
+        self.connection.execute("SAVEPOINT application_proposal")
+
+    def finish_proposal_application(self) -> None:
+        self.connection.execute("RELEASE SAVEPOINT application_proposal")
+
+    def rollback_proposal_application(self) -> None:
+        self.connection.execute("ROLLBACK TO SAVEPOINT application_proposal")
+        self.connection.execute("RELEASE SAVEPOINT application_proposal")
 
     def create_turn_proposal(
         self,
@@ -52,6 +70,7 @@ class TurnRepository(SQLiteRepository):
         proposed_npc_updates: list[dict] | None = None,
         proposed_map_moves: list[dict] | None = None,
         proposed_facts: list[dict] | None = None,
+        proposed_world_entity_states: list[dict] | None = None,
         source_model: str = "unknown",
     ) -> dict:
         if pc_id:
@@ -62,6 +81,9 @@ class TurnRepository(SQLiteRepository):
         npc_updates = dump_candidates(proposed_npc_updates or [], NpcUpdateCandidate)
         map_moves = dump_candidates(proposed_map_moves or [], MapMoveCandidate)
         facts = dump_candidates(proposed_facts or [], FactCandidate)
+        world_entity_states = dump_candidates(
+            proposed_world_entity_states or [], WorldEntityStateCandidate
+        )
         proposal_id = new_id("proposal")
         self.connection.execute(
             """
@@ -70,9 +92,9 @@ class TurnRepository(SQLiteRepository):
                 id, campaign_id, pc_id, status, player_action, public_narration, kp_notes,
                 proposed_checks_json, proposed_events_json, proposed_memories_json,
                 proposed_npc_updates_json, proposed_map_moves_json,
-                proposed_facts_json, source_model
+                proposed_facts_json, proposed_world_entity_states_json, source_model
               )
-            VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 proposal_id,
@@ -87,6 +109,7 @@ class TurnRepository(SQLiteRepository):
                 json.dumps(npc_updates, ensure_ascii=False),
                 json.dumps(map_moves, ensure_ascii=False),
                 json.dumps(facts, ensure_ascii=False),
+                json.dumps(world_entity_states, ensure_ascii=False),
                 source_model,
             ),
         )
@@ -135,7 +158,7 @@ class TurnRepository(SQLiteRepository):
             SET public_narration = ?, proposed_checks_json = ?,
                 proposed_events_json = '[]', proposed_memories_json = '[]',
                 proposed_npc_updates_json = '[]', proposed_map_moves_json = '[]',
-                proposed_facts_json = '[]'
+                proposed_facts_json = '[]', proposed_world_entity_states_json = '[]'
             WHERE id = ? AND status = 'draft'
             """,
             (public_narration, json.dumps(checks, ensure_ascii=False), proposal_id),
@@ -151,6 +174,23 @@ class TurnRepository(SQLiteRepository):
         )
         if ruling_update.rowcount != 1:
             raise ValueError("A precheck proposal requires exactly one action ruling")
+        return self.get_turn_proposal(proposal_id)
+
+    def clear_draft_world_effects(self, proposal_id: str) -> dict:
+        """Keep freeform narration non-authoritative until a kernel is bound."""
+
+        updated = self.connection.execute(
+            """
+            UPDATE turn_proposals
+            SET proposed_events_json = '[]', proposed_memories_json = '[]',
+                proposed_npc_updates_json = '[]', proposed_map_moves_json = '[]',
+                proposed_facts_json = '[]', proposed_world_entity_states_json = '[]'
+            WHERE id = ? AND status = 'draft'
+            """,
+            (proposal_id,),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("Only a draft proposal can clear world effects")
         return self.get_turn_proposal(proposal_id)
 
     def list_turn_proposals(self, campaign_id: str, status: str | None = None) -> list[dict]:
@@ -285,6 +325,14 @@ class TurnRepository(SQLiteRepository):
         if len(ruling_matches) > 1:
             raise ValueError("A proposal has multiple action rulings")
         proposal["action_ruling"] = ruling_matches[0] if ruling_matches else None
+        tabletop_matches = [
+            action["payload"]
+            for action in resolved_actions
+            if action["action_type"] == TABLETOP_TURN_ACTION_TYPE
+        ]
+        if len(tabletop_matches) > 1:
+            raise ValueError("A proposal has multiple tabletop turn frames")
+        proposal["tabletop_turn"] = tabletop_matches[0] if tabletop_matches else None
         applied_fact_matches = [
             action["payload"]
             for action in resolved_actions
@@ -469,8 +517,60 @@ class TurnRepository(SQLiteRepository):
         note: str = "",
         override_public_narration: str | None = None,
     ) -> dict:
+        return self._approve_turn_proposal(
+            proposal_id,
+            actor=actor,
+            note=note,
+            override_public_narration=override_public_narration,
+            parallel_batch_id=None,
+            parallel_phase=None,
+        )
+
+    def approve_parallel_turn_proposal(
+        self,
+        proposal_id: str,
+        *,
+        batch_id: str,
+        phase: ParallelProposalApprovalPhase,
+        actor: str,
+        note: str = "",
+        override_public_narration: str | None = None,
+    ) -> dict:
+        """Approve only through a revalidated parallel workflow phase."""
+
+        return self._approve_turn_proposal(
+            proposal_id,
+            actor=actor,
+            note=note,
+            override_public_narration=override_public_narration,
+            parallel_batch_id=batch_id,
+            parallel_phase=phase,
+        )
+
+    def _approve_turn_proposal(
+        self,
+        proposal_id: str,
+        *,
+        actor: str,
+        note: str,
+        override_public_narration: str | None,
+        parallel_batch_id: str | None,
+        parallel_phase: ParallelProposalApprovalPhase | None,
+    ) -> dict:
+        self.begin_immediate()
         self.connection.execute("SAVEPOINT approve_turn_proposal")
         try:
+            parallel_authority = ParallelProposalAuthority(self.connection)
+            if parallel_batch_id is None or parallel_phase is None:
+                if parallel_batch_id is not None or parallel_phase is not None:
+                    raise ValueError("Parallel proposal authority is incomplete")
+                parallel_authority.require_legacy_mutation_allowed(proposal_id)
+            else:
+                parallel_authority.validate_parallel_approval(
+                    proposal_id,
+                    batch_id=parallel_batch_id,
+                    phase=parallel_phase,
+                )
             claimed = self.connection.execute(
                 """
                 UPDATE turn_proposals
@@ -837,8 +937,12 @@ class TurnRepository(SQLiteRepository):
         actor: str = "human_kp",
         note: str = "",
     ) -> dict:
+        self.begin_immediate()
         self.connection.execute("SAVEPOINT reject_turn_proposal")
         try:
+            ParallelProposalAuthority(
+                self.connection
+            ).require_legacy_mutation_allowed(proposal_id)
             rejected = self.connection.execute(
                 """
                 UPDATE turn_proposals

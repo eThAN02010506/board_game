@@ -1,5 +1,5 @@
 import { CheckCircle2, History, MapPin, UserRoundPlus } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import type {
   CampaignInvestigator,
@@ -37,6 +37,13 @@ export function WorldExpansionContactForm({
   onConfirm
 }: Props) {
   const candidate = proposal.world_expansion?.candidate;
+  const typedBindings = useMemo(
+    () => candidate?.template_binding?.entity_bindings ?? [],
+    [candidate?.template_binding?.entity_bindings]
+  );
+  const typedNpcBindings = typedBindings.filter(
+    (item) => item.entity_kind === "npc"
+  );
   const receipt = proposal.world_expansion_materialization;
   const [idempotencyKey, setIdempotencyKey] = useState(() =>
     newIdempotencyKey(proposal.id)
@@ -57,6 +64,12 @@ export function WorldExpansionContactForm({
   const [participantIds, setParticipantIds] = useState<string[]>([]);
   const [interactionSummary, setInteractionSummary] = useState("");
   const [professionContext, setProfessionContext] = useState("");
+  const [entityValues, setEntityValues] = useState<
+    Record<
+      string,
+      { name: string; description: string; visibility: "table" | "kp" | "secret" }
+    >
+  >({});
 
   useEffect(() => {
     setIdempotencyKey(newIdempotencyKey(proposal.id));
@@ -76,13 +89,26 @@ export function WorldExpansionContactForm({
     setParticipantIds([]);
     setInteractionSummary("");
     setProfessionContext("");
+    setEntityValues(
+      Object.fromEntries(
+        typedBindings.map((binding) => [
+          binding.local_ref,
+          {
+            name: binding.label_variant,
+            description: "",
+            visibility: "table" as const
+          }
+        ])
+      )
+    );
   }, [
     activeMap?.id,
     activeMap?.locations,
     campaignTime,
     candidate?.proposal,
     candidate?.subject,
-    proposal.id
+    proposal.id,
+    typedBindings
   ]);
 
   if (!candidate) return null;
@@ -94,6 +120,9 @@ export function WorldExpansionContactForm({
           <strong>实际接触已经写入世界</strong>
           <p>
             {receipt.fact_event_ids.length} 条严格事实
+            {receipt.world_entity_ids?.length
+              ? ` · ${receipt.world_entity_ids.length} 个实体已记录`
+              : ""}
             {receipt.npc_id ? " · NPC 已记录" : ""}
             {receipt.map_token_id ? " · 地图棋子已同步" : ""}
           </p>
@@ -137,10 +166,17 @@ export function WorldExpansionContactForm({
           object_text: objectText
         }
       ],
+      entities: typedBindings.map((binding) => ({
+        local_ref: binding.local_ref,
+        name: entityValues[binding.local_ref]?.name ?? "",
+        description: entityValues[binding.local_ref]?.description ?? "",
+        visibility: entityValues[binding.local_ref]?.visibility ?? "table"
+      })),
       npc,
-      participant_investigator_ids: includeNpc ? participantIds : [],
+      participant_investigator_ids:
+        includeNpc || typedNpcBindings.length > 0 ? participantIds : [],
       interaction_summary:
-        includeNpc && participantIds.length
+        (includeNpc || typedNpcBindings.length > 0) && participantIds.length
           ? interactionSummary.trim() || summary
           : null,
       profession_context:
@@ -148,10 +184,14 @@ export function WorldExpansionContactForm({
           ? professionContext.trim() || null
           : null,
       map_placement:
-        includeNpc && placeOnMap && activeMap && mapLocation
+        (includeNpc || typedNpcBindings.length > 0) &&
+        placeOnMap &&
+        activeMap &&
+        mapLocation
           ? {
               map_id: activeMap.id,
               location_name: mapLocation,
+              entity_ref: typedNpcBindings[0]?.local_ref ?? null,
               visibility: "table",
               color: "#b93f2d"
             }
@@ -206,6 +246,77 @@ export function WorldExpansionContactForm({
           />
         </label>
       </fieldset>
+      {!!typedBindings.length && (
+        <fieldset className="world-materialization-entities">
+          <legend>获批模板实体的具体身份</legend>
+          <small>类型、原型与关系已经锁定；这里仅填写桌面实际确认的信息。</small>
+          {typedBindings.map((binding) => {
+            const value = entityValues[binding.local_ref] ?? {
+              name: "",
+              description: "",
+              visibility: "table" as const
+            };
+            return (
+              <article key={binding.local_ref}>
+                <strong>
+                  {binding.label_variant} · {binding.entity_kind}
+                </strong>
+                <small>
+                  {binding.archetype_id} / {binding.local_ref}
+                </small>
+                <label>
+                  具体名称
+                  <input
+                    required
+                    value={value.name}
+                    onChange={(event) =>
+                      setEntityValues((current) => ({
+                        ...current,
+                        [binding.local_ref]: { ...value, name: event.target.value }
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  已实际确认的描述
+                  <textarea
+                    value={value.description}
+                    onChange={(event) =>
+                      setEntityValues((current) => ({
+                        ...current,
+                        [binding.local_ref]: {
+                          ...value,
+                          description: event.target.value
+                        }
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  可见范围
+                  <select
+                    value={value.visibility}
+                    onChange={(event) =>
+                      setEntityValues((current) => ({
+                        ...current,
+                        [binding.local_ref]: {
+                          ...value,
+                          visibility: event.target.value as "table" | "kp" | "secret"
+                        }
+                      }))
+                    }
+                  >
+                    <option value="table">全桌可见</option>
+                    <option value="kp">仅 KP</option>
+                    <option value="secret">秘密</option>
+                  </select>
+                </label>
+              </article>
+            );
+          })}
+        </fieldset>
+      )}
+      {typedNpcBindings.length === 0 && (
       <label className="world-materialization-toggle">
         <input
           checked={includeNpc}
@@ -218,6 +329,7 @@ export function WorldExpansionContactForm({
         <UserRoundPlus size={16} />
         这次接触中出现了需要长期记录的 NPC
       </label>
+      )}
       {includeNpc && (
         <fieldset className="world-materialization-npc">
           <legend>NPC 档案</legend>
@@ -418,6 +530,74 @@ export function WorldExpansionContactForm({
           )}
           {!activeMap && (
             <small>当前没有地图；NPC 与事实仍可先保存，之后再放置棋子。</small>
+          )}
+        </fieldset>
+      )}
+      {typedNpcBindings.length > 0 && (
+        <fieldset className="world-materialization-npc">
+          <legend>模板 NPC 的接触记录</legend>
+          <fieldset>
+            <legend>本次实际接触的调查员</legend>
+            {contactInvestigators.map((item) => (
+              <label
+                className="world-materialization-toggle"
+                key={item.investigator_id}
+              >
+                <input
+                  checked={participantIds.includes(item.investigator_id)}
+                  type="checkbox"
+                  onChange={(event) =>
+                    setParticipantIds((current) =>
+                      event.target.checked
+                        ? [...current, item.investigator_id]
+                        : current.filter(
+                            (investigatorId) => investigatorId !== item.investigator_id
+                          )
+                    )
+                  }
+                />
+                {item.name}
+              </label>
+            ))}
+            {contactInvestigators.length === 0 && (
+              <small>当前团还没有已批准的稳定调查员；不会建立跨本人物经历。</small>
+            )}
+            {!!participantIds.length && (
+              <label>
+                他们一起做了什么
+                <textarea
+                  value={interactionSummary}
+                  onChange={(event) => setInteractionSummary(event.target.value)}
+                  placeholder={summary}
+                />
+              </label>
+            )}
+          </fieldset>
+          <label className="world-materialization-toggle">
+            <input
+              checked={placeOnMap}
+              disabled={!activeMap || availableLocations.length === 0}
+              type="checkbox"
+              onChange={(event) => setPlaceOnMap(event.target.checked)}
+            />
+            <MapPin size={16} />
+            将第一个模板 NPC 同步到当前地图
+          </label>
+          {placeOnMap && activeMap && (
+            <label>
+              {activeMap.title}上的已有地点
+              <select
+                required
+                value={mapLocation}
+                onChange={(event) => setMapLocation(event.target.value)}
+              >
+                {availableLocations.map((location) => (
+                  <option key={location.id} value={location.name}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
         </fieldset>
       )}

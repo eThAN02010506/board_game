@@ -124,7 +124,10 @@ export const workspaceRoutes = [
 export type PageId = (typeof workspaceRoutes)[number]["id"];
 export type WorkspaceRoute = (typeof workspaceRoutes)[number];
 export type WorkspaceAccess = WorkspaceRoute["access"];
-export type WorkspaceRole = "kp" | "player" | null | undefined;
+export type WorkspaceRole = "kp" | "player" | "observer" | null | undefined;
+
+const observerPages = new Set<PageId>(["play", "campaigns", "handouts"]);
+const guestPages = new Set<PageId>(["campaigns"]);
 
 export function routeByPage(page: PageId): WorkspaceRoute {
   return workspaceRoutes.find((item) => item.id === page) ?? workspaceRoutes[0];
@@ -132,11 +135,14 @@ export function routeByPage(page: PageId): WorkspaceRoute {
 
 export function isPageAllowedForRole(page: PageId, role: WorkspaceRole): boolean {
   const route = routeByPage(page);
-  return role !== "player" || route.access === "shared";
+  if (role === "kp") return true;
+  if (role === "player") return route.access === "shared";
+  if (role === "observer") return observerPages.has(page);
+  return guestPages.has(page);
 }
 
 export function resolveWorkspaceRoute(page: PageId, role: WorkspaceRole): WorkspaceRoute {
-  return routeByPage(isPageAllowedForRole(page, role) ? page : "play");
+  return routeByPage(isPageAllowedForRole(page, role) ? page : role ? "play" : "campaigns");
 }
 
 export function visibleWorkspaceRoutes(role: WorkspaceRole): readonly WorkspaceRoute[] {

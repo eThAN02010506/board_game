@@ -123,7 +123,11 @@ def test_document_process_sandbox_reports_abnormal_child_exit(
         run_document_process_isolated(
             source,
             operation_label="规则书 PDF 解析",
-            policy=DocumentProcessPolicy(timeout_seconds=5),
+            # ``spawn`` imports the test module in a clean interpreter. Under the
+            # full suite that startup can exceed five seconds before this target
+            # immediately exits, so keep this assertion about the exit code rather
+            # than accidentally turning it into another timeout test.
+            policy=DocumentProcessPolicy(timeout_seconds=15),
             target=_crashing_child,
             child_args=(),
             read_result=lambda _result_root: None,

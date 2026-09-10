@@ -10,8 +10,8 @@ from ai_kp.director.turn_output import (
     StrictModel,
     StructuredOutputError,
     Visibility,
-    _extract_json,
 )
+from ai_kp.platform.structured_json import decode_json_object
 
 PROMPT_VERSION = "session-recap.v1"
 MAX_RECAP_EVENTS = 250
@@ -70,7 +70,7 @@ SESSION_RECAP_INSTRUCTIONS = """你是跑团团次记录整理器，不是故事
 
 def parse_session_recap_output(raw: str) -> SessionRecapOutput:
     try:
-        return SessionRecapOutput.model_validate_json(_extract_json(raw))
+        return SessionRecapOutput.model_validate(decode_json_object(raw))
     except (ValidationError, ValueError) as exc:
         raise StructuredOutputError(str(exc)) from exc
 

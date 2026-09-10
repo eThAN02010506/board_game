@@ -11,6 +11,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 KnowledgeKind = Literal["module_canon", "module_anchor", "reference"]
 Visibility = Literal["player", "table", "kp", "secret"]
+EntityType = Literal[
+    "npc",
+    "location",
+    "clue",
+    "organization",
+    "item",
+    "event",
+    "anchor",
+]
 VISIBILITY_RANK: dict[str, int] = {
     "player": 0,
     "table": 0,
@@ -61,7 +70,15 @@ class ModuleKnowledgeCandidate(BaseModel):
     confidence: float = Field(default=0, ge=0, le=1)
     visibility: Visibility = "kp"
     spoiler_tag: str | None = Field(default=None, max_length=160)
+    entity_name: str | None = Field(default=None, min_length=1, max_length=100)
+    entity_type: EntityType | None = None
     citations: list[ModuleCitation] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def entity_type_requires_entity_name(self) -> ModuleKnowledgeCandidate:
+        if self.entity_type is not None and not self.entity_name:
+            raise ValueError("entity_type requires entity_name")
+        return self
 
 
 class ModuleKnowledgeValidationStore(Protocol):

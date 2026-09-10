@@ -8,14 +8,16 @@ import type {
   CreateSkillCheckInput,
   OpposedCheck,
   SessionMember,
-  SkillCheck
+  SkillCheck,
+  VisibleSkillCheck
 } from "../../api/types";
 import { statusLabel } from "../../ui/statusLabels";
 import { DiceRollResult } from "./DiceRollResult";
 
 type Props = {
   identity: AuthIdentity | null;
-  checks: SkillCheck[];
+  checks: VisibleSkillCheck[];
+  ownedCheckIds?: ReadonlySet<string>;
   opposedChecks: OpposedCheck[];
   members: SessionMember[];
   loading: boolean;
@@ -30,12 +32,13 @@ type Props = {
   onReplay: (checkId: string) => void;
   onOverride: (
     checkId: string,
-    successLevel: NonNullable<SkillCheck["success_level"]>,
+    successLevel: NonNullable<VisibleSkillCheck["success_level"]>,
     passed: boolean,
     reason: string
   ) => void;
   onCancel: (checkId: string, reason: string) => void;
   onPush: (checkId: string, reason: string) => void;
+  onDeclinePush: (checkId: string, reason: string) => void;
 };
 
 export function CheckPanel(props: Props) {
@@ -66,7 +69,7 @@ export function CheckPanel(props: Props) {
   const [visibility, setVisibility] = useState<SkillCheck["visibility"]>("public");
   const [allowPush, setAllowPush] = useState(true);
   const [physicalDrafts, setPhysicalDrafts] = useState<Record<string, { ones: string; tens: string }>>({});
-  const [decisionReason, setDecisionReason] = useState("KP 根据现场裁定");
+  const [decisionReasons, setDecisionReasons] = useState<Record<string, string>>({});
   const [overrideLevel, setOverrideLevel] = useState<NonNullable<SkillCheck["success_level"]>>("regular");
   const [opposedDraft, setOpposedDraft] = useState({
     leftSkill: "斗殴",
@@ -97,11 +100,11 @@ export function CheckPanel(props: Props) {
     });
   }
 
-  function physicalDraft(check: SkillCheck) {
+  function physicalDraft(check: VisibleSkillCheck) {
     return physicalDrafts[check.id] ?? { ones: "", tens: "" };
   }
 
-  function resolvePhysical(check: SkillCheck) {
+  function resolvePhysical(check: VisibleSkillCheck) {
     const draft = physicalDraft(check);
     const onesDigit = Number(draft.ones);
     const tensDigits = draft.tens
@@ -236,17 +239,37 @@ export function CheckPanel(props: Props) {
 
       <div className="check-list">
         {props.checks.length ? props.checks.map((check) => {
+          const decisionReason = decisionReasons[check.id] ?? "";
           const draft = physicalDraft(check);
           const canResolve = check.status === "requested" && (
-            props.identity?.role === "kp" || check.roller_member_id === props.identity?.member_id
+            props.identity?.role === "kp"
+            || check.roller_member_id === props.identity?.member_id
+            || props.ownedCheckIds?.has(check.id) === true
           );
           const linkedChecks = check.player_action_id
             ? props.checks.filter((item) => item.player_action_id === check.player_action_id)
             : [];
+          const hasPendingPushDecision = linkedChecks.some((item) =>
+            ["resolved", "overridden"].includes(item.status)
+            && item.passed === false
+            && item.allow_push
+            && item.push_decision?.decision !== "accept_failure"
+            && !linkedChecks.some((child) => child.pushed_from_check_id === item.id)
+          );
           const consequenceReady = linkedChecks.length > 0
             && linkedChecks.every((item) =>
               ["resolved", "overridden", "cancelled"].includes(item.status))
-            && !props.checks.some((item) => item.pushed_from_check_id === check.id);
+            && !hasPendingPushDecision
+            && !linkedChecks.some((item) => item.pushed_from_check_id === check.id);
+          const canDecidePush = check.passed === false
+            && check.allow_push
+            && check.push_decision?.decision !== "accept_failure"
+            && !props.checks.some((item) => item.pushed_from_check_id === check.id)
+            && (
+              props.identity?.role === "kp"
+              || props.identity?.member_id === check.roller_member_id
+              || props.ownedCheckIds?.has(check.id) === true
+            );
           return (
             <article className={`check-card ${check.status} ${check.passed === true ? "passed" : check.passed === false ? "failed" : ""}`} key={check.id}>
               <div className="check-card-heading">
@@ -259,8 +282,20 @@ export function CheckPanel(props: Props) {
               </div>
               <div className="check-facts">
                 <span>{check.bonus_dice > 0 ? `${check.bonus_dice} 奖励骰` : check.bonus_dice < 0 ? `${Math.abs(check.bonus_dice)} 惩罚骰` : "普通百分骰"}</span>
-                <span>规则 {check.ruleset_version} · 书内 {check.source_reference.page_start}-{check.source_reference.page_end} 页</span>
+                {check.ruleset_version && check.source_reference && (
+                  <span>规则 {check.ruleset_version} · 书内 {check.source_reference.page_start}-{check.source_reference.page_end} 页</span>
+                )}
               </div>
+
+              {check.check_plan && (
+                <dl className="check-plan-summary">
+                  {check.check_plan.scope && <><dt>本次检定范围</dt><dd>{check.check_plan.scope}</dd></>}
+                  {!!check.check_plan.supporting_factors?.length && <><dt>有利/不利因素</dt><dd>{check.check_plan.supporting_factors.join("；")}</dd></>}
+                  {!!check.check_plan.automatic_information?.length && <><dt>无需骰子即可获得</dt><dd>{check.check_plan.automatic_information.join("；")}</dd></>}
+                  {check.check_plan.failure_stakes && <><dt>普通失败</dt><dd>{check.check_plan.failure_stakes}</dd></>}
+                  {check.check_plan.pushed_failure_stakes && <><dt>推动失败</dt><dd>{check.check_plan.pushed_failure_stakes}</dd></>}
+                </dl>
+              )}
 
               {canResolve && (
                 <>
@@ -284,6 +319,15 @@ export function CheckPanel(props: Props) {
                 <button className="ghost-button" onClick={() => props.onReplay(check.id)} type="button"><RotateCcw size={14} />重放校验</button>
               )}
 
+              {canDecidePush && (
+                <div className="push-decision-actions">
+                  <p>失败结果已确定。你可以接受普通失败，或承担已公开的更严重风险进行孤注一掷。</p>
+                  <label>若要推动，请说明如何改变做法<input placeholder="例如：换用更冒险、代价更高的方法" value={decisionReason} onChange={(event) => setDecisionReasons((items) => ({ ...items, [check.id]: event.target.value }))} /></label>
+                  <button className="secondary-button" disabled={props.loading} onClick={() => props.onDeclinePush(check.id, decisionReason.trim() || "玩家确认接受普通失败")} type="button">接受普通失败</button>
+                  <button className="primary-button" disabled={props.loading || !decisionReason.trim()} onClick={() => props.onPush(check.id, decisionReason)} type="button">创建孤注一掷</button>
+                </div>
+              )}
+
               {props.identity?.role === "kp"
                 && check.player_action_id
                 && consequenceReady && (
@@ -300,14 +344,13 @@ export function CheckPanel(props: Props) {
               {props.identity?.role === "kp" && (
                 <details className="check-kp-tools">
                   <summary>KP 裁定与状态操作</summary>
-                  <label>理由或后果<input value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} /></label>
+                  <label>理由；若推动，请说明如何改变做法<input value={decisionReason} onChange={(event) => setDecisionReasons((items) => ({ ...items, [check.id]: event.target.value }))} /></label>
                   {check.status === "requested" ? (
                     <button className="secondary-button" onClick={() => props.onCancel(check.id, decisionReason)} type="button">取消检定</button>
                   ) : (
                     <>
                       <label>覆盖结果<select value={overrideLevel} onChange={(event) => setOverrideLevel(event.target.value as NonNullable<SkillCheck["success_level"]>)}>{Object.entries(levelLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                       <button className="secondary-button" onClick={() => props.onOverride(check.id, overrideLevel, !["failure", "fumble"].includes(overrideLevel), decisionReason)} type="button">记录 KP 覆盖</button>
-                      {!check.passed && check.allow_push && <button className="ghost-button" onClick={() => props.onPush(check.id, decisionReason)} type="button">创建孤注一掷</button>}
                     </>
                   )}
                 </details>

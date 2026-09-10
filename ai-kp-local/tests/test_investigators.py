@@ -17,6 +17,7 @@ from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.rules.coc7_character import normalize_character_sheet
 from ai_kp.rules.coc7_recommendations import recommend_coc7_skill_points
 from ai_kp.rules.coc7_skills import list_coc7_skill_catalog
+from tests.support_investigators import coc7_sheet
 
 
 def _xlsx_fixture() -> bytes:
@@ -747,3 +748,190 @@ def test_concurrent_review_and_resubmission_are_serialized_by_revision(
     }
     assert ("approved", first_revision_id) in review_pairs
     assert ("submitted", second_revision_id) in review_pairs
+
+
+def test_ai_kp_automation_auto_approves_submitted_investigator(
+    tmp_path: Path,
+) -> None:
+    """在 ai_kp 自动化模式下，玩家提交调查员后自动批准并绑定席位。"""
+    from ai_kp.platform.modules.ingestion import ModuleChunk
+
+    app = create_app(
+        Settings(
+            db_path=tmp_path / "ai-kp-auto-approve.sqlite3",
+            local_admin_enabled=False,
+            admin_token="ai-kp-approve-admin",
+        )
+    )
+    with TestClient(app) as client:
+        admin_headers = {"X-AI-KP-Admin-Token": "ai-kp-approve-admin"}
+        campaign = client.post(
+            "/campaigns", headers=admin_headers, json={"title": "AI KP 测试团"}
+        ).json()
+        session = client.post(
+            f"/campaigns/{campaign['id']}/sessions",
+            headers=admin_headers,
+            json={"kp_display_name": "测试 KP"},
+        ).json()
+        kp_headers = {"Authorization": f"Bearer {session['access_token']}"}
+
+        # 用 repo 直接创建模组并启动 ai_kp 自动化运行
+        db_path = tmp_path / "ai-kp-auto-approve.sqlite3"
+        observer = connect(db_path)
+        try:
+            repo = Repository(observer)
+            module = repo.create_module(
+                campaign["id"],
+                "测试模组",
+                [ModuleChunk(title="入口", text="车厢里很安静。", visibility="kp", order_index=0)],
+            )
+            run = repo.start_campaign_module_run(
+                campaign_id=campaign["id"],
+                module_id=module["id"],
+                current_scene_key="入口",
+                active_spoiler_tags=[],
+                state={},
+                started_by_member_id=session["member"]["id"],
+            )
+            repo.set_module_run_automation_level(
+                run["id"],
+                expected_version=run["version"],
+                level="ai_kp",
+                reason="测试自动批准",
+                member_id=session["member"]["id"],
+            )
+            observer.commit()
+        finally:
+            observer.close()
+        auto = client.get(
+            f"/campaigns/{campaign['id']}/module-runs/current",
+            headers=kp_headers,
+        )
+        assert auto.status_code == 200, auto.text
+        assert auto.json()["automation_level"] == "ai_kp"
+
+        # 玩家认领席位并创建调查员
+        profile = client.post(
+            "/player-profiles", json={"display_name": "AI 玩家"}
+        ).json()
+        seat = client.post(
+            f"/sessions/{session['session']['id']}/seats",
+            headers=kp_headers,
+            json={"label": "AI 玩家席位"},
+        ).json()
+        player = client.post(
+            "/session-seats/claim",
+            headers={"X-AI-KP-Player-Token": profile["player_token"]},
+            json={
+                "invitation_code": seat["invitation_code"],
+                "display_name": "AI 玩家",
+            },
+        ).json()
+        player_headers = {
+            "Authorization": f"Bearer {player['access_token']}",
+            "X-AI-KP-Player-Token": profile["player_token"],
+        }
+        created = client.post(
+            "/investigators",
+            headers=player_headers,
+            json={
+                "canonical_sheet": coc7_sheet("自动批准测试员"),
+                "source_type": "manual",
+            },
+        ).json()
+
+        # 提交调查员：ai_kp 模式下应自动批准并绑定
+        submitted = client.post(
+            f"/campaigns/{campaign['id']}/investigators/{created['id']}/submit",
+            headers=player_headers,
+            json={},
+        )
+        assert submitted.status_code == 200, submitted.text
+        assert submitted.json()["status"] == "approved"
+        assert submitted.json()["legacy_pc_id"] is not None
+        records = client.get(
+            f"/campaigns/{campaign['id']}/investigator-submissions",
+            headers=kp_headers,
+        ).json()
+        record = next(
+            (r for r in records if r["investigator_id"] == created["id"]), None
+        )
+        assert record is not None, records
+        assert record["status"] == "approved", record
+        assert record["legacy_pc_id"] is not None, record
+        # 席位应绑定该调查员
+        seat_after = client.get(
+            f"/sessions/{session['session']['id']}/seats",
+            headers=kp_headers,
+        ).json()
+        bound = next(
+            (s for s in seat_after if s["label"] == "AI 玩家席位"), None
+        )
+        assert bound is not None
+        assert bound["assigned_pc_id"] == record["legacy_pc_id"]
+
+
+def test_conservative_mode_does_not_auto_approve(tmp_path: Path) -> None:
+    """保守模式保持现状：提交后停留 submitted，需人类 KP 批准。"""
+    app = create_app(
+        Settings(
+            db_path=tmp_path / "conservative-approve.sqlite3",
+            local_admin_enabled=False,
+            admin_token="conservative-admin",
+        )
+    )
+    with TestClient(app) as client:
+        admin_headers = {"X-AI-KP-Admin-Token": "conservative-admin"}
+        campaign = client.post(
+            "/campaigns", headers=admin_headers, json={"title": "保守模式测试团"}
+        ).json()
+        session = client.post(
+            f"/campaigns/{campaign['id']}/sessions",
+            headers=admin_headers,
+            json={"kp_display_name": "测试 KP"},
+        ).json()
+        kp_headers = {"Authorization": f"Bearer {session['access_token']}"}
+        profile = client.post(
+            "/player-profiles", json={"display_name": "保守玩家"}
+        ).json()
+        seat = client.post(
+            f"/sessions/{session['session']['id']}/seats",
+            headers=kp_headers,
+            json={"label": "保守玩家席位"},
+        ).json()
+        player = client.post(
+            "/session-seats/claim",
+            headers={"X-AI-KP-Player-Token": profile["player_token"]},
+            json={
+                "invitation_code": seat["invitation_code"],
+                "display_name": "保守玩家",
+            },
+        ).json()
+        player_headers = {
+            "Authorization": f"Bearer {player['access_token']}",
+            "X-AI-KP-Player-Token": profile["player_token"],
+        }
+        created = client.post(
+            "/investigators",
+            headers=player_headers,
+            json={
+                "canonical_sheet": coc7_sheet("保守测试员"),
+                "source_type": "manual",
+            },
+        ).json()
+        submitted = client.post(
+            f"/campaigns/{campaign['id']}/investigators/{created['id']}/submit",
+            headers=player_headers,
+            json={},
+        )
+        assert submitted.status_code == 200, submitted.text
+        records = client.get(
+            f"/campaigns/{campaign['id']}/investigator-submissions",
+            headers=kp_headers,
+        ).json()
+        record = next(
+            (r for r in records if r["investigator_id"] == created["id"]), None
+        )
+        assert record is not None, records
+        # 无活动模组运行（conservative 默认），保持 submitted
+        assert record["status"] == "submitted", record

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -17,6 +19,7 @@ class ModuleScope:
     current_scene_key: str | None
     run_id: str | None
     explicit: bool
+    location: str | None = None
 
 
 class ModuleContextProvider:
@@ -31,6 +34,7 @@ class ModuleContextProvider:
         visibility_scope: str,
         included: list[dict],
         excluded: list[dict],
+        location: str | None = None,
     ) -> ModuleScope:
         active = self.connection.execute(
             """
@@ -70,6 +74,7 @@ class ModuleContextProvider:
                 current_scene_key=active["current_scene_key"],
                 run_id=active["id"],
                 explicit=True,
+                location=location,
             )
 
         modules = self.connection.execute(
@@ -112,6 +117,7 @@ class ModuleContextProvider:
                 current_scene_key=None,
                 run_id=None,
                 explicit=False,
+                location=location,
             )
         for module in modules:
             excluded.append(
@@ -124,6 +130,100 @@ class ModuleContextProvider:
                 }
             )
         return ModuleScope((), (), None, None, False)
+
+    def infer_action_location(
+        self, module_ids: tuple[str, ...], player_action: str
+    ) -> str | None:
+        """Infer an explicitly named module location from the current action.
+
+        This is deliberately lexical: it identifies a heading the player actually
+        named, but never asks a model to invent movement or scenario semantics.
+        """
+
+        if not module_ids or not player_action.strip():
+            return None
+        placeholders = ",".join("?" for _ in module_ids)
+        rows = self.connection.execute(
+            f"""
+            SELECT DISTINCT title FROM module_chunks
+            WHERE module_id IN ({placeholders})
+            """,
+            module_ids,
+        ).fetchall()
+        action_tokens = tokenize(player_action)
+        ranked: list[tuple[int, int, int, int, int, int, str]] = []
+        action_cjk = set(re.findall(r"[\u3400-\u9fff]", player_action))
+        low_signal_characters = set("的一是在与和及中内外")
+        action_ordinals = self._structural_ordinals(player_action)
+        for row in rows:
+            title = str(row["title"]).strip()
+            if not title:
+                continue
+            title_body = re.split(r"[:：]", title, maxsplit=1)[-1].strip()
+            title_tokens = tokenize(title_body)
+            overlap = len(action_tokens & title_tokens)
+            common = self._longest_common_cjk_run(player_action, title_body)
+            character_overlap = len(
+                (action_cjk - low_signal_characters)
+                & (
+                    set(re.findall(r"[\u3400-\u9fff]", title_body))
+                    - low_signal_characters
+                )
+            )
+            if common < 3 and overlap < 2:
+                continue
+            title_ordinals = self._structural_ordinals(title)
+            ordinal_match = int(bool(action_ordinals & title_ordinals))
+            ordinal_conflict = int(
+                bool(action_ordinals and title_ordinals and not ordinal_match)
+            )
+            # Equal lexical matches should resolve to the shorter, enclosing
+            # scene heading instead of a longer nested room that merely repeats
+            # the same entity name.
+            ranked.append(
+                (
+                    ordinal_match,
+                    -ordinal_conflict,
+                    common,
+                    character_overlap,
+                    overlap,
+                    -len(title),
+                    title,
+                )
+            )
+        if not ranked:
+            return None
+        ranked.sort(reverse=True)
+        return ranked[0][6]
+
+    @staticmethod
+    def _structural_ordinals(text: str) -> set[str]:
+        values: set[str] = set()
+        for pattern in (
+            r"(?:场景|房间|章节)\s*(\d+)",
+            r"(\d+)\s*号(?:房间|房|车厢|门|储藏室)?",
+        ):
+            values.update(re.findall(pattern, text))
+        return values
+
+    @staticmethod
+    def _longest_common_cjk_run(left: str, right: str) -> int:
+        """Return longest shared contiguous CJK run with bounded linear memory."""
+
+        left_cjk = "".join(re.findall(r"[\u3400-\u9fff]", left))
+        right_cjk = "".join(re.findall(r"[\u3400-\u9fff]", right))
+        if not left_cjk or not right_cjk:
+            return 0
+        previous = [0] * (len(right_cjk) + 1)
+        longest = 0
+        for left_char in left_cjk:
+            current = [0]
+            for index, right_char in enumerate(right_cjk, start=1):
+                length = previous[index - 1] + 1 if left_char == right_char else 0
+                current.append(length)
+                longest = max(longest, length)
+            previous = current
+        return longest
 
     def add_approved_knowledge(
         self,
@@ -193,10 +293,23 @@ class ModuleContextProvider:
         ).fetchall()
         query_tokens = self._action_query_tokens(player_action)
         current_scene = str(scope.current_scene_key or "")
+        current_location = str(scope.location or "").strip()
+        section_anchors = {
+            (str(row["module_id"]), int(row["order_index"]))
+            for row in rows
+            if current_location
+            and self._confirmed_context_matches(current_location, str(row["title"]))
+        }
         ranked: list[dict] = []
         for row in rows:
+            style_annotations = tuple(json.loads(row["style_annotations_json"] or "[]"))
+            is_scene_baseline = self._player_scene_baseline_allowed(
+                semantic_kind=str(row["semantic_kind"]),
+                style_annotations=style_annotations,
+                text=str(row["text"]),
+            )
             source = {
-                "kind": "module_chunk",
+                "kind": "module_scene_baseline" if is_scene_baseline else "module_chunk",
                 "id": row["id"],
                 "label": row["title"],
                 "content": row["text"],
@@ -205,37 +318,135 @@ class ModuleContextProvider:
                 "module_id": row["module_id"],
                 "source_locator": row["source_locator"],
                 "semantic_kind": row["semantic_kind"],
+                "required": is_scene_baseline,
             }
             if not self._spoiler_visible(row["spoiler_tag"], scope.spoiler_tags):
                 source["excluded_reason"] = "spoiler_not_active"
                 excluded.append(self._without_content(source))
                 continue
             searchable = f"{row['title']} {row['text']} {row['scene_key'] or ''}"
-            score = len(query_tokens & tokenize(searchable))
+            lexical_overlap = len(query_tokens & tokenize(searchable))
+            score = lexical_overlap
+            score_components: dict[str, int] = {"lexical_overlap": lexical_overlap}
             if current_scene and row["scene_key"] == current_scene:
                 score += 5
+                score_components["current_scene"] = 5
+            # 玩家所在位置的剧情块优先进上下文：AI 需要知道当前位置发生了什么，
+            # 而不是只按玩家行动的关键词匹配（否则会漏掉当前位置的既定剧情节点）。
+            if current_location and current_location in searchable:
+                score += 10
+                score_components["exact_location"] = 10
+            confirmed_context_match = bool(
+                current_location
+                and self._confirmed_context_matches(current_location, searchable)
+            )
+            section_distance = self._following_section_distance(
+                str(row["module_id"]),
+                int(row["order_index"]),
+                section_anchors,
+            )
+            if section_distance is not None:
+                # Rules and reactions are commonly placed immediately after a
+                # location's boxed/read-aloud text under child headings. Keep a
+                # bounded structural neighbourhood so retrieval does not discard
+                # them merely because the child heading has a different title.
+                confirmed_context_match = True
+                section_bonus = max(2, 10 - section_distance // 2)
+                score += section_bonus
+                score_components["section_neighbourhood"] = section_bonus
+            if confirmed_context_match:
+                score += 10
+                score_components["confirmed_context"] = 10
             if score == 0:
                 source["excluded_reason"] = "not_relevant"
                 excluded.append(self._without_content(source))
                 continue
             source["score"] = score
+            source["score_components"] = score_components
+            source["_confirmed_context_match"] = confirmed_context_match
+            source["_section_distance"] = section_distance
             ranked.append(source)
-        ranked.sort(key=lambda item: (-item["score"], item["id"]))
-        included.extend(ranked[:4])
-        for source in ranked[4:]:
+        ranked.sort(key=self._source_rank_key)
+        confirmed_matches = [
+            source for source in ranked if source["_confirmed_context_match"]
+        ]
+        if confirmed_matches:
+            for source in ranked:
+                if source["_confirmed_context_match"]:
+                    continue
+                source.pop("_confirmed_context_match", None)
+                source.pop("_section_distance", None)
+                source["excluded_reason"] = "outside_confirmed_action_context"
+                excluded.append(self._without_content(source))
+            ranked = confirmed_matches
+        for source in ranked:
+            source.pop("_confirmed_context_match", None)
+            source.pop("_section_distance", None)
+        included.extend(ranked[:8])
+        for source in ranked[8:]:
             source["excluded_reason"] = "module_chunk_limit"
             excluded.append(self._without_content(source))
 
     @staticmethod
     def _action_query_tokens(player_action: str) -> set[str]:
-        """Add narrow rules cues for risky and social intents before ranking."""
-        normalized = player_action.casefold()
-        cues = ""
-        if any(term in normalized for term in ("跳车", "跳下列车", "jump off")):
-            cues += " 灵感 智力 INT 跳跃 伤害 风险"
-        if any(term in normalized for term in ("亲属", "冒充", "欺骗", "说谎", "lost relative")):
-            cues += " 话术 说服 魅惑 心理学 欺骗 亲属"
-        return tokenize(player_action + cues)
+        """Tokenize the action without injecting scenario-specific semantics."""
+
+        return tokenize(player_action)
+
+    @staticmethod
+    def _confirmed_context_matches(context_target: str, searchable: str) -> bool:
+        """Match a confirmed prior target without scenario-specific vocabulary."""
+
+        target_tokens = tokenize(context_target)
+        if len(target_tokens) < 2:
+            return False
+        overlap = len(target_tokens & tokenize(searchable))
+        return overlap >= max(2, math.ceil(len(target_tokens) * 0.6))
+
+    @staticmethod
+    def _following_section_distance(
+        module_id: str,
+        order_index: int,
+        anchors: set[tuple[str, int]],
+        *,
+        max_distance: int = 12,
+    ) -> int | None:
+        distances = (
+            order_index - anchor_index
+            for anchor_module_id, anchor_index in anchors
+            if anchor_module_id == module_id
+            and 0 <= order_index - anchor_index <= max_distance
+        )
+        return min(distances, default=None)
+
+    @staticmethod
+    def _source_rank_key(source: dict) -> tuple[bool, int, int, str]:
+        section_distance = source.get("_section_distance")
+        return (
+            section_distance is None,
+            int(section_distance) if section_distance is not None else 10_000,
+            -int(source["score"]),
+            str(source["id"]),
+        )
+
+    @staticmethod
+    def _player_scene_baseline_allowed(
+        *,
+        semantic_kind: str,
+        style_annotations: tuple[str, ...],
+        text: str,
+    ) -> bool:
+        """Accept formatted read-aloud text while excluding role-only guidance."""
+
+        if semantic_kind != "text" or "italic" not in style_annotations:
+            return False
+        role_only_markers = re.compile(
+            r"(?:给\s*(?:守密人|主持人|kp)\s*的?\s*(?:提示|建议)|"
+            r"(?:守密人|主持人|keeper|game\s*master|\bkp\b)\s*"
+            r"(?:应当|应该|可以|必须|需要|注意|提示|建议))",
+            re.IGNORECASE,
+        )
+        return role_only_markers.search(text) is None
 
     def _candidate_sources(
         self,
@@ -334,9 +545,46 @@ class ModuleContextProvider:
             """,
             (*scope.module_ids, *visibility, *visibility),
         ).fetchall()
+        statements_by_entity: dict[str, list[dict]] = {}
+        entity_ids = [str(row["id"]) for row in rows]
+        if entity_ids:
+            entity_placeholders = ",".join("?" for _ in entity_ids)
+            statement_rows = self.connection.execute(
+                f"""
+                SELECT ec.entity_id, c.statement, c.spoiler_tag
+                FROM module_entity_candidates ec
+                JOIN module_entities linked_entity ON linked_entity.id = ec.entity_id
+                JOIN module_knowledge_candidates c ON c.id = ec.candidate_id
+                WHERE ec.entity_id IN ({entity_placeholders})
+                  AND c.module_id = linked_entity.module_id
+                  AND c.status = 'approved'
+                  AND c.visibility IN ({visibility_placeholders})
+                ORDER BY ec.entity_id, c.created_at, c.id
+                """,
+                (*entity_ids, *visibility),
+            ).fetchall()
+            for statement_row in statement_rows:
+                statements_by_entity.setdefault(
+                    str(statement_row["entity_id"]), []
+                ).append(statement_row)
         ranked: list[tuple[int, dict]] = []
         current_scene = str(scope.current_scene_key or "")
         for row in rows:
+            # Aggregate every approved statement attached to this entity via the
+            # junction table so the AI sees all confirmed facts (shock, bite
+            # mark, keys, devouring) about the same world entity.
+            related_statements = [
+                str(statement_row["statement"])
+                for statement_row in statements_by_entity.get(str(row["id"]), ())
+                if self._spoiler_visible(
+                    statement_row["spoiler_tag"], scope.spoiler_tags
+                )
+            ]
+            related_facts = ""
+            if related_statements:
+                related_facts = "；相关事实：" + "；".join(
+                    statement for statement in related_statements if statement
+                )
             source = {
                 "kind": "module_entity",
                 "id": row["id"],
@@ -344,6 +592,7 @@ class ModuleContextProvider:
                 "content": (
                     f"类型：{row['entity_type']}；描述：{row['description'] or '无'}；"
                     f"批准来源：{row['source_candidate_id']}"
+                    f"{related_facts}"
                 ),
                 "visibility": row["visibility"],
                 "spoiler_tag": row["spoiler_tag"],
@@ -369,7 +618,10 @@ class ModuleContextProvider:
                 source["excluded_reason"] = "spoiler_not_active"
                 excluded.append(self._without_content(source))
                 continue
-            searchable = f"{row['name']} {row['description']}"
+            searchable = (
+                f"{row['name']} {row['description']} "
+                f"{' '.join(related_statements)}"
+            )
             score = len(query_tokens & tokenize(searchable))
             if current_scene and current_scene in searchable:
                 score += 4

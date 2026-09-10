@@ -464,6 +464,56 @@ class InvestigatorRepository(SQLiteRepository):
         result["reviews"] = [row_to_dict(item) for item in reviews]
         return result
 
+    def get_campaign_investigator_by_legacy_pc(
+        self, campaign_id: str, legacy_pc_id: str
+    ) -> dict:
+        row = self.connection.execute(
+            """
+            SELECT investigator_id FROM campaign_investigators
+            WHERE campaign_id = ? AND legacy_pc_id = ?
+              AND approved_revision_id IS NOT NULL
+            """,
+            (campaign_id, legacy_pc_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Approved campaign investigator not found for PC: {legacy_pc_id}")
+        return self.get_campaign_investigator(campaign_id, str(row["investigator_id"]))
+
+    def approve_and_assign_investigator(
+        self,
+        *,
+        campaign_id: str,
+        investigator_id: str,
+        comment: str,
+        kp_member_id: str,
+        player_member_id: str,
+        session_id: str,
+    ) -> dict:
+        """Atomically approve a submitted revision and bind its player's seat."""
+
+        self.connection.execute("SAVEPOINT auto_approve_investigator")
+        try:
+            self.review_campaign_investigator(
+                campaign_id=campaign_id,
+                investigator_id=investigator_id,
+                action="approved",
+                comment=comment,
+                kp_member_id=kp_member_id,
+                session_id=session_id,
+            )
+            self.assign_approved_investigator(
+                session_id=session_id,
+                member_id=player_member_id,
+                investigator_id=investigator_id,
+            )
+            result = self.get_campaign_investigator(campaign_id, investigator_id)
+            self.connection.execute("RELEASE SAVEPOINT auto_approve_investigator")
+            return result
+        except Exception:
+            self.connection.execute("ROLLBACK TO SAVEPOINT auto_approve_investigator")
+            self.connection.execute("RELEASE SAVEPOINT auto_approve_investigator")
+            raise
+
     def list_campaign_investigators(
         self, campaign_id: str, owner_profile_id: str | None = None
     ) -> list[dict]:

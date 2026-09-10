@@ -21,12 +21,14 @@ class ModelConfigurationRepository:
         model: str,
         local_model_path: str | None,
         local_port: int,
+        semantic_profile: str,
     ) -> dict:
         self.connection.execute(
             """
             INSERT INTO model_configuration
-              (id, provider_type, base_url, api_key, model, local_model_path, local_port)
-            VALUES (1, ?, ?, ?, ?, ?, ?)
+              (id, provider_type, base_url, api_key, model, local_model_path, local_port,
+               semantic_profile)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               provider_type = excluded.provider_type,
               base_url = excluded.base_url,
@@ -34,6 +36,8 @@ class ModelConfigurationRepository:
               model = excluded.model,
               local_model_path = excluded.local_model_path,
               local_port = excluded.local_port,
+              semantic_profile = excluded.semantic_profile,
+              version = model_configuration.version + 1,
               updated_at = CURRENT_TIMESTAMP
             """,
             (
@@ -43,6 +47,7 @@ class ModelConfigurationRepository:
                 model,
                 local_model_path,
                 local_port,
+                semantic_profile,
             ),
         )
         result = self.get_model_configuration()

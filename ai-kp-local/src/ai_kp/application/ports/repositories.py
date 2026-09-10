@@ -1,15 +1,19 @@
 """Narrow persistence ports for application services."""
 
+from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
 from ai_kp.application.ports.ai_control import AiControlStore
 from ai_kp.application.ports.dynamic_branches import DynamicBranchStore
+from ai_kp.application.ports.world_entities import WorldEntityStateStore
 from ai_kp.platform.memory.npc_candidates import NpcCandidate
 from ai_kp.platform.memory.retrieval import RetrievedMemory
 from ai_kp.platform.modules.graph import ModuleEntityCreate, ModuleRelationCreate
 from ai_kp.platform.modules.ingestion import ModuleChunk
 from ai_kp.platform.modules.knowledge import ModuleKnowledgeCandidate
+from ai_kp.platform.resolution.parallel_batch_state import ParallelBatchEvent
 from ai_kp.platform.scenes.map_generation import GeneratedMap
+from ai_kp.platform.sessions.session_zero import CampaignSetupConfig
 
 
 class CampaignStore(Protocol):
@@ -23,6 +27,7 @@ class CampaignStore(Protocol):
         ruleset_version: str,
         character_schema_version: str,
         event_schema_version: str,
+        session_zero_required: bool = False,
     ) -> dict: ...
 
     def get_campaign(self, campaign_id: str) -> dict: ...
@@ -51,6 +56,10 @@ class GameplayStore(Protocol):
 
     def list_coc7_gameplay_events(self, **values: Any) -> list[dict[str, Any]]: ...
 
+    def find_coc7_gameplay_event(
+        self, session_id: str, command_id: str
+    ) -> dict[str, Any] | None: ...
+
     def transition_coc7_encounter(
         self, encounter_id: str, **values: Any
     ) -> dict[str, Any]: ...
@@ -60,6 +69,8 @@ class GameplayStore(Protocol):
     def append_event(self, *args: Any, **values: Any) -> dict: ...
 
     def create_permanent_change_proposal(self, **values: Any) -> dict: ...
+
+    def get_encounter_action_request(self, request_id: str) -> dict[str, Any]: ...
 
 
 class SkillGrowthStore(Protocol):
@@ -280,9 +291,22 @@ class ModuleGraphStore(Protocol):
         entity: ModuleEntityCreate,
         *,
         member_id: str,
+        extra_candidate_ids: tuple[str, ...] = (),
     ) -> dict: ...
 
     def get_module_entity(self, entity_id: str) -> dict: ...
+
+    def find_module_entity(
+        self,
+        module_id: str,
+        *,
+        entity_type: str,
+        normalized_name: str,
+    ) -> dict | None: ...
+
+    def list_entity_candidates(self, entity_id: str) -> list[dict]: ...
+
+    def link_candidate_to_entity(self, entity_id: str, candidate_id: str) -> dict: ...
 
     def create_module_relation(
         self,
@@ -317,8 +341,29 @@ class ModuleGraphStore(Protocol):
     def list_module_campaign_imports(self, campaign_id: str) -> list[dict]: ...
 
 
-class ModuleRunStore(Protocol):
+class ModuleEntityMaterializationStore(
+    ModuleKnowledgeStore,
+    ModuleGraphStore,
+    Protocol,
+):
+    def begin_immediate(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
+    def list_module_knowledge_candidates(
+        self,
+        module_id: str,
+        *,
+        status: str | None = None,
+    ) -> list[dict]: ...
+
+
+class ModuleRunStore(ModuleEntityMaterializationStore, Protocol):
     def get_active_campaign_module_run(self, campaign_id: str) -> dict | None: ...
+
+    def list_campaign_module_runs(
+        self, campaign_id: str, *, limit: int = 50, offset: int = 0
+    ) -> list[dict]: ...
 
     def get_campaign_module_run(self, run_id: str) -> dict: ...
 
@@ -411,7 +456,67 @@ class ModuleRunStore(Protocol):
     ) -> dict: ...
 
 
+class DirectorHelpAuditStore(Protocol):
+    """Write/list boundary for append-only human-KP advice audit events."""
+
+    def append_director_help_audit_event(
+        self,
+        *,
+        attempt_id: str,
+        campaign_id: str,
+        run_id: str,
+        requested_by_member_id: str | None,
+        request_id: str,
+        event_type: str,
+        question: str | None = None,
+        advice: dict[str, Any] | None = None,
+        response_hash: str | None = None,
+        error_code: str | None = None,
+        duration_ms: int | None = None,
+    ) -> dict[str, Any]: ...
+
+    def list_director_help_audits(
+        self,
+        campaign_id: str,
+        limit: int,
+        before_id: str | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    def append_abandoned_director_help_terminals(self, *, error_code: str) -> int: ...
+
+
+class DirectorHelpStore(AiControlStore, Protocol):
+    """Read boundary for source-grounded, state-fenced human-KP advice."""
+
+    def get_campaign_module_run(self, run_id: str) -> dict: ...
+
+    def get_module_run_contract_binding(self, run_id: str) -> dict[str, Any]: ...
+
+    def get_scenario_run_state(self, run_id: str) -> dict[str, Any]: ...
+
+    def search_module(
+        self,
+        module_id: str,
+        query: str,
+        *,
+        allowed_visibility: tuple[str, ...],
+        spoiler_tags: tuple[str, ...] | None,
+        limit: int = 12,
+    ) -> list[dict]: ...
+
+    def find_rule_source(self, ruleset_id: str) -> dict: ...
+
+    def lexical_rule_chunks(
+        self,
+        source_id: str,
+        query: str,
+        limit: int = 8,
+    ) -> list[dict]: ...
+
+
 class CheckStore(CampaignStore, SkillGrowthStore, Protocol):
+    def begin_immediate(self) -> None: ...
+
     def create_skill_check(
         self,
         *,
@@ -433,6 +538,7 @@ class CheckStore(CampaignStore, SkillGrowthStore, Protocol):
         proposal_id: str | None = None,
         player_action_id: str | None = None,
         pushed_from_check_id: str | None = None,
+        check_plan: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
     def get_skill_check(self, check_id: str) -> dict[str, Any]: ...
@@ -447,6 +553,10 @@ class CheckStore(CampaignStore, SkillGrowthStore, Protocol):
         self,
         player_action_id: str,
     ) -> list[dict[str, Any]]: ...
+
+    def get_parallel_action_batch_for_action(
+        self, action_id: str
+    ) -> dict[str, Any] | None: ...
 
     def create_opposed_check(
         self,
@@ -473,7 +583,7 @@ class CheckStore(CampaignStore, SkillGrowthStore, Protocol):
         self,
         opposed_check_id: str,
         *,
-        actor_member_id: str,
+        actor_member_id: str | None,
         result: dict[str, Any],
     ) -> dict[str, Any]: ...
 
@@ -506,6 +616,14 @@ class CheckStore(CampaignStore, SkillGrowthStore, Protocol):
     ) -> dict[str, Any]: ...
 
     def push_skill_check(
+        self,
+        check_id: str,
+        *,
+        actor_member_id: str,
+        reason: str,
+    ) -> dict[str, Any]: ...
+
+    def decline_skill_check_push(
         self,
         check_id: str,
         *,
@@ -595,6 +713,17 @@ class InvestigatorStore(Protocol):
         investigator_id: str,
     ) -> dict: ...
 
+    def approve_and_assign_investigator(
+        self,
+        *,
+        campaign_id: str,
+        investigator_id: str,
+        comment: str,
+        kp_member_id: str,
+        player_member_id: str,
+        session_id: str,
+    ) -> dict: ...
+
     def list_public_campaign_investigators(self, campaign_id: str) -> list[dict]: ...
 
     def update_investigator_campaign_state(
@@ -635,6 +764,8 @@ class CharacterTimelineStore(InvestigatorStore, Protocol):
 
 
 class SessionStore(Protocol):
+    def get_campaign(self, campaign_id: str) -> dict: ...
+
     def create_campaign_session(
         self,
         campaign_id: str,
@@ -643,11 +774,14 @@ class SessionStore(Protocol):
         kp_display_name: str = "KP",
     ) -> dict: ...
 
+    def create_initial_episode(self, campaign_id: str, session_id: str) -> dict: ...
+
     def join_campaign_session(
         self,
         join_code: str,
         *,
         display_name: str,
+        role: str = "player",
     ) -> dict: ...
 
     def reissue_campaign_kp_access_token(
@@ -695,7 +829,34 @@ class SessionStore(Protocol):
 
     def reissue_seat_invitation(self, session_id: str, seat_id: str) -> dict: ...
 
+    def create_session_zero_revision(
+        self,
+        *,
+        campaign_id: str,
+        config: CampaignSetupConfig,
+        expected_version: int,
+        actor_member_id: str,
+    ) -> dict: ...
+
+    def get_current_session_zero_revision(self, campaign_id: str) -> dict | None: ...
+
 class WorldStore(RealtimeOutbox, Protocol):
+    def get_active_campaign_module_run(self, campaign_id: str) -> dict | None: ...
+
+    def get_module_run_contract_binding(self, run_id: str) -> dict: ...
+
+    def list_module_entities(self, module_id: str) -> list[dict]: ...
+
+    def get_campaign_world_entity(self, entity_id: str) -> dict: ...
+
+    def list_campaign_world_entities(self, campaign_id: str) -> list[dict]: ...
+
+    def list_campaign_world_entity_relations(self, campaign_id: str) -> list[dict]: ...
+
+    def list_campaign_world_entity_states(self, campaign_id: str) -> list[dict]: ...
+
+    def list_campaign_world_entity_state_changes(self, campaign_id: str) -> list[dict]: ...
+
     def require_approved_contact_investigators(
         self,
         campaign_id: str,
@@ -984,14 +1145,187 @@ class RulebookStore(Protocol):
     ) -> list[dict]: ...
 
 
+class ParallelActionBatchStore(Protocol):
+    def begin_parallel_action_workflow(self) -> None: ...
+
+    def finish_parallel_action_workflow(self) -> None: ...
+
+    def rollback_parallel_action_workflow(self) -> None: ...
+
+    def create_parallel_action_batch(
+        self,
+        *,
+        campaign_id: str,
+        session_id: str,
+        run_id: str,
+        module_run_version: int,
+        contract_version_id: str,
+        base_state_version: int,
+        idempotency_key: str,
+        items: Sequence[Mapping[str, Any]],
+        created_by_member_id: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    def get_parallel_action_batch(self, batch_id: str) -> dict[str, Any]: ...
+
+    def create_parallel_action_regather(
+        self,
+        source_batch_id: str,
+        *,
+        actor_member_id: str,
+        reason: str,
+    ) -> dict[str, Any]: ...
+
+    def get_parallel_action_regather(
+        self, regather_id: str
+    ) -> dict[str, Any]: ...
+
+    def get_active_parallel_action_regather_for_member(
+        self,
+        campaign_id: str,
+        session_id: str,
+        member_id: str,
+    ) -> dict[str, Any] | None: ...
+
+    def register_parallel_action_regather_submission(
+        self,
+        regather_id: str,
+        action_id: str,
+        *,
+        actor_member_id: str,
+        expected_version: int,
+        auto_kp_requested: bool,
+    ) -> dict[str, Any]: ...
+
+    def mark_parallel_action_regather_queued(
+        self,
+        regather_id: str,
+        *,
+        expected_version: int,
+        prepare_job_id: str,
+    ) -> dict[str, Any]: ...
+
+    def complete_parallel_action_regather(
+        self,
+        regather_id: str,
+        *,
+        resulting_batch_id: str | None,
+    ) -> dict[str, Any]: ...
+
+    def reopen_parallel_action_regather(
+        self,
+        regather_id: str,
+        *,
+        expected_prepare_job_id: str,
+        reason: str,
+    ) -> dict[str, Any]: ...
+
+    def cancel_parallel_action_regather(
+        self,
+        regather_id: str,
+        *,
+        expected_version: int,
+        actor_member_id: str,
+        reason: str,
+    ) -> dict[str, Any]: ...
+
+    def list_parallel_action_batch_coordinator_summaries(
+        self,
+        campaign_id: str,
+        session_id: str,
+        *,
+        status: str,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]: ...
+
+    def get_parallel_action_abandonment_decision(
+        self, batch_id: str
+    ) -> dict[str, Any]: ...
+
+    def get_parallel_action_batch_by_key(
+        self, campaign_id: str, idempotency_key: str
+    ) -> dict[str, Any]: ...
+
+    def get_active_parallel_action_batch_for_action(
+        self, action_id: str
+    ) -> dict[str, Any] | None: ...
+
+    def get_active_parallel_action_batch_for_member(
+        self,
+        campaign_id: str,
+        session_id: str,
+        member_id: str,
+    ) -> dict[str, Any] | None: ...
+
+    def get_parallel_action_batch_for_action(
+        self, action_id: str
+    ) -> dict[str, Any] | None: ...
+
+    def validate_parallel_action_batch_authority(
+        self, batch_id: str
+    ) -> dict[str, Any]: ...
+
+    def validate_parallel_action_batch_settlement(
+        self, batch_id: str
+    ) -> dict[str, Any]: ...
+
+    def dispose_superseded_parallel_actions(
+        self,
+        batch_id: str,
+        *,
+        actor_member_id: str,
+        reason: str,
+    ) -> dict[str, Any]: ...
+
+    def record_parallel_action_item_decision(
+        self,
+        batch_id: str,
+        action_id: str,
+        *,
+        expected_version: int,
+        selected_skill_key: str | None = None,
+        outcome_key: str | None = None,
+        check_result_fingerprint: str | None = None,
+        actor_member_id: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    def rebind_parallel_action_item_skill(
+        self,
+        batch_id: str,
+        action_id: str,
+        *,
+        expected_batch_version: int,
+        expected_adjudication_version: int,
+        selected_skill_key: str,
+        preview: Mapping[str, Any],
+        narrative: Mapping[str, Any],
+        actor_member_id: str,
+    ) -> dict[str, Any]: ...
+
+    def transition_parallel_action_batch(
+        self,
+        batch_id: str,
+        event: ParallelBatchEvent,
+        *,
+        expected_version: int,
+        actor_member_id: str | None = None,
+        reason: str = "",
+        settlement_hash: str | None = None,
+        scenario_command_batch_id: str | None = None,
+    ) -> dict[str, Any]: ...
+
+
 class TurnStore(
     CheckStore,
     ModuleRunStore,
     RealtimeOutbox,
     DynamicBranchStore,
+    WorldEntityStateStore,
     Protocol,
 ):
     def begin_immediate(self) -> None: ...
+
+    def player_action_block_reason(self, identity: Any) -> str | None: ...
 
     def create_player_action(
         self,
@@ -1007,6 +1341,12 @@ class TurnStore(
 
     def create_turn_proposal(self, **values: Any) -> dict: ...
 
+    def begin_proposal_application(self) -> None: ...
+
+    def finish_proposal_application(self) -> None: ...
+
+    def rollback_proposal_application(self) -> None: ...
+
     def link_player_action_to_proposal(
         self,
         action_id: str,
@@ -1019,6 +1359,8 @@ class TurnStore(
     def is_session_member_active(self, member_id: str, session_id: str) -> bool: ...
 
     def get_turn_proposal(self, proposal_id: str) -> dict: ...
+
+    def get_parallel_action_batch(self, batch_id: str) -> dict[str, Any]: ...
 
     def list_fact_heads(self, campaign_id: str) -> list[Any]: ...
 
@@ -1093,6 +1435,17 @@ class TurnStore(
         override_public_narration: str | None = None,
     ) -> dict: ...
 
+    def approve_parallel_turn_proposal(
+        self,
+        proposal_id: str,
+        *,
+        batch_id: str,
+        phase: str,
+        actor: str,
+        note: str = "",
+        override_public_narration: str | None = None,
+    ) -> dict: ...
+
     def player_action_id_for_proposal(self, proposal_id: str) -> str | None: ...
 
     def reject_turn_proposal(
@@ -1114,8 +1467,11 @@ class TurnStore(
 __all__ = [
     "CampaignStore",
     "CheckStore",
+    "DirectorHelpAuditStore",
+    "DirectorHelpStore",
     "InvestigatorStore",
     "MapStore",
+    "ParallelActionBatchStore",
     "RealtimeOutbox",
     "RulebookStore",
     "SessionStore",

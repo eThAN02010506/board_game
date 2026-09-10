@@ -163,6 +163,7 @@ def _approved_branch(tmp_path: Path):
             WorldExpansionCommand(
                 run_id=run["id"],
                 player_intent="我去找治安官查旧档案",
+                requested_expansion_kind="reactive_branch",
             ),
             identity,
             DynamicBranchDirector(),

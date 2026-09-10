@@ -265,8 +265,8 @@ class ModuleKnowledgeRepository(SQLiteRepository):
             INSERT INTO module_knowledge_candidates
               (id, module_id, kind, title, statement, rationale, confidence,
                visibility, spoiler_tag, object_hash, created_by, source_model,
-               prompt_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               prompt_version, entity_name, entity_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(module_id, object_hash) DO NOTHING
             """,
             (
@@ -283,6 +283,8 @@ class ModuleKnowledgeRepository(SQLiteRepository):
                 created_by,
                 source_model,
                 prompt_version,
+                candidate.entity_name,
+                candidate.entity_type,
             ),
         )
         row = self.connection.execute(

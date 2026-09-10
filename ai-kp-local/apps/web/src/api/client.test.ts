@@ -2,25 +2,41 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   analyzeModuleRunIntent,
+  askDirectorHelp,
+  abandonParallelActionBatch,
   abandonDynamicBranch,
+  analyzeSettingProfileSettlement,
+  createModuleSettingProfile,
   getCurrentModuleRun,
+  getRunSettingSelection,
   getModuleRunDirectorState,
   generateWorldExpansionProposal,
+  getCurrentParallelActionPlayerBatch,
+  getCurrentParallelActionPlayerRegather,
+  listParallelActionAttentionBatches,
+  listCampaignWorldEntities,
+  listDirectorHelpAudits,
   listDynamicBranches,
   listNpcReappearanceCandidates,
   materializeWorldExpansionEncounter,
   resolveDynamicBranchBeat,
+  resumeParallelActionBatch,
   resumeDynamicBranch,
   listModuleRuns,
+  listModuleSettingProfiles,
+  listSettingCatalogs,
   listRuleReviewCandidates,
   requestJson,
   reviewRuleCandidate,
   settleParallelPlayerActions,
+  setRunSettingSelection,
   startModuleRun,
   transitionModuleRunScene,
   updateAutomationLevel,
+  updateCampaignWorldEntityState,
   updateModuleRunEntityState,
-  updateModuleRun
+  updateModuleRun,
+  updateModuleSettingProfile
 } from "./client";
 
 
@@ -75,6 +91,32 @@ describe("API client", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("keeps the request timeout active while consuming a deferred response body", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      const signal = init?.signal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"ok":'));
+          signal?.addEventListener("abort", () => {
+            controller.error(signal.reason);
+          }, { once: true });
+        }
+      });
+      return new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    });
+
+    const request = requestJson("/deferred-body");
+    const rejection = expect(request).rejects.toThrow(
+      "请求超时，请检查后端或模型服务是否仍在运行"
+    );
+    await vi.advanceTimersByTimeAsync(310_000);
+    await rejection;
   });
 
   it("uses the module-run endpoints and includes optimistic concurrency", async () => {
@@ -225,6 +267,116 @@ describe("API client", () => {
     });
   });
 
+  it("uses versioned setting-profile and run-selection endpoints", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    const regions = [{
+      region_id: "new-england",
+      title: "新英格兰",
+      pattern_id: "county_town_network",
+      role_counts: { nearby: 2 }
+    }];
+    const document = { schema_version: "1" as const, regions, settlements: [] };
+
+    await listSettingCatalogs();
+    await listModuleSettingProfiles("module/1");
+    await createModuleSettingProfile("module/1", {
+      title: "Profile",
+      setting_pack_id: "us.1920s",
+      regions
+    });
+    await updateModuleSettingProfile("profile/1", {
+      expected_version: 1,
+      title: "Profile v2",
+      document
+    });
+    await getRunSettingSelection("run/1");
+    await setRunSettingSelection("run/1", {
+      expected_run_version: 4,
+      profile_id: "profile/1",
+      profile_version: 2,
+      settlement_id: "new-england.hub_1",
+      reason: "当前场景"
+    });
+    await analyzeSettingProfileSettlement(
+      "profile/1",
+      2,
+      "new-england.hub_1"
+    );
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/setting-catalogs",
+      "/api/modules/module%2F1/setting-profiles",
+      "/api/modules/module%2F1/setting-profiles",
+      "/api/setting-profiles/profile%2F1",
+      "/api/module-runs/run%2F1/setting-selection",
+      "/api/module-runs/run%2F1/setting-selection",
+      "/api/setting-profiles/profile%2F1/settlements/new-england.hub_1/analysis?version=2"
+    ]);
+    expect(fetchMock.mock.calls[5]?.[1]).toMatchObject({
+      method: "PUT",
+      body: JSON.stringify({
+        expected_run_version: 4,
+        profile_id: "profile/1",
+        profile_version: 2,
+        settlement_id: "new-england.hub_1",
+        reason: "当前场景"
+      })
+    });
+  });
+
+  it("loads the visibility-filtered campaign world entity graph", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ entities: [], relations: [], state_changes: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await listCampaignWorldEntities("campaign/1");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/campaigns/campaign%2F1/world-entities"
+    );
+  });
+
+  it("submits a versioned campaign world entity state command", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ entity: {}, change: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await updateCampaignWorldEntityState("campaign/1", "entity/1", {
+      expected_version: 2,
+      dimension: "cooperation",
+      value: "guarded",
+      visibility: "kp",
+      idempotency_key: "world-state:test:1",
+      note: "实际交谈后的状态"
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/campaigns/campaign%2F1/world-entities/entity%2F1/states"
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        expected_version: 2,
+        dimension: "cooperation",
+        value: "guarded",
+        visibility: "kp",
+        idempotency_key: "world-state:test:1",
+        note: "实际交谈后的状态"
+      })
+    });
+  });
+
   it("uses the parallel action settlement endpoint", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ status: "approved" }), {
@@ -234,8 +386,7 @@ describe("API client", () => {
     );
 
     await settleParallelPlayerActions("camp/1", {
-      action_ids: ["action/1", "action/2"],
-      auto_approve: true
+      action_ids: ["action/1", "action/2"]
     });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
@@ -244,9 +395,87 @@ describe("API client", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       method: "POST",
       body: JSON.stringify({
-        action_ids: ["action/1", "action/2"],
-        auto_approve: true
+        action_ids: ["action/1", "action/2"]
       })
+    });
+  });
+
+  it("loads only the current player's parallel batch projection", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("null", {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await expect(getCurrentParallelActionPlayerBatch("camp/1")).resolves.toBeNull();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/campaigns/camp%2F1/parallel-action-batches/current",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+  });
+
+  it("loads the KP recovery index with an explicit safe status filter", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("[]", {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await expect(
+      listParallelActionAttentionBatches("camp/1")
+    ).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/campaigns/camp%2F1/parallel-action-batches?status=needs_attention",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+  });
+
+  it("loads only the current player's safe parallel regather projection", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("null", {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await expect(
+      getCurrentParallelActionPlayerRegather("camp/1")
+    ).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/campaigns/camp%2F1/parallel-action-regathers/current",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+  });
+
+  it("binds parallel recovery commands to the exact batch version and reason", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response("{}", {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    const payload = { expected_version: 7, reason: "KP verified frozen authority." };
+
+    await resumeParallelActionBatch("batch/1", payload);
+    await abandonParallelActionBatch("batch/1", payload);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/parallel-action-batches/batch%2F1/resume"
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "/api/parallel-action-batches/batch%2F1/abandon"
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify(payload)
     });
   });
 
@@ -315,5 +544,91 @@ describe("API client", () => {
       "/api/campaigns/camp%2F1/npc-reappearance-candidates?query=%E6%8A%A5%E7%A4%BE+%E7%BA%BF%E4%BA%BA",
       expect.any(Object)
     );
+  });
+
+  it("posts a director help question to the encoded module run", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    const currentRunController = new AbortController();
+    const helpController = new AbortController();
+    await getCurrentModuleRun("camp/1", { signal: currentRunController.signal });
+    await askDirectorHelp(
+      "run/1",
+      "玩家想保护被害人，我该怎么办？",
+      { signal: helpController.signal }
+    );
+
+    expect(fetchMock.mock.calls[0]).toEqual([
+      "/api/campaigns/camp%2F1/module-runs/current",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    ]);
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).not.toBe(currentRunController.signal);
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/module-runs/run%2F1/director/help",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ question: "玩家想保护被害人，我该怎么办？" }),
+        signal: expect.any(AbortSignal)
+      })
+    ]);
+    expect(fetchMock.mock.calls[1]?.[1]?.signal).not.toBe(helpController.signal);
+  });
+
+  it("lets callers abort current-run lookup and director help requests", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      const signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+
+    const currentRunController = new AbortController();
+    const currentRunRequest = getCurrentModuleRun("camp/1", {
+      signal: currentRunController.signal
+    });
+    const currentRunRejection = expect(currentRunRequest).rejects.toMatchObject({
+      name: "AbortError"
+    });
+    currentRunController.abort();
+    await currentRunRejection;
+
+    const helpController = new AbortController();
+    const helpRequest = askDirectorHelp("run/1", "现在怎么办？", {
+      signal: helpController.signal
+    });
+    const helpRejection = expect(helpRequest).rejects.toMatchObject({
+      name: "AbortError"
+    });
+    helpController.abort();
+    await helpRejection;
+  });
+
+  it("encodes director-help audit pagination and lets callers abort it", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      const signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+
+    const controller = new AbortController();
+    const request = listDirectorHelpAudits("camp/1", {
+      limit: 10,
+      beforeId: "audit/older cursor",
+      signal: controller.signal
+    });
+    const rejection = expect(request).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/campaigns/camp%2F1/director-help/audits?limit=10&before_id=audit%2Folder+cursor",
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    controller.abort();
+    await rejection;
   });
 });

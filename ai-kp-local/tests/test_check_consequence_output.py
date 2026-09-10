@@ -3,6 +3,9 @@ import unittest
 
 from ai_kp.director.check_consequence import (
     check_consequence_output_instructions,
+    enforce_effect_ceiling_consistency,
+    enforce_failure_consistency,
+    enforce_narrative_quality,
     parse_check_consequence_output,
 )
 from ai_kp.director.turn_output import StructuredOutputError
@@ -175,6 +178,137 @@ class CheckConsequenceOutputTests(unittest.TestCase):
         self.assertIn(HIDDEN_CHECK_PUBLIC_NARRATION, instructions)
         self.assertIn('visibility 必须全部为 "kp"', instructions)
         self.assertIn("proposed_npc_updates 必须为空", instructions)
+
+    def test_failed_check_rejects_success_hidden_in_structured_effects(self) -> None:
+        candidate = payload()
+        candidate["public_narration"] = "你没有从表面看出任何异常。"
+        output = parse_check_consequence_output(
+            json.dumps(candidate, ensure_ascii=False)
+        )
+
+        with self.assertRaisesRegex(StructuredOutputError, "cannot claim or persist"):
+            enforce_failure_consistency(output, all_checks_passed=False)
+
+    def test_failed_check_allows_explicit_failure_consequences(self) -> None:
+        candidate = payload()
+        candidate["public_narration"] = "你没有找到收据，翻动文件的声音惊动了守卫。"
+        candidate["proposed_events"] = [
+            {
+                "event_type": "guard_alerted",
+                "summary": "搜索失败惊动了守卫。",
+                "actor_type": "environment",
+                "actor_id": None,
+                "visibility": "table",
+                "happened_at": None,
+                "payload": {},
+            }
+        ]
+        output = parse_check_consequence_output(
+            json.dumps(candidate, ensure_ascii=False)
+        )
+
+        self.assertIs(
+            enforce_failure_consistency(output, all_checks_passed=False),
+            output,
+        )
+
+    def test_failed_social_check_rejects_implicit_partial_success(self) -> None:
+        candidate = payload()
+        candidate["public_narration"] = (
+            "你未能说服列车长交出钥匙，但他暂时相信了你的亲属说法，愿意继续让步。"
+        )
+        candidate["proposed_events"] = []
+        candidate["proposed_memories"] = []
+        output = parse_check_consequence_output(
+            json.dumps(candidate, ensure_ascii=False)
+        )
+
+        with self.assertRaisesRegex(StructuredOutputError, "cannot claim or persist"):
+            enforce_failure_consistency(output, all_checks_passed=False)
+
+    def test_dangerous_jump_ceiling_rejects_safe_landing_even_on_success(self) -> None:
+        candidate = payload()
+        candidate["public_narration"] = "你从高速列车跳下，却毫发无伤地安全落地。"
+        candidate["proposed_events"] = []
+        candidate["proposed_memories"] = []
+        output = parse_check_consequence_output(
+            json.dumps(candidate, ensure_ascii=False)
+        )
+
+        with self.assertRaisesRegex(StructuredOutputError, "effect constraint"):
+            enforce_effect_ceiling_consistency(
+                output,
+                forbidden_outcome_claims=("毫发无伤", "安全落地"),
+            )
+
+    def test_rejects_weak_model_clause_loops(self) -> None:
+        candidate = payload()
+        candidate["public_narration"] = (
+            "你撞向车门，车门被撞到，车门扉跳下，车门被撞到，"
+            "你跌落，车门扉跳下，车门被撞到，车门扉跳下，"
+            "你跌落，车门被撞到，车门扉跳下，车门被撞到。"
+        )
+        candidate["proposed_events"] = []
+        candidate["proposed_memories"] = []
+        output = parse_check_consequence_output(
+            json.dumps(candidate, ensure_ascii=False)
+        )
+
+        with self.assertRaisesRegex(StructuredOutputError, "repeated clauses"):
+            enforce_narrative_quality(output)
+
+    def test_failed_check_rejects_success_event_type_and_payload_state(self) -> None:
+        for event_type, event_payload in (
+            ("door_opened", {}),
+            ("environment_changed", {"door": {"state": "opened"}}),
+            ("environment_changed", {"clue": {"discovered": True}}),
+        ):
+            with self.subTest(event_type=event_type, payload=event_payload):
+                candidate = payload()
+                candidate["public_narration"] = "你没能打开驾驶室的门。"
+                candidate["proposed_events"] = [
+                    {
+                        "event_type": event_type,
+                        "summary": "门锁和周围环境保持原状。",
+                        "actor_type": "environment",
+                        "actor_id": None,
+                        "visibility": "table",
+                        "happened_at": None,
+                        "payload": event_payload,
+                    }
+                ]
+                output = parse_check_consequence_output(
+                    json.dumps(candidate, ensure_ascii=False)
+                )
+
+                with self.assertRaisesRegex(
+                    StructuredOutputError,
+                    "event type or state transition",
+                ):
+                    enforce_failure_consistency(output, all_checks_passed=False)
+
+    def test_failed_check_allows_adverse_found_event(self) -> None:
+        candidate = payload()
+        candidate["public_narration"] = "你没找到出口，反而和巡逻守卫撞个正着。"
+        candidate["proposed_events"] = [
+            {
+                "event_type": "guard_found_player",
+                "summary": "守卫撞见了正在撬锁的调查员。",
+                "actor_type": "npc",
+                "actor_id": None,
+                "visibility": "table",
+                "happened_at": None,
+                "payload": {"guard_alerted": True},
+            }
+        ]
+        output = parse_check_consequence_output(
+            json.dumps(candidate, ensure_ascii=False)
+        )
+
+        self.assertIs(
+            enforce_failure_consistency(output, all_checks_passed=False),
+            output,
+        )
 
 
 if __name__ == "__main__":

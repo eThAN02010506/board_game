@@ -9,6 +9,72 @@ from __future__ import annotations
 from typing import Any
 
 
+async def confirm_current_session_zero(
+    client: Any,
+    *,
+    campaign_id: str,
+    member_headers: tuple[dict[str, str], ...],
+) -> dict[str, Any]:
+    """Explicitly consent every listed table member to the current revision."""
+    if not member_headers:
+        raise ValueError("at least one table member must confirm Session 0")
+    view_response = await client.get(
+        f"/campaigns/{campaign_id}/session-zero",
+        headers=member_headers[0],
+    )
+    view_response.raise_for_status()
+    view = view_response.json()
+    revision = view.get("revision")
+    if revision is None:
+        raise AssertionError("product campaign did not create a Session 0 revision")
+    payload = {
+        "revision_id": revision["id"],
+        "expected_version": revision["version"],
+    }
+    for headers in member_headers:
+        response = await client.post(
+            f"/campaigns/{campaign_id}/session-zero/confirm",
+            headers=headers,
+            json=payload,
+        )
+        response.raise_for_status()
+        view = response.json()
+    return view
+
+
+def confirm_current_session_zero_sync(
+    client: Any,
+    *,
+    campaign_id: str,
+    member_headers: tuple[dict[str, str], ...],
+) -> dict[str, Any]:
+    """Synchronous counterpart used by TestClient integration tests."""
+    if not member_headers:
+        raise ValueError("at least one table member must confirm Session 0")
+    view_response = client.get(
+        f"/campaigns/{campaign_id}/session-zero",
+        headers=member_headers[0],
+    )
+    view_response.raise_for_status()
+    view = view_response.json()
+    revision = view.get("revision")
+    if revision is None:
+        raise AssertionError("product campaign did not create a Session 0 revision")
+    payload = {
+        "revision_id": revision["id"],
+        "expected_version": revision["version"],
+    }
+    for headers in member_headers:
+        response = client.post(
+            f"/campaigns/{campaign_id}/session-zero/confirm",
+            headers=headers,
+            json=payload,
+        )
+        response.raise_for_status()
+        view = response.json()
+    return view
+
+
 def coc7_sheet(
     name: str,
     *,

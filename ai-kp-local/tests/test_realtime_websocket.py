@@ -13,7 +13,11 @@ from ai_kp.core.config import Settings
 from ai_kp.core.db import connect
 from ai_kp.core.repository import Repository
 from ai_kp.security.tokens import hash_realtime_ticket
-from tests.support_investigators import coc7_sheet, create_approved_player_sync
+from tests.support_investigators import (
+    coc7_sheet,
+    confirm_current_session_zero_sync,
+    create_approved_player_sync,
+)
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -61,6 +65,11 @@ class RealtimeWebSocketTests(unittest.TestCase):
         self.pc = approved_player["pc"]
         self.player = approved_player["bundle"]
         self.player_headers = approved_player["headers"]
+        confirm_current_session_zero_sync(
+            self.client,
+            campaign_id=self.campaign["id"],
+            member_headers=(self.kp_headers, self.player_headers),
+        )
         self.saved_map = self.client.post(
             f"/campaigns/{self.campaign['id']}/maps/generate",
             headers=self.kp_headers,

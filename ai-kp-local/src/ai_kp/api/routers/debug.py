@@ -329,6 +329,22 @@ def diagnostics(
     }
 
 
+@router.get("/debug/runtime-identity")
+def runtime_identity(
+    request: Request,
+    _admin: None = Depends(require_local_admin),
+) -> dict[str, Any]:
+    """Project the narrow identities needed to prove a real process restart."""
+
+    return {
+        "process_instance_id": str(request.app.state.process_instance_id),
+        "os_pid": os.getpid(),
+        "persistent_store_id": str(request.app.state.persistent_store_id),
+        "schema_version": LATEST_SCHEMA_VERSION,
+        "status": "ready",
+    }
+
+
 @router.get("/debug/requests")
 def recent_requests(
     request: Request,
@@ -385,13 +401,17 @@ def database_check(
 ) -> dict[str, Any]:
     started = time.perf_counter()
     quick_check = [str(row[0]) for row in repo.connection.execute("PRAGMA quick_check")]
+    from ai_kp.infrastructure.database.integrity import fts_integrity_issues
+
+    fts_issues = fts_integrity_issues(repo.connection)
     foreign_key_issues = [
         dict(row) for row in repo.connection.execute("PRAGMA foreign_key_check").fetchall()
     ]
     return {
-        "ok": quick_check == ["ok"] and not foreign_key_issues,
+        "ok": quick_check == ["ok"] and not foreign_key_issues and not fts_issues,
         "quick_check": quick_check,
         "foreign_key_issues": foreign_key_issues,
+        "fts_issues": fts_issues,
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
     }
 

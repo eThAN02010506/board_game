@@ -5,12 +5,14 @@ from typing import Any, Protocol
 from ai_kp.application.ports.dynamic_branches import DynamicBranchStore
 from ai_kp.application.ports.facts import FactStore
 from ai_kp.application.ports.travel_graph import TravelGraphStore
+from ai_kp.application.ports.world_entities import WorldEntityStore
 
 
 class WorldExpansionMaterializationStore(
     FactStore,
     TravelGraphStore,
     DynamicBranchStore,
+    WorldEntityStore,
     Protocol,
 ):
     def begin_world_expansion_materialization(self) -> None: ...
@@ -102,6 +104,12 @@ class WorldExpansionMaterializationStore(
     ) -> dict | None: ...
 
     def create_world_expansion_materialization(self, **values: Any) -> dict: ...
+
+    def attach_world_expansion_materialization_entities(
+        self,
+        materialization_id: str,
+        entities: list[dict[str, Any]],
+    ) -> None: ...
 
 
 __all__ = ["WorldExpansionMaterializationStore"]

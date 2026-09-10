@@ -13,6 +13,7 @@ from ai_kp.application.ports.world_expansion_materializations import (
 )
 from ai_kp.application.turn_service import TurnService, WorldExpansionCommand
 from ai_kp.application.world_expansion_materialization_service import (
+    EncounterEntityRealization,
     EncounterFact,
     MaterializeWorldExpansionCommand,
     WorldExpansionMaterializationService,
@@ -168,6 +169,9 @@ class AutoWorldExpansionService:
             blockers.append("candidate_conflicts")
         if candidate.get("branch_plan") is not None:
             blockers.append("branch_plan_requires_contact_review")
+        template_binding = candidate.get("template_binding") or {}
+        if template_binding.get("entity_bindings") and level != "ai_kp":
+            blockers.append("typed_entities_require_full_ai_or_human_review")
         allowed = not blockers and level in {"balanced", "ai_kp"}
         return {
             "schema_version": "auto-world-expansion-policy.v1",
@@ -190,6 +194,7 @@ class AutoWorldExpansionService:
         subject = str(candidate["subject"]).strip()
         text = str(candidate["proposal"]).strip()
         summary = str(proposal["public_narration"]).strip() or text
+        template_binding = candidate.get("template_binding") or {}
         return MaterializeWorldExpansionCommand(
             idempotency_key=f"auto-world:{proposal['id']}",
             summary=summary[:2000],
@@ -203,6 +208,15 @@ class AutoWorldExpansionService:
                     predicate="存在或成立",
                     object_text=text[:4000],
                 ),
+            ),
+            entities=tuple(
+                EncounterEntityRealization(
+                    local_ref=str(item["local_ref"]),
+                    name=str(item["label_variant"]),
+                    description=text[:4000],
+                    visibility="table",
+                )
+                for item in template_binding.get("entity_bindings") or ()
             ),
             interaction_summary=(
                 "Auto KP materialized an environment-only world expansion "

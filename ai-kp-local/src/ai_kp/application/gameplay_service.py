@@ -8,6 +8,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from ai_kp.application.character_lifecycle_service import CharacterLifecycleService
+from ai_kp.application.encounter_loot_service import EncounterLootService
 from ai_kp.application.ports.repositories import GameplayStore
 from ai_kp.platform.sessions.models import AuthenticatedMember
 from ai_kp.rulesets import get_campaign_ruleset, get_ruleset
@@ -17,9 +19,9 @@ from ai_kp.rulesets.coc7.mechanics.gameplay import (
     apply_first_aid,
     apply_medicine,
     apply_natural_healing,
+    apply_resolved_sanity_loss,
     apply_sanity_loss,
     chase_action_points,
-    evaluate_recorded_dice,
     resolve_chase_hazard,
     resolve_dying_con,
     resolve_fighting_maneuver,
@@ -27,6 +29,14 @@ from ai_kp.rulesets.coc7.mechanics.gameplay import (
     resolve_melee_exchange,
     resolve_skill_development,
     validate_dice_expression,
+)
+from ai_kp.rulesets.coc7.mechanics.runtime_effects import (
+    active_armor,
+    adjust_armor,
+    adjust_resource,
+    adjust_skill,
+    runtime_skill_adjustment,
+    runtime_skill_target,
 )
 from ai_kp.rulesets.coc7.mechanics.skill_check import success_level
 
@@ -52,6 +62,7 @@ class GameplayCommand:
     command_type: str
     payload: dict[str, Any]
     visibility: str = "table"
+    authority_request_id: str | None = None
 
 
 class GameplayService:
@@ -121,8 +132,11 @@ class GameplayService:
         command: GameplayCommand,
     ) -> dict[str, Any]:
         encounter = self.repo.get_coc7_encounter(encounter_id)
-        self._require_kp(identity, str(encounter["campaign_id"]))
         self._require_encounter(identity, encounter)
+        if identity.role == "kp":
+            self._require_kp(identity, str(encounter["campaign_id"]))
+        else:
+            self._require_player_turn_command(identity, encounter, command)
         if encounter["status"] != "active":
             raise ValueError("Only an active encounter accepts commands")
         state = deepcopy(encounter["state"])
@@ -172,7 +186,48 @@ class GameplayService:
             )
             if linked is not None:
                 transitioned["linked_character_transition"] = linked
-        return transitioned
+            EncounterLootService(self.repo).materialize(
+                transitioned["encounter"],
+                actor_member_id=identity.member_id,
+            )
+        return self.project_transition_for_identity(transitioned, identity)
+
+    @classmethod
+    def project_transition_for_identity(
+        cls, transitioned: dict[str, Any], identity: AuthenticatedMember
+    ) -> dict[str, Any]:
+        if identity.role == "kp":
+            return transitioned
+        projected = deepcopy(transitioned)
+        projected["encounter"] = cls._project_encounter(
+            projected["encounter"], identity
+        )
+        event = projected.get("event")
+        if isinstance(event, dict):
+            event["input"] = {}
+            event["result"] = cls._public_encounter_result(event.get("result"))
+        return projected
+
+    @classmethod
+    def _public_encounter_result(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return [cls._public_encounter_result(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        hidden = {
+            "current_hp",
+            "max_hp",
+            "conditions",
+            "defender_target",
+            "attacker_target",
+            "damage_rolls",
+            "rolls",
+        }
+        return {
+            key: cls._public_encounter_result(item)
+            for key, item in value.items()
+            if key not in hidden
+        }
 
     def get_character_state(
         self,
@@ -205,11 +260,25 @@ class GameplayService:
     ) -> dict[str, Any]:
         self._require_kp(identity, campaign_id)
         self._require_coc7_campaign(campaign_id)
+        # Serialize the idempotency read before any transition can generate
+        # random evidence. Concurrent retries therefore cannot even perform a
+        # discarded second roll.
+        self.repo.begin_immediate()
         record = self.repo.get_campaign_investigator(campaign_id, investigator_id)
         state = record.get("campaign_state")
         revision = record.get("approved_revision")
         if state is None or revision is None:
             raise ValueError("CoC7 state commands require an approved investigator")
+        existing = self.repo.find_coc7_gameplay_event(
+            identity.session_id, command.command_id
+        )
+        if existing is not None:
+            if (
+                existing["campaign_id"] != campaign_id
+                or existing["investigator_id"] != investigator_id
+            ):
+                raise ValueError("Command ID was already used for another aggregate")
+            return {"state": state, "event": existing, "idempotent_replay": True}
         canonical = revision["canonical_sheet"]
         result, changes = self._character_transition(
             state, canonical, command.command_type, command.payload
@@ -230,6 +299,27 @@ class GameplayService:
             ruleset_version=self.ruleset.manifest.version,
             source_reference=GAMEPLAY_SOURCE_REFERENCE,
         )
+        if not transitioned["idempotent_replay"]:
+            encounter_syncs = self._sync_character_state_to_encounters(
+                campaign_id=campaign_id,
+                investigator_id=investigator_id,
+                identity=identity,
+                canonical=canonical,
+                character_state=transitioned["state"],
+                source_event_id=str(transitioned["event"]["id"]),
+            )
+            if encounter_syncs:
+                transitioned["encounter_syncs"] = encounter_syncs
+        lifecycle = CharacterLifecycleService(self.repo).sync_character_state(
+            campaign_id=campaign_id,
+            session_id=identity.session_id,
+            investigator_id=investigator_id,
+            character_state=transitioned["state"],
+            source_event_id=str(transitioned["event"]["id"]),
+            actor_member_id=identity.member_id,
+        )
+        if lifecycle is not None:
+            transitioned["lifecycle_transition"] = lifecycle
         if command.command_type == "development" and not transitioned[
             "idempotent_replay"
         ]:
@@ -242,6 +332,93 @@ class GameplayService:
                 result,
             )
         return transitioned
+
+    def _sync_character_state_to_encounters(
+        self,
+        *,
+        campaign_id: str,
+        investigator_id: str,
+        identity: AuthenticatedMember,
+        canonical: dict[str, Any],
+        character_state: dict[str, Any],
+        source_event_id: str,
+        exclude_encounter_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Update active linked encounter snapshots in the same transaction."""
+
+        conditions = deepcopy(character_state.get("conditions") or [])
+        generated_profiles = self._investigator_action_profiles(canonical, conditions)
+        dodge_skill = next(
+            (
+                item
+                for item in canonical.get("skills") or []
+                if item.get("skill_key") == "dodge"
+            ),
+            None,
+        )
+        derived = canonical.get("derived") or {}
+        dodge_target = (
+            runtime_skill_target(dodge_skill, conditions)
+            if dodge_skill is not None
+            else int(derived.get("dodge") or 0)
+        )
+        synced: list[dict[str, Any]] = []
+        for encounter in self.repo.list_coc7_encounters(
+            campaign_id, identity.session_id
+        ):
+            if encounter.get("status") != "active" or str(
+                encounter.get("id") or ""
+            ) == str(exclude_encounter_id or ""):
+                continue
+            state = deepcopy(encounter["state"])
+            participant = next(
+                (
+                    item
+                    for item in state.get("participants") or []
+                    if str(item.get("investigator_id") or "") == investigator_id
+                ),
+                None,
+            )
+            if participant is None:
+                continue
+            previous_conditions = deepcopy(participant.get("conditions") or [])
+            legacy_generated_profiles = self._investigator_action_profiles(
+                canonical, previous_conditions
+            )
+            existing_profiles = participant.get("action_profiles") or []
+            participant["current_hp"] = int(character_state["current_hp"])
+            participant["conditions"] = conditions
+            participant["dodge_target"] = dodge_target
+            profile_source = participant.get("action_profiles_source")
+            if profile_source == "ruleset_generated" or (
+                profile_source is None
+                and existing_profiles == legacy_generated_profiles
+            ):
+                participant["action_profiles"] = deepcopy(generated_profiles)
+                participant["action_profiles_source"] = "ruleset_generated"
+            sync_command_id = "character-state-sync-" + hashlib.sha256(
+                f"{source_event_id}:{encounter['id']}".encode()
+            ).hexdigest()
+            synced.append(
+                self.repo.transition_coc7_encounter(
+                    str(encounter["id"]),
+                    expected_version=int(encounter["version"]),
+                    state=state,
+                    round_no=int(encounter["round_no"]),
+                    turn_index=int(encounter["turn_index"]),
+                    status=str(encounter["status"]),
+                    member_id=identity.member_id,
+                    command_id=sync_command_id,
+                    event_type="character.runtime_state_sync",
+                    command_input={"source_event_id": source_event_id},
+                    result={"investigator_id": investigator_id},
+                    visibility="kp",
+                    ruleset_id=self.ruleset.manifest.ruleset_id,
+                    ruleset_version=self.ruleset.manifest.version,
+                    source_reference=GAMEPLAY_SOURCE_REFERENCE,
+                )
+            )
+        return synced
 
     def _new_combat_state(
         self, campaign_id: str, participants: tuple[dict[str, Any], ...]
@@ -330,10 +507,14 @@ class GameplayService:
         participant_id = str(raw.get("participant_id") or "").strip()
         name = str(raw.get("name") or "").strip()
         investigator_id = str(raw.get("investigator_id") or "").strip() or None
+        npc_id = str(raw.get("npc_id") or "").strip() or None
         if not participant_id or not name:
             raise ValueError("Every participant requires participant_id and name")
+        if investigator_id and npc_id:
+            raise ValueError("An encounter participant cannot be both an investigator and NPC")
         result = deepcopy(raw)
         if investigator_id:
+            declared_profiles = deepcopy(result.get("action_profiles") or [])
             record = self.repo.get_campaign_investigator(campaign_id, investigator_id)
             revision = record.get("approved_revision")
             state = record.get("campaign_state")
@@ -342,6 +523,15 @@ class GameplayService:
             canonical = revision["canonical_sheet"]
             characteristics = canonical.get("characteristics") or {}
             derived = canonical.get("derived") or {}
+            conditions = deepcopy(state["conditions"])
+            dodge_skill = next(
+                (
+                    item
+                    for item in canonical.get("skills") or []
+                    if item.get("skill_key") == "dodge"
+                ),
+                None,
+            )
             result.update(
                 {
                     "investigator_id": investigator_id,
@@ -350,9 +540,24 @@ class GameplayService:
                     "max_hp": int(derived.get("max_hp") or 0),
                     "current_hp": int(state["current_hp"]),
                     "build": int(derived.get("build") or 0),
-                    "conditions": deepcopy(state["conditions"]),
+                    "conditions": conditions,
+                    "dodge_target": (
+                        runtime_skill_target(dodge_skill, conditions)
+                        if dodge_skill is not None
+                        else int(derived.get("dodge") or 0)
+                    ),
+                    "action_profiles": (
+                        declared_profiles
+                        or self._investigator_action_profiles(canonical, conditions)
+                    ),
+                    "action_profiles_source": (
+                        "declared" if declared_profiles else "ruleset_generated"
+                    ),
                 }
             )
+        elif npc_id:
+            self.repo.get_campaign_npc(campaign_id, npc_id)
+            result["npc_id"] = npc_id
         for key in ("dex", "max_hp", "current_hp"):
             if type(result.get(key)) is not int or int(result[key]) < 0:
                 raise ValueError(f"Participant {key} must be a non-negative integer")
@@ -367,7 +572,99 @@ class GameplayService:
         result["conditions"] = deepcopy(result.get("conditions") or [])
         result["readied_firearm"] = bool(result.get("readied_firearm", False))
         result["build"] = int(result.get("build") or 0)
+        result["dodge_target"] = int(result.get("dodge_target") or 25)
+        result["action_profiles"] = self._normalize_action_profiles(
+            result.get("action_profiles") or []
+        )
         return result
+
+    @staticmethod
+    def _investigator_action_profiles(
+        canonical: dict[str, Any], conditions: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        profiles: list[dict[str, Any]] = []
+        skills = list(canonical.get("skills") or [])
+        brawl = next(
+            (item for item in skills if item.get("skill_key") == "fighting_brawl"),
+            None,
+        )
+        if brawl is not None:
+            profiles.append(
+                {
+                    "action_key": "unarmed_brawl",
+                    "label": str(brawl.get("display_name") or "格斗（斗殴）"),
+                    "kind": "melee",
+                    "skill_target": runtime_skill_target(brawl, conditions),
+                    "damage_expression": "1d3",
+                }
+            )
+        for index, weapon in enumerate((canonical.get("combat") or {}).get("weapons") or []):
+            if not isinstance(weapon, dict):
+                continue
+            skill_key = str(weapon.get("skill_key") or "")
+            skill = next((item for item in skills if item.get("skill_key") == skill_key), None)
+            base_override = weapon.get("skill_target")
+            if skill is not None and type(base_override) is int:
+                target = min(
+                    100,
+                    max(
+                        1,
+                        int(base_override)
+                        + runtime_skill_adjustment(skill, conditions),
+                    ),
+                )
+            elif skill is not None:
+                target = runtime_skill_target(skill, conditions)
+            else:
+                target = base_override
+            damage = str(weapon.get("damage") or weapon.get("damage_expression") or "").strip()
+            if not target or not damage:
+                continue
+            profiles.append(
+                {
+                    "action_key": str(weapon.get("id") or f"weapon_{index + 1}"),
+                    "label": str(weapon.get("name") or f"武器 {index + 1}"),
+                    "kind": "firearm" if str(weapon.get("range") or "") else "melee",
+                    "skill_target": int(target),
+                    "damage_expression": damage,
+                }
+            )
+        return GameplayService._normalize_action_profiles(profiles)
+
+    @staticmethod
+    def _normalize_action_profiles(raw_profiles: list[Any]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        keys: set[str] = set()
+        for raw in raw_profiles:
+            if not isinstance(raw, dict):
+                raise TypeError("Encounter action profiles must be objects")
+            action_key = str(raw.get("action_key") or "").strip()
+            label = str(raw.get("label") or "").strip()
+            kind = str(raw.get("kind") or "").strip()
+            target = raw.get("skill_target")
+            damage = str(raw.get("damage_expression") or "").strip()
+            if (
+                not action_key
+                or action_key in keys
+                or not label
+                or kind not in {"melee", "firearm"}
+                or type(target) is not int
+                or not 1 <= int(target) <= 100
+                or not damage
+            ):
+                raise ValueError("Encounter action profile is invalid")
+            validate_dice_expression(damage)
+            keys.add(action_key)
+            normalized.append(
+                {
+                    "action_key": action_key,
+                    "label": label,
+                    "kind": kind,
+                    "skill_target": int(target),
+                    "damage_expression": damage,
+                }
+            )
+        return normalized
 
     @staticmethod
     def _require_unique_participants(participants: list[dict[str, Any]]) -> None:
@@ -383,6 +680,8 @@ class GameplayService:
         command_type: str,
         payload: dict[str, Any],
     ) -> tuple[dict[str, Any], int, int, str]:
+        if command_type == "take_turn":
+            return self._take_combat_turn(state, round_no, turn_index, payload)
         if command_type in {"complete", "cancel"}:
             return (
                 {"status": "completed" if command_type == "complete" else "cancelled"},
@@ -428,7 +727,123 @@ class GameplayService:
         result = handler(state, attacker, target, payload)
         if attacker is not None and attacker["participant_id"] not in state["acted"]:
             state["acted"].append(attacker["participant_id"])
+        encounter_outcome = self._combat_outcome(state)
+        if encounter_outcome is not None:
+            result["encounter_outcome"] = encounter_outcome
+            return result, round_no, turn_index, "completed"
         return result, round_no, turn_index, "active"
+
+    def _take_combat_turn(
+        self,
+        state: dict[str, Any],
+        round_no: int,
+        turn_index: int,
+        payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], int, int, str]:
+        participant = self._participant(state, str(payload.get("participant_id")))
+        self._require_active_turn(state, turn_index, participant)
+        self._require_can_act(participant)
+        inner = payload.get("inner")
+        if not isinstance(inner, dict):
+            raise TypeError("Encounter turn requires one prepared inner action")
+        action_type = str(inner.get("action_type") or "")
+        if action_type == "pass":
+            action_result: dict[str, Any] = {"outcome": "passed_turn"}
+        elif action_type == "defend":
+            participant["conditions"] = [
+                item
+                for item in participant.get("conditions") or []
+                if item.get("type") != "defending"
+            ]
+            participant["conditions"].append(
+                {"type": "defending", "active": True, "round_no": round_no}
+            )
+            action_result = {"outcome": "defending"}
+        elif action_type in {"melee", "maneuver", "firearm"}:
+            action_result, _, _, _ = self._command_combat(
+                state, round_no, turn_index, action_type, inner
+            )
+        else:
+            raise ValueError("Unsupported prepared combat turn action")
+        encounter_outcome = self._combat_outcome(state)
+        if encounter_outcome is not None:
+            return (
+                {
+                    "action": action_result,
+                    "encounter_outcome": encounter_outcome,
+                    "round_no": round_no,
+                    "turn_index": turn_index,
+                    "active_participant_id": None,
+                },
+                round_no,
+                turn_index,
+                "completed",
+            )
+        next_round, next_index = self._next_turn(state, round_no, turn_index)
+        return (
+            {
+                "action": action_result,
+                "round_no": next_round,
+                "turn_index": next_index,
+                "active_participant_id": state["turn_order"][next_index],
+            },
+            next_round,
+            next_index,
+            "active",
+        )
+
+    @classmethod
+    def _next_turn(
+        cls, state: dict[str, Any], round_no: int, turn_index: int
+    ) -> tuple[int, int]:
+        next_index = turn_index
+        for _ in state["turn_order"]:
+            next_index += 1
+            if next_index >= len(state["turn_order"]):
+                next_index = 0
+                round_no += 1
+                state["acted"] = []
+                state["defense_reactions"] = {}
+            candidate = cls._participant(state, state["turn_order"][next_index])
+            if cls._participant_can_act(candidate):
+                return round_no, next_index
+        raise ValueError("Combat has no participant capable of taking a turn")
+
+    @classmethod
+    def _combat_outcome(cls, state: dict[str, Any]) -> dict[str, Any] | None:
+        participants = list(state["participants"])
+        capable = [item for item in participants if cls._participant_can_act(item)]
+        declared_sides = {
+            str(item["side"])
+            for item in participants
+            if item.get("side") is not None and str(item["side"]).strip()
+        }
+        if len(declared_sides) >= 2:
+            capable_sides = {
+                str(item["side"])
+                for item in capable
+                if item.get("side") is not None and str(item["side"]).strip()
+            }
+            if len(capable_sides) <= 1:
+                return {
+                    "reason": "only_one_declared_side_can_act",
+                    "remaining_sides": sorted(capable_sides),
+                }
+        has_investigators = any(item.get("investigator_id") for item in participants)
+        has_non_investigators = any(
+            not item.get("investigator_id") for item in participants
+        )
+        if has_investigators and has_non_investigators:
+            capable_groups = {
+                "investigators" if item.get("investigator_id") else "opposition"
+                for item in capable
+            }
+            if len(capable_groups) <= 1:
+                return {
+                    "reason": "only_one_control_group_can_act",
+                    "remaining_groups": sorted(capable_groups),
+                }
+        return None
 
     def _combat_melee(
         self,
@@ -551,6 +966,19 @@ class GameplayService:
         command_type: str,
         payload: dict[str, Any],
     ) -> tuple[dict[str, Any], int, int, str]:
+        if command_type == "take_turn":
+            inner = payload.get("inner")
+            if not isinstance(inner, dict):
+                raise TypeError("Encounter turn requires one prepared inner action")
+            participant_id = str(payload.get("participant_id") or "")
+            if inner.get("action_type") == "pass":
+                participant = self._participant(state, participant_id)
+                self._require_active_turn(state, turn_index, participant)
+                command_type, payload = "advance_turn", {}
+            elif inner.get("action_type") == "move":
+                command_type, payload = "move", inner
+            else:
+                raise ValueError("Unsupported prepared chase turn action")
         if command_type in {"complete", "cancel"}:
             return (
                 {"status": "completed" if command_type == "complete" else "cancelled"},
@@ -630,12 +1058,18 @@ class GameplayService:
             return self._health_transition(
                 state, canonical, command_type, payload
             )
-        if command_type in {"sanity", "end_bout", "reset_san_day"}:
+        if command_type in {"sanity", "san_loss", "end_bout", "reset_san_day"}:
             return self._sanity_transition(
                 state, canonical, command_type, payload
             )
         if command_type == "development":
             return self._development_transition(state, canonical, payload)
+        if command_type == "resource_adjust":
+            return self._resource_adjust_transition(state, canonical, payload)
+        if command_type == "armor_adjust":
+            return self._armor_adjust_transition(state, payload)
+        if command_type == "skill_adjust":
+            return self._skill_adjust_transition(state, canonical, payload)
         raise ValueError("Unsupported CoC7 character command")
 
     def _health_transition(
@@ -649,7 +1083,9 @@ class GameplayService:
         characteristics = canonical.get("characteristics") or {}
         max_hp = int(derived.get("max_hp") or 0)
         if command_type == "damage":
-            amount, dice = self._recorded_value(payload, "damage")
+            rolled_amount, dice = self._recorded_value(payload, "damage")
+            armor = active_armor(state.get("conditions") or [])
+            amount = max(0, rolled_amount - armor)
             result = apply_damage(
                 current_hp=int(state["current_hp"]),
                 max_hp=max_hp,
@@ -657,6 +1093,8 @@ class GameplayService:
                 conditions=state["conditions"],
             )
             result["dice"] = dice
+            result["rolled_damage"] = rolled_amount
+            result["armor_reduction"] = min(armor, rolled_amount)
             return result, {
                 "current_hp": result["current_hp"],
                 "conditions": result["conditions"],
@@ -703,6 +1141,52 @@ class GameplayService:
                 "conditions": result["conditions"],
             }
         return self._natural_healing_transition(state, max_hp, payload)
+
+    def _resource_adjust_transition(
+        self,
+        state: dict[str, Any],
+        canonical: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        amount, dice = self._recorded_value(payload, "amount")
+        result, changes = adjust_resource(
+            state,
+            canonical,
+            resource=str(payload.get("resource") or ""),
+            direction=str(payload.get("direction") or ""),
+            amount=amount,
+        )
+        result["dice"] = dice
+        return result, changes
+
+    def _armor_adjust_transition(
+        self, state: dict[str, Any], payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        amount, dice = self._recorded_value(payload, "amount")
+        result, changes = adjust_armor(
+            state.get("conditions") or [],
+            direction=str(payload.get("direction") or ""),
+            amount=amount,
+        )
+        result["dice"] = dice
+        return result, changes
+
+    def _skill_adjust_transition(
+        self,
+        state: dict[str, Any],
+        canonical: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        amount, dice = self._recorded_value(payload, "amount")
+        result, changes = adjust_skill(
+            state.get("conditions") or [],
+            canonical,
+            requested_skill=str(payload.get("skill_key") or ""),
+            direction=str(payload.get("direction") or ""),
+            amount=amount,
+        )
+        result["dice"] = dice
+        return result, changes
 
     def _natural_healing_transition(
         self,
@@ -776,6 +1260,50 @@ class GameplayService:
         derived = canonical.get("derived") or {}
         characteristics = canonical.get("characteristics") or {}
         max_san = int(derived.get("max_san", 99))
+        if command_type == "san_loss":
+            loss, loss_dice = self._recorded_value(payload, "loss")
+            int_roll = payload.get("intelligence_roll")
+            if loss >= 5 and int_roll is None:
+                int_roll = self._d100()
+            initial = int(state.get("daily_san_start") or state["current_san"])
+            bout_roll = payload.get("bout_roll")
+            bout_duration = payload.get("bout_duration")
+            first = apply_resolved_sanity_loss(
+                current_san=int(state["current_san"]),
+                maximum_san=max_san,
+                intelligence=int(characteristics.get("int") or 0),
+                loss=loss,
+                daily_loss_before=int(state.get("daily_san_loss") or 0),
+                daily_starting_san=initial,
+                intelligence_roll=int(int_roll) if int_roll is not None else None,
+            )
+            if first["requires_bout"]:
+                bout_roll = int(bout_roll or secrets.randbelow(10) + 1)
+                bout_duration = int(bout_duration or secrets.randbelow(10) + 1)
+                first = apply_resolved_sanity_loss(
+                    current_san=int(state["current_san"]),
+                    maximum_san=max_san,
+                    intelligence=int(characteristics.get("int") or 0),
+                    loss=loss,
+                    daily_loss_before=int(state.get("daily_san_loss") or 0),
+                    daily_starting_san=initial,
+                    intelligence_roll=int(int_roll) if int_roll is not None else None,
+                    bout_roll=bout_roll,
+                    bout_duration=bout_duration,
+                )
+            conditions = self._merge_insanity_conditions(state["conditions"], first)
+            first["dice"] = {
+                "loss": loss_dice,
+                "intelligence_roll": int_roll,
+                "bout_roll": bout_roll,
+                "bout_duration": bout_duration,
+            }
+            return first, {
+                "current_san": first["current_san"],
+                "daily_san_loss": first["daily_san_loss"],
+                "daily_san_start": initial,
+                "conditions": conditions,
+            }
         if command_type == "sanity":
             success_loss, success_dice = self._recorded_value(
                 payload, "success_loss"
@@ -952,7 +1480,9 @@ class GameplayService:
     def _damage_participant(
         self, participant: dict[str, Any], payload: dict[str, Any]
     ) -> dict[str, Any]:
-        amount, dice = self._recorded_value(payload, "damage")
+        rolled_amount, dice = self._recorded_value(payload, "damage")
+        armor = active_armor(participant.get("conditions") or [])
+        amount = max(0, rolled_amount - armor)
         health = apply_damage(
             current_hp=int(participant["current_hp"]),
             max_hp=int(participant["max_hp"]),
@@ -961,7 +1491,13 @@ class GameplayService:
         )
         participant["current_hp"] = health["current_hp"]
         participant["conditions"] = health["conditions"]
-        return {**health, "dice": dice, "participant_id": participant["participant_id"]}
+        return {
+            **health,
+            "dice": dice,
+            "rolled_damage": rolled_amount,
+            "armor_reduction": min(armor, rolled_amount),
+            "participant_id": participant["participant_id"],
+        }
 
     def _sync_encounter_health_effect(
         self,
@@ -999,7 +1535,7 @@ class GameplayService:
         linked_command_id = "encounter-state-" + hashlib.sha256(
             f"{encounter['id']}:{command.command_id}".encode()
         ).hexdigest()
-        return self.repo.transition_coc7_character_state(
+        transitioned = self.repo.transition_coc7_character_state(
             campaign_id=str(encounter["campaign_id"]),
             session_id=str(encounter["session_id"]),
             investigator_id=str(investigator_id),
@@ -1022,6 +1558,29 @@ class GameplayService:
             ruleset_version=self.ruleset.manifest.version,
             source_reference=GAMEPLAY_SOURCE_REFERENCE,
         )
+        if not transitioned["idempotent_replay"]:
+            encounter_syncs = self._sync_character_state_to_encounters(
+                campaign_id=str(encounter["campaign_id"]),
+                investigator_id=str(investigator_id),
+                identity=identity,
+                canonical=revision["canonical_sheet"],
+                character_state=transitioned["state"],
+                source_event_id=str(transitioned["event"]["id"]),
+                exclude_encounter_id=str(encounter["id"]),
+            )
+            if encounter_syncs:
+                transitioned["encounter_syncs"] = encounter_syncs
+        lifecycle = CharacterLifecycleService(self.repo).sync_character_state(
+            campaign_id=str(encounter["campaign_id"]),
+            session_id=str(encounter["session_id"]),
+            investigator_id=str(investigator_id),
+            character_state=transitioned["state"],
+            source_event_id=str(transitioned["event"]["id"]),
+            actor_member_id=identity.member_id,
+        )
+        if lifecycle is not None:
+            transitioned["lifecycle_transition"] = lifecycle
+        return transitioned
 
     @staticmethod
     def _merge_insanity_conditions(
@@ -1106,12 +1665,16 @@ class GameplayService:
 
     @staticmethod
     def _require_can_act(participant: dict[str, Any]) -> None:
+        if not GameplayService._participant_can_act(participant):
+            raise ValueError("This encounter participant cannot act in their current state")
+
+    @staticmethod
+    def _participant_can_act(participant: dict[str, Any]) -> bool:
         inactive = {"dead", "unconscious", "dying"}
-        if any(
+        return not any(
             item.get("active", True) and item.get("type") in inactive
             for item in participant.get("conditions") or []
-        ):
-            raise ValueError("This encounter participant cannot act in their current state")
+        )
 
     @staticmethod
     def _recorded_value(
@@ -1127,18 +1690,20 @@ class GameplayService:
             return value, {"expression": str(value), "rolls": [], "total": value}
         if expression is None:
             raise ValueError(f"{prefix} or {prefix}_expression is required")
-        count, sides, _modifier = validate_dice_expression(str(expression))
+        parsed = validate_dice_expression(str(expression))
         recorded = (
-            [int(item) for item in rolls]
+            list(rolls)
             if rolls is not None
-            else [secrets.randbelow(sides) + 1 for _ in range(count)]
+            else parsed.roll(secrets.randbelow)[0]
         )
-        value = evaluate_recorded_dice(str(expression), recorded)
+        value, terms = parsed.evaluate(recorded)
         if value < 0:
             raise ValueError(f"{prefix} total cannot be negative")
         return value, {
-            "expression": str(expression),
+            "expression": parsed.normalized,
             "rolls": recorded,
+            "terms": list(terms),
+            "modifier": parsed.modifier,
             "total": value,
         }
 
@@ -1184,6 +1749,39 @@ class GameplayService:
         ):
             raise KeyError(f"CoC7 encounter not found: {encounter['id']}")
 
+    def _require_player_turn_command(
+        self,
+        identity: AuthenticatedMember,
+        encounter: dict[str, Any],
+        command: GameplayCommand,
+    ) -> None:
+        if identity.role != "player" or command.command_type != "take_turn":
+            raise PermissionError("Players may only commit their confirmed encounter turn")
+        if not command.authority_request_id:
+            raise PermissionError("Player encounter turns require confirmed action authority")
+        request = self.repo.get_encounter_action_request(command.authority_request_id)
+        prepared = request.get("prepared_command")
+        if (
+            request.get("status") != "confirmed"
+            or request.get("encounter_id") != encounter["id"]
+            or request.get("member_id") != identity.member_id
+            or not isinstance(prepared, dict)
+            or prepared.get("command_type") != command.command_type
+            or prepared.get("payload") != command.payload
+        ):
+            raise PermissionError("Player encounter action authority is invalid or stale")
+        participant_id = str(command.payload.get("participant_id") or "")
+        participant = self._participant(encounter["state"], participant_id)
+        self._require_active_turn(encounter["state"], int(encounter["turn_index"]), participant)
+        investigator_id = participant.get("investigator_id")
+        if not investigator_id:
+            raise PermissionError("This encounter participant is not controlled by a player")
+        record = self.repo.get_campaign_investigator(
+            str(encounter["campaign_id"]), str(investigator_id)
+        )
+        if identity.pc_id != record.get("legacy_pc_id"):
+            raise PermissionError("Players may only act for their assigned investigator")
+
     @staticmethod
     def _require_character_visible(
         identity: AuthenticatedMember, record: dict[str, Any]
@@ -1201,6 +1799,9 @@ class GameplayService:
             return encounter
         projected = deepcopy(encounter)
         for participant in projected["state"].get("participants", []):
+            participant.pop("action_profiles", None)
+            participant.pop("action_profiles_source", None)
+            participant.pop("dodge_target", None)
             if participant.get("investigator_id") is None:
                 participant.pop("current_hp", None)
                 participant.pop("max_hp", None)

@@ -113,7 +113,10 @@ export function useWorkspaceRealtime(options: WorkspaceRealtimeOptions) {
       if (queuedKinds.has("seats") && role === "kp") callbacks.refreshSeats();
       if (queuedKinds.has("checks")) callbacks.refreshChecks();
       if (queuedKinds.has("pcs")) callbacks.refreshPcs();
-      if (queuedKinds.has("actions") && role === "kp") callbacks.refreshActions();
+      // The callback is deliberately role-aware at the workspace boundary:
+      // KP reloads pending actions, while players reload only public turns.
+      // Both roles therefore need this signal after a shared-world commit.
+      if (queuedKinds.has("actions")) callbacks.refreshActions();
       if (queuedKinds.has("proposals") && role === "kp") callbacks.refreshProposals();
       if (queuedKinds.has("maps")) callbacks.refreshMaps();
     }, 100);
@@ -176,9 +179,15 @@ export function useWorkspaceRealtime(options: WorkspaceRealtimeOptions) {
       onReady: (resyncRequired) => {
         if (!sameScope(scopeRef.current, expectedScope)) return;
         setNote(resyncRequired ? "游标已过期，正在安全地完整同步" : "实时同步已连接");
-        const commonKinds: RefreshKind[] = ["identity", "checks", "pcs", "maps"];
+        const commonKinds: RefreshKind[] = [
+          "identity",
+          "checks",
+          "pcs",
+          "maps",
+          "actions"
+        ];
         if (scopeRef.current.role === "kp") {
-          commonKinds.push("members", "seats", "actions", "proposals");
+          commonKinds.push("members", "seats", "proposals");
         }
         queueRefresh(expectedScope, ...commonKinds);
       },

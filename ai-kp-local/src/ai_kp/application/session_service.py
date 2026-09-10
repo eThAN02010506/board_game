@@ -1,5 +1,6 @@
 from ai_kp.application.ports.repositories import SessionStore
 from ai_kp.platform.sessions.models import AuthenticatedPlayer
+from ai_kp.platform.sessions.session_zero import CampaignSetupConfig
 
 
 class SessionService:
@@ -15,21 +16,39 @@ class SessionService:
         title: str | None = None,
         kp_display_name: str = "KP",
     ) -> dict:
-        return self.repo.create_campaign_session(
+        result = self.repo.create_campaign_session(
             campaign_id,
             title=title,
             kp_display_name=kp_display_name,
         )
+        self.repo.create_initial_episode(campaign_id, str(result["session"]["id"]))
+        campaign = result["campaign"]
+        if (
+            campaign.get("session_zero_required")
+            and self.repo.get_current_session_zero_revision(campaign_id) is None
+        ):
+            self.repo.create_session_zero_revision(
+                campaign_id=campaign_id,
+                config=CampaignSetupConfig(
+                    ruleset_id=str(campaign["ruleset_id"]),
+                    ruleset_version=str(campaign["ruleset_version"]),
+                ),
+                expected_version=0,
+                actor_member_id=str(result["member"]["id"]),
+            )
+        return result
 
     def join(
         self,
         join_code: str,
         *,
         display_name: str,
+        role: str = "player",
     ) -> dict:
         return self.repo.join_campaign_session(
             join_code,
             display_name=display_name,
+            role=role,
         )
 
     def recover_kp(self, campaign_id: str, *, display_name: str) -> dict:

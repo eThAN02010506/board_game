@@ -191,7 +191,3 @@ class RuleReviewSubmission(ClosedRuleModel):
         if self.decision == "rejected" and not (self.note or "").strip():
             raise ValueError("Rejected rules require a review note")
         return self
-
-
-class RuleExtractionEnvelope(ClosedRuleModel):
-    rules: list[RuleObject] = Field(default_factory=list, max_length=24)

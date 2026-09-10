@@ -28,6 +28,7 @@ def create_llm_client(
         client=getattr(request.app.state, "http_client", None),
     )
 
+
 def create_kp_orchestrator(
     repo: Repository,
     settings: Settings,
@@ -41,5 +42,6 @@ def create_kp_orchestrator(
         create_llm_client(settings, request),
         call_registry=registry,
     )
+
 
 __all__ = ["create_kp_orchestrator", "create_llm_client"]

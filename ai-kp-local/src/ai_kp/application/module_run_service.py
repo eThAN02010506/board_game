@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from typing import Any, NoReturn
 
 from ai_kp.application.errors import ConflictError, InvalidInputError
+from ai_kp.application.module_entity_materialization_service import (
+    ModuleEntityMaterializationService,
+)
 from ai_kp.application.ports.repositories import ModuleRunStore
 
 
@@ -258,13 +261,32 @@ class ModuleRunService:
         member_id: str,
     ) -> dict:
         try:
-            return self.repo.set_module_run_automation_level(
+            updated = self.repo.set_module_run_automation_level(
                 run_id,
                 expected_version=command.expected_version,
                 level=command.level,
                 reason=command.reason,
                 member_id=member_id,
             )
+            if command.level == "ai_kp":
+                pending_ids = tuple(
+                    str(candidate["id"])
+                    for candidate in self.repo.list_module_knowledge_candidates(
+                        str(updated["module_id"]),
+                        status="pending",
+                    )
+                    if candidate.get("created_by") == "ai"
+                )
+                ModuleEntityMaterializationService(
+                    self.repo
+                ).review_and_materialize(
+                    str(updated["module_id"]),
+                    pending_ids,
+                    member_id=member_id,
+                    note="auto-reviewed when automation changed to ai_kp",
+                )
+                return self.repo.get_campaign_module_run(run_id)
+            return updated
         except ValueError as exc:
             self._raise_input_or_conflict(exc)
 

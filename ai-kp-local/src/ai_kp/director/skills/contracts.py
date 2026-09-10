@@ -15,6 +15,7 @@ SkillCategory = Literal[
     "memory_curation",
     "module_understanding",
     "safety_review",
+    "encounter_tactics",
 ]
 
 

@@ -6,10 +6,13 @@ Callers supply recorded dice results, which makes every transition replayable.
 
 from __future__ import annotations
 
-import re
 from copy import deepcopy
 from typing import Any, Literal
 
+from ai_kp.platform.resolution.dice_expression import (
+    AdditiveDiceExpression,
+    parse_dice_expression,
+)
 from ai_kp.rulesets.coc7.mechanics.skill_check import SuccessLevel, success_level
 
 DefenseChoice = Literal["dodge", "fight_back"]
@@ -22,45 +25,17 @@ _SUCCESS_RANK: dict[SuccessLevel, int] = {
     "extreme": 3,
     "critical": 4,
 }
-_DICE_EXPRESSION = re.compile(
-    r"^\s*(?:(?P<count>[1-9]\d*)d(?P<sides>[1-9]\d*)|(?P<fixed>\d+))"
-    r"\s*(?P<modifier>[+-]\s*\d+)?\s*$",
-    re.IGNORECASE,
-)
+def validate_dice_expression(expression: str) -> AdditiveDiceExpression:
+    """Return the bounded, canonical AST for a damage/SAN expression."""
 
-
-def validate_dice_expression(expression: str) -> tuple[int, int, int]:
-    """Return ``(count, sides, modifier)`` for a bounded damage/SAN expression."""
-
-    match = _DICE_EXPRESSION.fullmatch(expression)
-    if match is None:
-        raise ValueError("Dice expression must look like 1d6, 2d10+3, or 4")
-    if match.group("fixed") is not None:
-        fixed = int(match.group("fixed"))
-        if fixed > 10_000:
-            raise ValueError("Fixed dice value is too large")
-        return 0, 0, fixed
-    count = int(match.group("count"))
-    sides = int(match.group("sides"))
-    modifier = int((match.group("modifier") or "0").replace(" ", ""))
-    if count > 100 or sides > 1_000 or abs(modifier) > 10_000:
-        raise ValueError("Dice expression exceeds safety limits")
-    return count, sides, modifier
+    return parse_dice_expression(expression)
 
 
 def evaluate_recorded_dice(expression: str, rolls: list[int]) -> int:
     """Evaluate an expression from explicitly recorded die faces."""
 
-    count, sides, modifier = validate_dice_expression(expression)
-    if count == 0:
-        if rolls:
-            raise ValueError("A fixed value does not accept die rolls")
-        return modifier
-    if len(rolls) != count:
-        raise ValueError(f"Expected {count} recorded dice, received {len(rolls)}")
-    if any(type(roll) is not int or not 1 <= roll <= sides for roll in rolls):
-        raise ValueError(f"Every recorded die must be between 1 and {sides}")
-    return sum(rolls) + modifier
+    total, _terms = validate_dice_expression(expression).evaluate(rolls)
+    return total
 
 
 def resolve_melee_exchange(
@@ -372,14 +347,49 @@ def apply_sanity_loss(
         raise ValueError("Daily sanity baseline is invalid")
     passed = roll <= current_san
     loss = success_loss if passed else failure_loss
+    result = apply_resolved_sanity_loss(
+        current_san=current_san,
+        maximum_san=maximum_san,
+        intelligence=intelligence,
+        loss=loss,
+        daily_loss_before=daily_loss_before,
+        daily_starting_san=daily_starting_san,
+        intelligence_roll=intelligence_roll,
+        bout_roll=bout_roll,
+        bout_duration=bout_duration,
+    )
+    return {"passed": passed, **result}
+
+
+def apply_resolved_sanity_loss(
+    *,
+    current_san: int,
+    maximum_san: int,
+    intelligence: int,
+    loss: int,
+    daily_loss_before: int,
+    daily_starting_san: int,
+    intelligence_roll: int | None = None,
+    bout_roll: int | None = None,
+    bout_duration: int | None = None,
+) -> dict[str, Any]:
+    """Apply a loss selected by an already-resolved scenario SAN check."""
+
+    if not 0 <= current_san <= maximum_san <= 99:
+        raise ValueError("Sanity state is invalid")
+    if loss < 0:
+        raise ValueError("Sanity loss cannot be negative")
+    if daily_loss_before < 0 or not 0 <= daily_starting_san <= 99:
+        raise ValueError("Daily sanity baseline is invalid")
     new_san = max(0, current_san - loss)
-    daily_loss = daily_loss_before + (current_san - new_san)
+    applied_loss = current_san - new_san
+    daily_loss = daily_loss_before + applied_loss
     temporary = False
-    requires_intelligence_roll = loss >= 5 and intelligence_roll is None
+    requires_intelligence_roll = applied_loss >= 5 and intelligence_roll is None
     if intelligence_roll is not None:
         if not 1 <= intelligence_roll <= 100:
             raise ValueError("Intelligence roll must be between 1 and 100")
-        temporary = loss >= 5 and intelligence_roll <= intelligence
+        temporary = applied_loss >= 5 and intelligence_roll <= intelligence
     indefinite = daily_starting_san > 0 and daily_loss * 5 >= daily_starting_san
     bout = None
     if (temporary or indefinite) and bout_roll is not None:
@@ -393,8 +403,7 @@ def apply_sanity_loss(
             "duration_unit": "round",
         }
     return {
-        "passed": passed,
-        "loss": current_san - new_san,
+        "loss": applied_loss,
         "current_san": new_san,
         "daily_san_loss": daily_loss,
         "temporary_insanity": temporary,
@@ -480,7 +489,11 @@ def _condition_map(
             raw["type"] = condition_type
             raw["active"] = True
             identity = condition_type
-            if condition_type in {"skill_growth_mark", "development_pending"}:
+            if condition_type in {
+                "skill_adjustment",
+                "skill_growth_mark",
+                "development_pending",
+            }:
                 identity = ":".join(
                     (
                         condition_type,

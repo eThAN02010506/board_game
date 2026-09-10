@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from ai_kp.director.turn_output import StructuredOutputError, _extract_json
+from ai_kp.platform.structured_json import decode_json_object
 
 WORLD_EFFECT_FIELDS = (
     "proposed_events",
@@ -12,14 +12,15 @@ WORLD_EFFECT_FIELDS = (
     "proposed_npc_updates",
     "proposed_map_moves",
     "proposed_facts",
+    "proposed_world_entity_states",
 )
 
 
 def remove_precommitted_world_effects(raw: str) -> str:
     """Remove effects only when the candidate itself declares an unresolved roll."""
     try:
-        payload = json.loads(_extract_json(raw))
-    except (json.JSONDecodeError, StructuredOutputError):
+        payload = decode_json_object(raw)
+    except ValueError:
         return raw
     if not isinstance(payload, dict):
         return raw

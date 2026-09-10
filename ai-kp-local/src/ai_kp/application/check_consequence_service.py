@@ -6,7 +6,14 @@ from ai_kp.application.ai_control_service import AiControlService
 from ai_kp.application.errors import KpSessionEndedError
 from ai_kp.application.ports.director import CheckConsequenceDirector
 from ai_kp.application.ports.repositories import TurnStore
-from ai_kp.director.check_consequence import enforce_failure_consistency
+from ai_kp.application.world_entity_state_candidates import (
+    validate_world_entity_state_candidates,
+)
+from ai_kp.director.check_consequence import (
+    enforce_effect_ceiling_consistency,
+    enforce_failure_consistency,
+    enforce_narrative_quality,
+)
 from ai_kp.platform.resolution import (
     HIDDEN_CHECK_PUBLIC_NARRATION,
     build_check_consequence_snapshot,
@@ -58,6 +65,13 @@ class CheckConsequenceService:
         effect_ceiling = (
             str(ceiling_value)[:1000] if ceiling_value else None
         )
+        forbidden_outcome_claims = tuple(
+            str(item)
+            for item in (origin.get("action_ruling") or {}).get(
+                "forbidden_outcome_claims", ()
+            )
+            if str(item).strip()
+        )[:8]
         control = AiControlService(self.repo).authorize(
             str(action["campaign_id"]),
             "check consequence proposal",
@@ -115,13 +129,22 @@ class CheckConsequenceService:
         hidden_batch = current_snapshot["has_hidden_checks"] is True
         if hidden_batch:
             self._require_kp_only_hidden_effects(output)
-        any_check_passed = any(
-            bool(item.get("passed"))
-            for item in current_snapshot.get("effective_results", [])
+        effective_results = current_snapshot.get("effective_results", [])
+        all_checks_passed = bool(effective_results) and all(
+            item.get("passed") is True
+            for item in effective_results
         )
         output = enforce_failure_consistency(
             output,
-            any_check_passed=any_check_passed,
+            all_checks_passed=all_checks_passed,
+        )
+        output = enforce_effect_ceiling_consistency(
+            output,
+            forbidden_outcome_claims=forbidden_outcome_claims,
+        )
+        output = enforce_narrative_quality(output)
+        output = validate_world_entity_state_candidates(
+            output, result.context.included_sources
         )
         proposal = self.repo.create_turn_proposal(
             campaign_id=str(current_action["campaign_id"]),
@@ -139,6 +162,7 @@ class CheckConsequenceService:
             proposed_npc_updates=output.proposed_npc_updates,
             proposed_map_moves=[],
             proposed_facts=output.proposed_facts,
+            proposed_world_entity_states=output.proposed_world_entity_states,
             source_model=source_model,
         )
         self.repo.add_proposal_action(
@@ -214,6 +238,13 @@ class CheckConsequenceService:
             )
         if getattr(output, "proposed_npc_updates", ()):
             raise ValueError("Hidden check consequences cannot persist NPC updates")
+        if any(
+            getattr(state, "visibility", None) == "table"
+            for state in getattr(output, "proposed_world_entity_states", ())
+        ):
+            raise ValueError(
+                "Hidden check consequences cannot persist table-visible entity states"
+            )
 
     @staticmethod
     def _require_linked_scope(

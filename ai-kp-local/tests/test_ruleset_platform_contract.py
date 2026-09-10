@@ -118,6 +118,7 @@ def test_ai_skills_are_explicit_proposal_only_contracts() -> None:
         "platform.check_consequence_narration",
         "platform.world_expansion",
         "platform.session_recap",
+        "platform.enemy_turn_selection",
     }
     assert all(item["authority"] == "proposal_only" for item in skills)
     assert all(item["source_requirements"] for item in skills)

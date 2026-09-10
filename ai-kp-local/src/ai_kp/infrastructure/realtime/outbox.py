@@ -180,7 +180,7 @@ class RealtimeRepository:
         after_cursor: int = 0,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        if role not in {"kp", "player"}:
+        if role not in {"kp", "player", "observer"}:
             raise ValueError(f"Unsupported realtime role: {role}")
         bounded_limit = max(1, min(limit, 200))
         rows = self.connection.execute(
@@ -192,9 +192,17 @@ class RealtimeRepository:
             WHERE event.session_id = ?
               AND event.id > ?
               AND viewer.revoked_at IS NULL
+              AND viewer.role = ?
+              AND viewer.campaign_id = event.campaign_id
               AND session.status = 'active'
               AND (
-                event.audience = 'session'
+                (event.audience = 'session' AND (
+                  ? != 'observer' OR event.event_type IN (
+                    'table_message.created', 'session.safety_paused',
+                    'session.safety_resolved', 'session.closed', 'world.updated',
+                    'map.published'
+                  )
+                ))
                 OR (event.audience = 'kp' AND ? = 'kp')
                 OR (event.audience = 'member' AND event.member_id = ?)
               )
@@ -205,6 +213,8 @@ class RealtimeRepository:
                 member_id,
                 session_id,
                 max(0, after_cursor),
+                role,
+                role,
                 role,
                 member_id,
                 bounded_limit,
@@ -220,18 +230,33 @@ class RealtimeRepository:
         role: str,
         member_id: str,
     ) -> int | None:
+        if role not in {"kp", "player", "observer"}:
+            raise ValueError(f"Unsupported realtime role: {role}")
         row = self.connection.execute(
             """
-            SELECT id FROM realtime_events
-            WHERE event_key = ?
-              AND session_id = ?
+            SELECT event.id FROM realtime_events event
+            JOIN session_members viewer
+              ON viewer.id = ? AND viewer.session_id = event.session_id
+            JOIN campaign_sessions session ON session.id = event.session_id
+            WHERE event.event_key = ?
+              AND event.session_id = ?
+              AND viewer.revoked_at IS NULL
+              AND viewer.role = ?
+              AND viewer.campaign_id = event.campaign_id
+              AND session.status = 'active'
               AND (
-                audience = 'session'
-                OR (audience = 'kp' AND ? = 'kp')
-                OR (audience = 'member' AND member_id = ?)
+                (event.audience = 'session' AND (
+                  ? != 'observer' OR event.event_type IN (
+                    'table_message.created', 'session.safety_paused',
+                    'session.safety_resolved', 'session.closed', 'world.updated',
+                    'map.published'
+                  )
+                ))
+                OR (event.audience = 'kp' AND ? = 'kp')
+                OR (event.audience = 'member' AND event.member_id = ?)
               )
             """,
-            (event_key, session_id, role, member_id),
+            (member_id, event_key, session_id, role, role, role, member_id),
         ).fetchone()
         return int(row["id"]) if row is not None else None
 

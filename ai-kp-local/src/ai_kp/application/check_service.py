@@ -22,6 +22,7 @@ class CreateCheckCommand:
     target: int | None = None
     proposal_id: str | None = None
     player_action_id: str | None = None
+    check_plan: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,10 @@ class CheckService:
             bonus_dice=command.bonus_dice,
         )
         manifest = ruleset.manifest
+        self.repo.begin_immediate()
+        self._assert_parallel_action_check_creation_allowed(
+            command.player_action_id
+        )
         return self.repo.create_skill_check(
             campaign_id=campaign_id,
             session_id=identity.session_id,
@@ -95,6 +100,7 @@ class CheckService:
             target=command.target,
             proposal_id=command.proposal_id,
             player_action_id=command.player_action_id,
+            check_plan=command.check_plan,
         )
 
     def list(self, campaign_id: str, identity: AuthenticatedMember) -> list[dict]:
@@ -163,7 +169,14 @@ class CheckService:
         self._require_kp(identity, str(opposed["campaign_id"]))
         if identity.session_id != opposed["session_id"]:
             raise PermissionError("Opposed check belongs to another session")
+        self.repo.begin_immediate()
+        opposed = self.repo.get_opposed_check(opposed_check_id)
+        self._require_kp(identity, str(opposed["campaign_id"]))
+        if identity.session_id != opposed["session_id"]:
+            raise PermissionError("Opposed check belongs to another session")
         left, right = opposed["left_check"], opposed["right_check"]
+        self._assert_parallel_check_mutation_allowed(left)
+        self._assert_parallel_check_mutation_allowed(right)
         if any(check["status"] not in {"resolved", "overridden"} for check in (left, right)):
             raise ValueError("Both sides must have terminal rolled results")
         if left["ruleset_id"] != right["ruleset_id"]:
@@ -220,6 +233,14 @@ class CheckService:
         if opposed["status"] != "reroll_required":
             raise ValueError("Only an exact tied opposed check can be rerolled")
         self.repo.begin_immediate()
+        opposed = self.repo.get_opposed_check(opposed_check_id)
+        self._require_kp(identity, str(opposed["campaign_id"]))
+        if identity.session_id != opposed["session_id"]:
+            raise PermissionError("Opposed check belongs to another session")
+        if opposed["status"] != "reroll_required":
+            raise ValueError("Only an exact tied opposed check can be rerolled")
+        self._assert_parallel_check_mutation_allowed(opposed["left_check"])
+        self._assert_parallel_check_mutation_allowed(opposed["right_check"])
         # Re-check after acquiring the write lock so two concurrent reroll
         # requests serialize: the second one will see the first's result.
         existing = next(
@@ -298,6 +319,13 @@ class CheckService:
             bonus_dice=int(check["bonus_dice"]),
             raw_dice=raw_dice,
         )
+        # The batch status and check result form one authority boundary.  Take
+        # the writer lock only after potentially slow/random rule evaluation,
+        # then re-read both records before the result write.
+        self.repo.begin_immediate()
+        check = self.repo.get_skill_check(check_id)
+        self._require_visible(check, identity, resolving=True)
+        self._assert_parallel_check_mutation_allowed(check)
         resolved = self.repo.resolve_skill_check(
             check_id,
             actor_member_id=identity.member_id,
@@ -354,6 +382,10 @@ class CheckService:
     ) -> dict:
         check = self.repo.get_skill_check(check_id)
         self._require_kp_check(identity, check)
+        self.repo.begin_immediate()
+        check = self.repo.get_skill_check(check_id)
+        self._require_kp_check(identity, check)
+        self._assert_parallel_check_mutation_allowed(check)
         overridden = self.repo.override_skill_check(
             check_id,
             actor_member_id=identity.member_id,
@@ -371,16 +403,89 @@ class CheckService:
     ) -> dict:
         check = self.repo.get_skill_check(check_id)
         self._require_kp_check(identity, check)
+        self.repo.begin_immediate()
+        check = self.repo.get_skill_check(check_id)
+        self._require_kp_check(identity, check)
+        self._assert_parallel_check_mutation_allowed(check)
         return self.repo.cancel_skill_check(
             check_id, actor_member_id=identity.member_id, reason=reason
         )
 
     def push(self, check_id: str, identity: AuthenticatedMember, *, reason: str) -> dict:
         check = self.repo.get_skill_check(check_id)
-        self._require_kp_check(identity, check)
+        self._require_push_actor(identity, check)
+        self.repo.begin_immediate()
+        check = self.repo.get_skill_check(check_id)
+        self._require_push_actor(identity, check)
+        self._assert_parallel_check_mutation_allowed(check)
         return self.repo.push_skill_check(
             check_id, actor_member_id=identity.member_id, reason=reason
         )
+
+    def decline_push(
+        self, check_id: str, identity: AuthenticatedMember, *, reason: str
+    ) -> dict:
+        check = self.repo.get_skill_check(check_id)
+        self._require_push_actor(identity, check)
+        self.repo.begin_immediate()
+        check = self.repo.get_skill_check(check_id)
+        self._require_push_actor(identity, check)
+        self._assert_parallel_check_mutation_allowed(check)
+        return self.repo.decline_skill_check_push(
+            check_id, actor_member_id=identity.member_id, reason=reason
+        )
+
+    def _assert_parallel_check_mutation_allowed(
+        self,
+        check: dict,
+    ) -> None:
+        """Fence a linked result to the batch's check-collection phase.
+
+        The caller must already hold the repository write lock.  Looking up
+        every lifecycle status (including settled and superseded) prevents a
+        stale check endpoint from changing the exact result behind a ready or
+        committed batch receipt.
+        """
+
+        self._assert_parallel_action_check_mutation_allowed(
+            check.get("player_action_id")
+        )
+
+    def _assert_parallel_action_check_creation_allowed(
+        self,
+        action_id: str | None,
+    ) -> None:
+        """Keep new batch checks behind the consent-bound workflow seam.
+
+        Initial batch checks are created while the last player confirmation is
+        committed. Push children use their own parent-bound repository path.
+        The generic KP check APIs have neither authority and therefore cannot
+        append another roll after the players have confirmed the batch plan.
+        """
+
+        if not action_id:
+            return
+        batch = self.repo.get_parallel_action_batch_for_action(str(action_id))
+        if batch is not None:
+            raise ValueError(
+                "Checks for a parallel action can be created only by the "
+                "consent-bound parallel workflow"
+            )
+
+    def _assert_parallel_action_check_mutation_allowed(
+        self,
+        action_id: str | None,
+    ) -> None:
+        if not action_id:
+            return
+        batch = self.repo.get_parallel_action_batch_for_action(str(action_id))
+        if batch is None:
+            return
+        if batch["status"] != "awaiting_checks":
+            raise ValueError(
+                "Parallel batch check results can change only while the batch "
+                f"awaits checks (current status: {batch['status']})"
+            )
 
     @staticmethod
     def _require_campaign(identity: AuthenticatedMember, campaign_id: str) -> None:
@@ -404,6 +509,22 @@ class CheckService:
             raise PermissionError("Check belongs to another session")
         if not cls._can_view(check, identity):
             raise PermissionError("Check is not visible to this member")
+
+    @classmethod
+    def _require_push_actor(
+        cls,
+        identity: AuthenticatedMember,
+        check: dict,
+    ) -> None:
+        cls._require_campaign(identity, str(check["campaign_id"]))
+        if identity.session_id != check["session_id"]:
+            raise PermissionError("Check belongs to another session")
+        if not cls._can_view(check, identity):
+            raise PermissionError("Check is not visible to this member")
+        if identity.role != "kp" and identity.member_id != check.get(
+            "roller_member_id"
+        ):
+            raise PermissionError("Only the roller or KP can decide whether to push")
 
     @classmethod
     def _require_visible(

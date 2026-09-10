@@ -15,13 +15,28 @@ class Settings(BaseSettings):
     llm_base_url: str = Field(default="http://localhost:11434/v1")
     llm_api_key: str = Field(default="local")
     llm_model: str = Field(default="qwen3:8b")
+    director_help_max_concurrency: int = Field(default=1, ge=1, le=32)
     rulebook_index_root: Path = Field(default=Path("data/rag/rulesets"))
     rulebook_embedding_dimensions: int = Field(default=384, ge=64, le=2048)
     map_asset_root: Path = Field(default=Path("data/map-assets"))
     module_asset_root: Path = Field(default=Path("data/module-assets"))
-    module_parse_timeout_seconds: float = Field(default=90, ge=5, le=600)
+    module_parse_timeout_seconds: float = Field(default=3600, ge=5, le=3600)
     module_parse_memory_limit_mib: int = Field(default=1024, ge=256, le=8192)
-    module_parse_cpu_seconds: int = Field(default=60, ge=1, le=600)
+    module_parse_cpu_seconds: int = Field(default=3600, ge=1, le=3600)
+    module_document_parse_timeout_seconds: float = Field(
+        default=10_800,
+        ge=60,
+        le=21_600,
+    )
+    module_document_parse_cpu_seconds: int = Field(
+        default=10_800,
+        ge=60,
+        le=21_600,
+    )
+    module_document_parser: Literal["native_first", "mineru", "builtin"] = "native_first"
+    mineru_command: str = Field(default="mineru", min_length=1, max_length=500)
+    mineru_backend: Literal["pipeline", "vlm-engine", "hybrid-engine"] = "pipeline"
+    mineru_model_source: Literal["modelscope", "huggingface"] = "modelscope"
     legacy_doc_converter_command: str = Field(
         default="soffice",
         min_length=1,

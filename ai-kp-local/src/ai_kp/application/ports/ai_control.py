@@ -5,6 +5,7 @@ from typing import Protocol
 
 class AiControlStore(Protocol):
     def get_active_campaign_module_run(self, campaign_id: str) -> dict | None: ...
+    def get_model_configuration(self) -> dict | None: ...
 
 
 __all__ = ["AiControlStore"]

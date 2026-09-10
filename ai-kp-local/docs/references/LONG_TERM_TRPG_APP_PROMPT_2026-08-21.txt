@@ -1,0 +1,1568 @@
+# 任务：设计并打磨一个真正可长期使用的跑团（TRPG）App
+
+你现在负责设计一个真正可以让玩家长期使用的 TRPG / 跑团 App。
+
+不要把任务理解成：
+
+> “做一个可以聊天、投骰子、生成故事的 AI RPG App。”
+
+我要的是：
+
+> **一个真正能够支持现实跑团完整游玩流程的产品。**
+
+请站在以下四种角色的角度同时思考：
+
+1. **资深 DM / GM**
+2. **真实玩家**
+3. **TRPG 产品经理**
+4. **QA / 游戏测试人员**
+
+最终目标是：
+
+> 用户第一次打开 App 后，可以自然地完成“建团 → 建卡 → Session 0 → 正式游戏 → 探索 → 对话 → 战斗 → 掷骰 → 判定 → 战利品 → 升级 → Session End → 长期 Campaign”，并且整个过程中不会因为 App 的设计而破坏跑团体验。
+
+---
+
+# 一、首先不要急着设计 UI
+
+在开始设计之前，先完整分析：
+
+## 一个真实跑团到底是怎么发生的？
+
+请模拟一个完整 Campaign。
+
+至少考虑：
+
+```text
+找团
+↓
+加入 Campaign
+↓
+创建角色
+↓
+选择规则 / 世界观
+↓
+Session 0
+↓
+认识其他玩家
+↓
+建立 Party
+↓
+开始冒险
+↓
+探索
+↓
+NPC 对话
+↓
+调查
+↓
+技能检定
+↓
+战斗
+↓
+回合管理
+↓
+技能 / 法术
+↓
+物品
+↓
+角色成长
+↓
+剧情推进
+↓
+Session End
+↓
+保存 Campaign State
+↓
+下次继续
+↓
+长期 Campaign
+```
+
+不要只考虑“一次游戏”。
+
+必须考虑：
+
+> **玩家玩了 20 次 Session 以后，这个 App 还能不能正常工作？**
+
+---
+
+# 二、定义真实用户
+
+至少考虑以下用户：
+
+## Player
+
+可能：
+
+* 第一次玩 TRPG
+* 有经验的玩家
+* 非常熟悉规则
+* 喜欢角色扮演
+* 喜欢战斗
+* 喜欢探索
+* 喜欢优化 Build
+* 喜欢剧情
+* 喜欢搞事情 / Sandbox
+
+## DM / GM
+
+可能：
+
+* 新手 DM
+* 有经验 DM
+* 喜欢严格规则
+* 喜欢 Rule of Cool
+* 喜欢剧情
+* 喜欢开放世界
+* 喜欢自制规则
+
+## Observer / Spectator
+
+有些用户可能：
+
+* 观看游戏
+* 不参与游戏
+* 后加入 Campaign
+
+---
+
+# 三、必须支持真实的多人跑团
+
+不要把 TRPG 理解成：
+
+> 一个用户 + AI
+
+必须考虑：
+
+```text
+DM
+Player 1
+Player 2
+Player 3
+Player 4
+Player 5
+AI Assistant
+```
+
+同时在线。
+
+必须考虑：
+
+* 谁能看到什么
+* 谁能修改什么
+* 谁能掷骰
+* 谁能看到骰子结果
+* DM 的隐藏信息
+* 玩家之间的私聊
+* DM 私聊玩家
+* NPC 私密信息
+* Hidden Check
+* Secret Door
+* Hidden Trap
+* Fog of War
+
+---
+
+# 四、Session 0
+
+Session 0 是真实跑团非常重要的一部分。
+
+必须考虑：
+
+### Campaign Setup
+
+* 世界观
+* 规则
+* DM
+* 玩家人数
+* 游戏风格
+* Campaign 类型
+* Character Level
+* Allowed Classes
+* Allowed Races
+* House Rules
+
+### Player Expectations
+
+例如：
+
+* Combat-heavy
+* Roleplay-heavy
+* Exploration-heavy
+* Horror
+* Comedy
+* Serious
+* Sandbox
+* Linear
+
+### Safety
+
+真实玩家可能不希望某些内容出现。
+
+考虑：
+
+* Content Warning
+* Lines
+* Veils
+* X-Card / Safety Tools
+* Sensitive Topics
+
+不要把这些做成复杂流程。
+
+应该自然地融入产品。
+
+---
+
+# 五、角色创建
+
+角色创建不能只是：
+
+```text
+Name
+Class
+Race
+Stats
+```
+
+真实玩家会考虑：
+
+* Background
+* Personality
+* Ideals
+* Bonds
+* Flaws
+* Goals
+* Relationships
+* Backstory
+* Equipment
+* Spells
+* Abilities
+* Proficiencies
+* Languages
+
+还要考虑：
+
+### 角色卡是否会变化？
+
+例如：
+
+```text
+Level 1
+↓
+Level 2
+↓
+Level 3
+↓
+装备变化
+↓
+Buff
+↓
+Debuff
+↓
+Death
+↓
+Resurrection
+```
+
+必须保证 Character State 永远一致。
+
+---
+
+# 六、不要强迫玩家使用复杂 UI
+
+真实跑团最大的体验问题之一：
+
+> 玩家想做一件很简单的事情，却必须点击 10 个按钮。
+
+例如：
+
+玩家说：
+
+> “我想打开这个箱子。”
+
+系统不应该要求：
+
+```text
+Open Inventory
+↓
+Select Character
+↓
+Select Action
+↓
+Select Object
+↓
+Select Check
+↓
+Confirm
+```
+
+而应该允许：
+
+> “我打开箱子。”
+
+系统判断：
+
+* 是否需要检定
+* 是否需要消耗行动
+* 是否触发 Trap
+* 是否需要 DM 决定
+
+然后自然推进游戏。
+
+---
+
+# 七、自然语言是核心交互方式之一
+
+玩家应该能够：
+
+> “我看看地上有没有脚印。”
+
+系统：
+
+> Perception Check
+
+然后：
+
+> 🎲 Roll d20 + 4
+
+而不是强迫用户找到：
+
+> Investigation → Perception → Roll
+
+---
+
+# 八、但不要完全依赖 AI
+
+必须区分：
+
+## Deterministic Game Logic
+
+应该由程序控制：
+
+* HP
+* AC
+* Dice
+* Damage
+* Inventory
+* Currency
+* Initiative
+* Spell Slots
+* Conditions
+* Character Stats
+* Level
+* XP
+* Death
+
+## AI Logic
+
+适合：
+
+* NPC Dialogue
+* Storytelling
+* Description
+* Quest Generation
+* Improvisation
+* DM Assistance
+* Rule Explanation
+
+不要让 LLM 随便决定：
+
+> “玩家 HP 现在变成 43。”
+
+游戏状态必须由可靠的数据结构控制。
+
+---
+
+# 九、骰子系统
+
+必须认真设计骰子。
+
+至少支持：
+
+```text
+d4
+d6
+d8
+d10
+d12
+d20
+d100
+2d6
+1d20+5
+2d20kh1
+2d20kl1
+```
+
+并考虑：
+
+* Advantage
+* Disadvantage
+* Critical
+* Critical Failure
+* Modifier
+* Reroll
+* Hidden Roll
+* DM Roll
+* Player Roll
+
+还要考虑：
+
+### 谁可以看到结果？
+
+例如：
+
+```text
+Public Roll
+Private Roll
+DM Only
+Player + DM
+```
+
+---
+
+# 十、战斗系统
+
+不要只设计：
+
+```text
+Player attacks
+Enemy loses HP
+```
+
+真实战斗至少考虑：
+
+### Initiative
+
+```text
+Player A
+Enemy A
+Player B
+Enemy B
+```
+
+### Turn
+
+必须清楚：
+
+```text
+Action
+Bonus Action
+Movement
+Reaction
+Free Interaction
+```
+
+具体规则根据系统而定，不要强行假设所有 TRPG 都使用 D&D。
+
+---
+
+# 十一、战斗中的现实问题
+
+考虑：
+
+### 玩家离线
+
+玩家突然：
+
+> Disconnect
+
+怎么办？
+
+### 玩家挂机
+
+玩家 10 分钟没操作。
+
+怎么办？
+
+### DM 改规则
+
+DM：
+
+> “这次我允许你做这个动作。”
+
+怎么办？
+
+### Player 想做规则外行为
+
+玩家：
+
+> “我想把桌子扔过去。”
+
+系统不能只说：
+
+> “该操作不支持。”
+
+应该：
+
+> “这可以作为 Improvised Action，由 DM 判断。”
+
+---
+
+# 十二、Rule of Cool
+
+这是非常重要的。
+
+TRPG 不是电子游戏。
+
+玩家经常会：
+
+> 做规则没有写的事情。
+
+例如：
+
+> “我把油倒在地上然后点火。”
+
+或者：
+
+> “我从二楼跳下来，把剑插进敌人肩膀。”
+
+系统应该：
+
+1. 判断是否存在规则支持
+2. 如果没有，建议可能的判定
+3. 给 DM 最终决定权
+
+不要让 AI 直接拒绝。
+
+---
+
+# 十三、DM 权限必须非常强
+
+DM 应该能够：
+
+* 修改 HP
+* 修改 NPC
+* 修改天气
+* 修改地图
+* 添加 NPC
+* 添加 Quest
+* 修改 Dice Result
+* Override Rule
+* 添加 House Rule
+* 控制 NPC
+* 隐藏信息
+* 修改剧情
+* 回滚状态
+
+DM 应该拥有：
+
+> **最终解释权。**
+
+AI 是助手，不应该取代 DM。
+
+---
+
+# 十四、AI DM
+
+如果 App 有 AI DM：
+
+不要把 AI DM 设计成：
+
+> “一直讲故事。”
+
+AI DM 必须理解：
+
+```text
+World State
+Character State
+Party State
+Quest State
+NPC State
+Location State
+Combat State
+Inventory State
+Time
+Weather
+Secrets
+```
+
+例如：
+
+玩家杀死 NPC A。
+
+以后：
+
+> NPC A 不应该再次出现。
+
+除非：
+
+* Resurrection
+* Clone
+* Illusion
+* Time Travel
+* AI 合理解释
+
+---
+
+# 十五、长期世界状态
+
+这是整个 App 最重要的系统之一。
+
+必须建立：
+
+# Campaign State
+
+例如：
+
+```text
+Campaign
+├── World
+├── Locations
+├── NPCs
+├── Factions
+├── Quests
+├── Items
+├── Monsters
+├── Timeline
+├── Secrets
+├── Relationships
+└── History
+```
+
+玩家行为必须改变 World State。
+
+例如：
+
+Session 3：
+
+> Party burns the tavern.
+
+Session 8：
+
+> Tavern should still be burned.
+
+不能因为 AI context window 变化就忘记。
+
+---
+
+# 十六、记忆系统
+
+至少需要：
+
+### Short-term Memory
+
+当前对话。
+
+### Session Memory
+
+当前 Session。
+
+### Campaign Memory
+
+整个 Campaign。
+
+### Character Memory
+
+角色经历。
+
+### NPC Memory
+
+NPC 对玩家的印象。
+
+例如：
+
+玩家欺骗 NPC。
+
+以后：
+
+> NPC 应该记得。
+
+如果 NPC 不知道玩家身份：
+
+> 不能突然知道。
+
+---
+
+# 十七、NPC 必须拥有自己的知识边界
+
+非常重要。
+
+NPC 不应该知道：
+
+* 玩家没告诉他的事情
+* DM Secret
+* 世界其他地方发生的事情
+* 玩家角色之间的秘密
+
+除非合理获得信息。
+
+也就是说：
+
+> **Information ≠ World Truth**
+
+必须区分：
+
+```text
+World State
+NPC Knowledge
+Player Knowledge
+DM Knowledge
+```
+
+---
+
+# 十八、地图
+
+如果存在地图系统：
+
+考虑：
+
+* Grid
+* Distance
+* Position
+* Movement
+* Line of Sight
+* Fog of War
+* Hidden Areas
+* Tokens
+* NPC
+* Monsters
+* Objects
+* Terrain
+* Doors
+* Traps
+
+但是不要强迫所有跑团都使用战术地图。
+
+支持：
+
+### Theater of the Mind
+
+以及：
+
+### Tactical Combat
+
+---
+
+# 十九、物品与经济
+
+必须考虑：
+
+* Inventory
+* Weight / Encumbrance
+* Equipment
+* Currency
+* Consumables
+* Loot
+* Quest Items
+* Unique Items
+* Cursed Items
+* Hidden Properties
+
+尤其是：
+
+> 玩家不知道物品真实属性。
+
+例如：
+
+> 一个戒指看起来普通。
+
+DM 知道：
+
+> Ring is cursed.
+
+玩家不应该直接看到。
+
+---
+
+# 二十、死亡
+
+真实 TRPG 会出现：
+
+> Player Character dies.
+
+必须考虑：
+
+* Death
+* Downed
+* Death Saves
+* Resurrection
+* New Character
+* Spectator
+* Rejoin
+* Party Reaction
+
+不要假设：
+
+> 玩家死了 = Game Over。
+
+---
+
+# 二十一、玩家加入/退出 Campaign
+
+长期跑团非常常见。
+
+考虑：
+
+### 新玩家加入
+
+如何：
+
+* 创建角色
+* 加入已有世界
+* 获取 Campaign Summary
+* 获取重要 NPC
+* 获取 Party 信息
+
+### 玩家退出
+
+角色怎么办？
+
+* DM 控制
+* NPC 化
+* 暂时离队
+* 永久离队
+
+---
+
+# 二十二、Session End
+
+Session 结束时：
+
+不要只：
+
+> “Game saved.”
+
+应该生成：
+
+### Session Summary
+
+* 发生了什么
+* 获得了什么
+* 谁受伤
+* 谁死亡
+* Quest Progress
+* NPC Changes
+* World Changes
+* Important Decisions
+* Unresolved Threads
+
+但必须区分：
+
+### 玩家可见总结
+
+和：
+
+### DM Summary
+
+DM Summary 可以包含秘密。
+
+---
+
+# 二十三、下一次 Session
+
+玩家下次打开：
+
+应该看到：
+
+> **Continue Campaign**
+
+然后：
+
+### Previously on...
+
+简短回顾：
+
+> 上次你们……
+
+并提供：
+
+* 当前地点
+* Party 状态
+* 当前任务
+* 未解决问题
+* 重要 NPC
+* Inventory
+
+让玩家可以马上进入游戏。
+
+---
+
+# 二十四、真实社交体验
+
+考虑：
+
+* Party Chat
+* Voice Chat
+* Text Chat
+* DM Announcement
+* Private Message
+* Dice Reactions
+* Emotes
+* Character Portrait
+* Voice / Speech
+* Turn Notifications
+
+但不要为了“功能多”而加入所有东西。
+
+每个功能必须回答：
+
+> **它是否真的改善跑团体验？**
+
+---
+
+# 二十五、不要让 UI 打断沉浸感
+
+这是核心原则：
+
+> **TRPG App 应该辅助游戏，而不是成为游戏本身。**
+
+例如：
+
+玩家：
+
+> “我拔出剑。”
+
+系统不应该突然弹出：
+
+> Select Weapon → Confirm → Action → Confirm
+
+而应该：
+
+> “你拔出长剑。”
+
+只有真正需要玩家决策时才展示 UI。
+
+---
+
+# 二十六、考虑真实玩家的情绪
+
+测试：
+
+### 玩家很兴奋
+
+系统不要频繁打断。
+
+### 玩家很困惑
+
+提供帮助。
+
+### 玩家不知道规则
+
+解释规则，但不要强迫阅读规则书。
+
+### 玩家失败
+
+不要让失败直接导致剧情死路。
+
+### 玩家做出非常蠢的决定
+
+不要立刻阻止。
+
+### 玩家做出创造性行为
+
+鼓励 Rule of Cool。
+
+### 玩家输了战斗
+
+不要自动结束 Campaign。
+
+---
+
+# 二十七、考虑“失败也应该有趣”
+
+TRPG 的失败不能简单变成：
+
+> Failed → Nothing happens.
+
+应该允许：
+
+```text
+Success
+Partial Success
+Failure
+Failure with Consequence
+Critical Success
+Critical Failure
+```
+
+例如：
+
+玩家没有打开门。
+
+不应该：
+
+> “You failed.”
+
+可以：
+
+> “你没能打开锁，但你听见门后似乎有人移动。”
+
+失败继续推动故事。
+
+---
+
+# 二十八、必须测试玩家乱来
+
+请主动模拟：
+
+> 玩家不按照剧情走。
+
+例如：
+
+DM 准备：
+
+> 玩家进入城堡。
+
+玩家：
+
+> “我不去城堡，我去森林。”
+
+系统怎么办？
+
+必须支持：
+
+> **Player Agency。**
+
+不要强迫玩家按照预设剧情走。
+
+---
+
+# 二十九、必须测试 AI Hallucination
+
+例如：
+
+AI 说：
+
+> “你之前在 Waterdeep 买过一把剑。”
+
+但数据库没有这个记录。
+
+必须阻止。
+
+AI 不能创造：
+
+* 不存在的历史
+* 不存在的物品
+* 不存在的 NPC 关系
+* 不存在的玩家行为
+
+除非明确标记：
+
+> AI Proposed Content
+
+并等待确认。
+
+---
+
+# 三十、必须测试极端情况
+
+至少测试：
+
+1. 玩家突然退出
+2. DM 退出
+3. 网络断开
+4. 两个玩家同时操作
+5. 两个玩家同时修改同一个物品
+6. 战斗中断
+7. AI 崩溃
+8. AI 记忆错误
+9. 玩家输入完全不符合预期
+10. 玩家连续做出规则外行为
+11. 玩家死亡
+12. 玩家加入
+13. 玩家离开
+14. DM 修改规则
+15. Campaign 长时间暂停
+16. Campaign 重新开始
+17. Session 回滚
+18. 玩家要求查看秘密
+19. NPC 被杀死
+20. 关键 Quest 被玩家跳过
+
+---
+
+# 三十一、建立真实玩家测试
+
+请不要只做功能测试。
+
+模拟至少 5 类玩家：
+
+## Player A — TRPG 新手
+
+目标：
+
+> 不知道任何规则。
+
+测试：
+
+> 能否自然开始游戏？
+
+---
+
+## Player B — 老玩家
+
+目标：
+
+> 非常在意规则正确性。
+
+测试：
+
+> AI 是否胡乱解释规则？
+
+---
+
+## Player C — Roleplay Player
+
+目标：
+
+> 喜欢角色扮演。
+
+测试：
+
+> 系统是否过度 UI 化？
+
+---
+
+## Player D — Min-Max Player
+
+目标：
+
+> 非常在意数值。
+
+测试：
+
+> Character State 是否准确？
+
+---
+
+## Player E — Chaos Player
+
+目标：
+
+> 什么都想尝试。
+
+测试：
+
+> Player Agency 是否足够？
+
+---
+
+# 三十二、建立 DM 测试
+
+模拟：
+
+## New DM
+
+测试：
+
+> 是否容易管理 NPC / Combat / Quest？
+
+## Experienced DM
+
+测试：
+
+> AI 是否妨碍 DM？
+
+## AI-assisted DM
+
+测试：
+
+> AI 是否真的减少 DM 工作量？
+
+---
+
+# 三十三、建立 UX 标准
+
+定义：
+
+# Real Player Standard
+
+一个功能只有满足以下条件才算合格：
+
+### 1.
+
+玩家知道现在发生什么。
+
+### 2.
+
+玩家知道自己可以做什么。
+
+### 3.
+
+玩家不会因为 UI 不知道下一步。
+
+### 4.
+
+玩家可以自由表达行动。
+
+### 5.
+
+系统不会擅自替玩家做重要决定。
+
+### 6.
+
+DM 永远可以 Override。
+
+### 7.
+
+游戏状态不会因为 AI 出错而损坏。
+
+### 8.
+
+玩家可以随时理解自己的角色状态。
+
+### 9.
+
+长期 Campaign 不会遗忘重要历史。
+
+### 10.
+
+失败不会轻易导致游戏体验崩溃。
+
+### 11.
+
+新玩家可以快速上手。
+
+### 12.
+
+老玩家不会觉得系统限制太多。
+
+---
+
+# 三十四、进行“完整游戏模拟”
+
+这是最重要的测试。
+
+不要只测试单个功能。
+
+你必须真正模拟：
+
+# Session 0
+
+→ 建立 Campaign
+
+→ 创建 4 个角色
+
+→ 分配 DM
+
+→ 设定规则
+
+→ 开始 Session
+
+→ 玩家探索
+
+→ 玩家发现 NPC
+
+→ 对话
+
+→ 技能检定
+
+→ 失败
+
+→ 继续探索
+
+→ 发现敌人
+
+→ 战斗
+
+→ Initiative
+
+→ Player 1 行动
+
+→ Player 2 行动
+
+→ Enemy 行动
+
+→ 玩家使用物品
+
+→ 玩家受伤
+
+→ NPC 死亡
+
+→ 获得 Loot
+
+→ 玩家做出非预期选择
+
+→ Quest 改变
+
+→ Session End
+
+→ 保存世界状态
+
+→ 第二天重新打开
+
+→ Continue Campaign
+
+→ 回顾上一 Session
+
+→ 继续游戏。
+
+---
+
+# 三十五、至少模拟 10 个 Session
+
+不要只测试第一局。
+
+模拟：
+
+### Session 1
+
+第一次冒险。
+
+### Session 2
+
+玩家开始熟悉系统。
+
+### Session 3
+
+出现复杂 NPC。
+
+### Session 4
+
+玩家开始探索开放世界。
+
+### Session 5
+
+发生重大剧情选择。
+
+### Session 6
+
+角色升级。
+
+### Session 7
+
+玩家死亡。
+
+### Session 8
+
+新角色加入。
+
+### Session 9
+
+玩家离开 Campaign。
+
+### Session 10
+
+Campaign 长期状态检查。
+
+然后检查：
+
+> **系统有没有忘记任何重要信息？**
+
+---
+
+# 三十六、建立 Bug 分类
+
+所有问题分类：
+
+### P0 — Game Breaking
+
+游戏无法继续。
+
+### P1 — State Corruption
+
+角色 / 世界状态错误。
+
+### P2 — Major UX Problem
+
+严重影响游戏体验。
+
+### P3 — Minor UX
+
+小问题。
+
+### P4 — Nice to Have
+
+优化。
+
+优先修：
+
+> P0 → P1 → P2 → P3 → P4
+
+---
+
+# 三十七、不要为了“功能完整”牺牲体验
+
+请始终遵循：
+
+> **Depth > Feature Count**
+
+一个真正好用的：
+
+* Dice
+* Character Sheet
+* Campaign State
+* Chat
+* Combat
+* AI DM
+
+比 50 个没人用的功能更重要。
+
+---
+
+# 三十八、最终请你自己挑战这个产品
+
+完成设计后，不要直接告诉我：
+
+> “设计完成。”
+
+你必须主动问：
+
+### “如果我是一个真实玩家，我会在哪里烦？”
+
+### “如果我是 DM，我会在哪里崩溃？”
+
+### “如果 Campaign 玩了 50 小时，哪里会坏？”
+
+### “如果 AI 出错，什么状态会被污染？”
+
+### “如果玩家完全不按照设计路线玩，系统还能不能运行？”
+
+### “如果一个新手第一次接触 TRPG，他能不能玩？”
+
+### “如果一个资深玩家使用，他会不会觉得这个 App 太傻？”
+
+---
+
+# 三十九、最终输出
+
+最终请给我：
+
+## 1. 完整用户旅程
+
+从：
+
+> Download App
+
+一直到：
+
+> 50 小时后的 Campaign。
+
+---
+
+## 2. Player Flow
+
+完整玩家流程。
+
+---
+
+## 3. DM Flow
+
+完整 DM 流程。
+
+---
+
+## 4. Game State Architecture
+
+说明：
+
+* Character State
+* Combat State
+* Campaign State
+* World State
+* NPC State
+* Quest State
+* Inventory State
+* Memory State
+
+如何组织。
+
+---
+
+## 5. AI Architecture
+
+明确：
+
+哪些事情：
+
+> AI 决定
+
+哪些事情：
+
+> 程序决定
+
+哪些事情：
+
+> DM 决定
+
+---
+
+## 6. UX Architecture
+
+说明：
+
+什么时候使用：
+
+* Chat
+* Button
+* Card
+* Dice UI
+* Map
+* Character Sheet
+* Modal
+* Notification
+
+以及什么时候**不应该显示 UI**。
+
+---
+
+## 7. Edge Cases
+
+至少列出 50 个真实跑团 Edge Cases。
+
+---
+
+## 8. Player Simulation
+
+模拟：
+
+* 新手玩家
+* 老玩家
+* Roleplay 玩家
+* 数值玩家
+* Chaos 玩家
+* 新手 DM
+* 老 DM
+
+---
+
+## 9. 10 Session Stress Test
+
+完整模拟至少 10 个 Session。
+
+找出：
+
+* Bug
+* UX 问题
+* AI 问题
+* Memory 问题
+* State 问题
+* Multiplayer 问题
+
+---
+
+## 10. 最终修改
+
+根据测试结果：
+
+> 修改产品设计 → 重新测试 → 再修改。
+
+至少进行 **3 轮迭代**。
+
+不要假设第一版设计就是正确的。
+
+---
+
+# 最终判断标准
+
+不要用：
+
+> “功能是否实现？”
+
+作为唯一标准。
+
+真正的判断标准是：
+
+> **如果我把 4 个真实玩家和 1 个真实 DM 放进这个 App，让他们连续玩 10 次 Session，他们是否会忘记自己正在使用一个 App，而只是觉得自己在跑团？**
+
+如果答案不是：
+
+> **Yes**
+
+那么继续修改。
+
+最终目标：
+
+> **让 App 消失，让跑团本身成为体验。**

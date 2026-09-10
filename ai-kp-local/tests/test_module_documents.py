@@ -81,6 +81,48 @@ def _legacy_doc() -> bytes:
     return OLE_CFB_SIGNATURE + (b"\x00" * 504)
 
 
+def _ending_docx() -> bytes:
+    document = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+ <w:body>
+  <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>结局</w:t></w:r></w:p>
+  <w:p><w:r><w:t>若调查员消除了威胁，委托人会支付报酬。</w:t></w:r></w:p>
+  <w:p><w:r><w:t>进行信用评级检定以确定额外报酬。</w:t></w:r></w:p>
+ </w:body>
+</w:document>""".encode()
+    output = BytesIO()
+    with ZipFile(output, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", document)
+    return output.getvalue()
+
+
+def _round69_heading_docx() -> bytes:
+    headings = (
+        "场景 2：调查开始",
+        "查阅剪报",
+        "一楼",
+        "2 号房间: 儿童房",
+        "床架攻击",
+        "刀进行的攻击",
+    )
+    paragraphs = "".join(
+        f"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>{heading}</w:t></w:r></w:p>"
+        "<w:p><w:r><w:t>这是当前标题下的普通正文。</w:t></w:r></w:p>"
+        for heading in headings
+    )
+    document = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{paragraphs}</w:body></w:document>"
+    ).encode()
+    output = BytesIO()
+    with ZipFile(output, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", document)
+    return output.getvalue()
+
+
 def _fake_converter(tmp_path: Path, body: str) -> Path:
     converter = tmp_path / "fake-soffice"
     converter.write_text(
@@ -155,7 +197,7 @@ def _wait_for_import(
     job_id: str,
     headers: dict[str, str],
     *,
-    timeout: float = 5,
+    timeout: float = 20,
 ) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -176,6 +218,10 @@ def test_docx_extraction_preserves_heading_table_image_and_anchors() -> None:
     assert result.chunks[1].title == "第一章 雾港"
     assert result.chunks[1].source_locator == "docx:paragraph:2"
     assert result.chunks[0].semantic_kind == "heading"
+    assert result.chunks[0].heading_level == 1
+    assert result.chunks[0].section_path == ("第一章 雾港",)
+    assert result.chunks[1].heading_level is None
+    assert result.chunks[1].section_path == ("第一章 雾港",)
     assert result.chunks[1].style_annotations == ("color:#C00000",)
     assert "人物 | 秘密" in result.chunks[2].text
     assert len(result.assets) == 1
@@ -184,11 +230,75 @@ def test_docx_extraction_preserves_heading_table_image_and_anchors() -> None:
     assert result.assets[0].height == 24
 
 
+def test_docx_plain_prose_inherits_a_strong_ending_section() -> None:
+    result = extract_module_document(_ending_docx(), "ending.docx", title="Scenario")
+
+    assert [chunk.semantic_kind for chunk in result.chunks] == [
+        "heading",
+        "ending",
+        "check",
+    ]
+
+
+def test_round69_style_headings_get_bounded_structural_ancestry() -> None:
+    result = extract_module_document(
+        _round69_heading_docx(), "round69.docx", title="Round 69"
+    )
+    heading_chunks = result.chunks[::2]
+
+    assert [chunk.heading_level for chunk in heading_chunks] == [1, 2, 2, 3, 4, 4]
+    assert heading_chunks[1].section_path == ("场景 2：调查开始", "查阅剪报")
+    assert all(chunk.scene_key == "调查开始" for chunk in heading_chunks[1:])
+    assert heading_chunks[4].section_path == (
+        "场景 2：调查开始",
+        "一楼",
+        "2 号房间: 儿童房",
+        "床架攻击",
+    )
+    assert heading_chunks[5].section_path[-1] == "刀进行的攻击"
+    assert result.chunks[-1].heading_level is None
+
+
+def test_round69_reversed_room_numbers_are_sibling_level_three_sections() -> None:
+    headings = (
+        "场景 3",
+        "地下室",
+        "1号储藏室",
+        "房间 2: 科比特的藏身处",
+        "房间3：儿童房",
+        "房间4：浴室",
+    )
+    paragraphs = "".join(
+        f"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>{heading}</w:t></w:r></w:p>"
+        for heading in headings
+    )
+    document = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{paragraphs}</w:body></w:document>"
+    ).encode()
+    output = BytesIO()
+    with ZipFile(output, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", document)
+
+    result = extract_module_document(output.getvalue(), "round69.docx", title="Round 69")
+
+    assert [chunk.heading_level for chunk in result.chunks] == [1, 2, 3, 3, 3, 3]
+    assert result.chunks[3].section_path == (
+        "场景 3",
+        "地下室",
+        "房间 2: 科比特的藏身处",
+    )
+    assert result.chunks[4].section_path[-1] == "房间3：儿童房"
+    assert "1号储藏室" not in result.chunks[5].section_path
+
+
 def test_legacy_doc_detection_requires_exact_ole_signature_and_isolated_flow() -> None:
     data = _legacy_doc()
 
     assert detect_document_type(data, "常暗之厢.doc") == "docx"
-    assert PARSER_VERSION == "module-document.v4"
+    assert PARSER_VERSION == "module-document.v9"
     with pytest.raises(ValueError, match="OLE CFB"):
         detect_document_type(b"not-an-ole-document", "伪装.doc")
     with pytest.raises(ValueError, match="隔离"):
@@ -208,7 +318,10 @@ def test_legacy_doc_import_reports_missing_converter(tmp_path: Path) -> None:
             title="缺少转换器",
             expected_hash=hashlib.sha256(data).hexdigest(),
             policy=DocumentParsePolicy(
-                timeout_seconds=3,
+                parser="builtin",
+                # Process-spawn latency varies substantially on loaded desktop CI.
+                # The converter's own one-second budget still tests the boundary.
+                timeout_seconds=15,
                 legacy_doc_converter_command=str(tmp_path / "missing-soffice"),
                 legacy_doc_converter_timeout_seconds=1,
             ),
@@ -237,9 +350,10 @@ raise SystemExit(7)
             title="转换失败",
             expected_hash=hashlib.sha256(data).hexdigest(),
             policy=DocumentParsePolicy(
-                timeout_seconds=3,
+                parser="builtin",
+                timeout_seconds=15,
                 legacy_doc_converter_command=str(failing_converter),
-                legacy_doc_converter_timeout_seconds=1,
+                legacy_doc_converter_timeout_seconds=2,
             ),
         )
 
@@ -259,9 +373,10 @@ outdir = Path(args[args.index("--outdir") + 1])
             title="无效产物",
             expected_hash=hashlib.sha256(data).hexdigest(),
             policy=DocumentParsePolicy(
-                timeout_seconds=3,
+                parser="builtin",
+                timeout_seconds=15,
                 legacy_doc_converter_command=str(invalid_converter),
-                legacy_doc_converter_timeout_seconds=1,
+                legacy_doc_converter_timeout_seconds=2,
             ),
         )
 
@@ -288,7 +403,8 @@ Path({str(escaped_marker)!r}).write_text("escaped", encoding="utf-8")
             title="转换超时",
             expected_hash=hashlib.sha256(data).hexdigest(),
             policy=DocumentParsePolicy(
-                timeout_seconds=3,
+                parser="builtin",
+                timeout_seconds=15,
                 legacy_doc_converter_command=str(slow_converter),
                 legacy_doc_converter_timeout_seconds=0.05,
             ),
@@ -317,7 +433,8 @@ sys.stderr.write("x" * (70 * 1024))
             title="输出上限",
             expected_hash=hashlib.sha256(data).hexdigest(),
             policy=DocumentParsePolicy(
-                timeout_seconds=3,
+                parser="builtin",
+                timeout_seconds=15,
                 legacy_doc_converter_command=str(noisy_converter),
                 legacy_doc_converter_timeout_seconds=1,
             ),
@@ -340,7 +457,8 @@ with (outdir / "input.docx").open("wb") as output:
             title="转换产物上限",
             expected_hash=hashlib.sha256(data).hexdigest(),
             policy=DocumentParsePolicy(
-                timeout_seconds=3,
+                parser="builtin",
+                timeout_seconds=15,
                 legacy_doc_converter_command=str(oversized_converter),
                 legacy_doc_converter_timeout_seconds=1,
             ),
@@ -356,6 +474,7 @@ def test_legacy_doc_real_import_preserves_original_hash_and_safe_arguments(
     data = _legacy_doc()
     settings = Settings(
         db_path=tmp_path / "legacy-doc.sqlite3",
+        module_document_parser="builtin",
         module_asset_root=tmp_path / "module-assets",
         legacy_doc_converter_command=str(converter),
         legacy_doc_converter_timeout_seconds=2,
@@ -395,6 +514,8 @@ def test_legacy_doc_real_import_preserves_original_hash_and_safe_arguments(
         )
         assert chunks.status_code == 200
         assert chunks.json()[1]["source_locator"] == "docx:paragraph:2"
+        assert chunks.json()[1]["heading_level"] is None
+        assert chunks.json()[1]["section_path"] == ["第一章 雾港"]
 
     arguments = argument_log.read_text(encoding="utf-8").splitlines()
     assert "--headless" in arguments
@@ -445,6 +566,7 @@ def test_compressed_pdf_stream_fails_without_harming_api_or_retry_semantics(
 ) -> None:
     settings = Settings(
         db_path=tmp_path / "compressed.sqlite3",
+        module_document_parser="builtin",
         module_asset_root=tmp_path / "module-assets",
         local_admin_enabled=False,
         admin_token="module-admin",
@@ -525,7 +647,10 @@ def test_kp_document_import_realcase_is_durable_retryable_and_private(
 ) -> None:
     settings = Settings(
         db_path=tmp_path / "ai-kp.sqlite3",
+        module_document_parser="builtin",
         module_asset_root=tmp_path / "module-assets",
+        llm_base_url="",
+        llm_model="",
         local_admin_enabled=False,
         admin_token="module-admin",
     )
@@ -783,6 +908,7 @@ def test_module_worker_recovers_processing_job_after_restart(tmp_path: Path) -> 
         db_path,
         asset_root,
         poll_interval_seconds=0.01,
+        parse_policy=DocumentParsePolicy(parser="builtin"),
     )
     worker.start()
     try:

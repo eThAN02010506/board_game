@@ -52,7 +52,7 @@ describe("CampaignPanel", () => {
 
     expect(screen.queryByLabelText(/管理员口令/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText("团名")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "创建测试团" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "创建 Campaign" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /雪夜列车 coc7/ }));
     expect(onSelectCampaign).toHaveBeenCalledWith(campaigns[1]);
@@ -77,7 +77,7 @@ describe("CampaignPanel", () => {
       target: { value: "1929-01-05 21:30" }
     });
     fireEvent.click(screen.getByRole("button", { name: "应用/清除管理员口令" }));
-    fireEvent.click(screen.getByRole("button", { name: "创建测试团" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建 Campaign" }));
 
     expect(onAdminTokenChange).toHaveBeenCalledWith("local-admin-token");
     expect(onCampaignTitleChange).toHaveBeenCalledWith("灰塔来信");

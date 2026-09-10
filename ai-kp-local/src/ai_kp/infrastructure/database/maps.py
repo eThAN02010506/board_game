@@ -214,6 +214,7 @@ class MapRepository:
         self,
         map_id: str,
         allowed_visibility: tuple[str, ...] = ("player", "table", "kp"),
+        known_location_ids: frozenset[str] | None = None,
     ) -> dict:
         map_row = self.connection.execute("SELECT * FROM maps WHERE id = ?", (map_id,)).fetchone()
         if map_row is None:
@@ -243,14 +244,35 @@ class MapRepository:
             """,
             (map_id, *allowed_visibility, *allowed_visibility, *allowed_visibility),
         ).fetchall()
+        if known_location_ids is not None:
+            locations = [
+                row for row in locations if str(row["id"]) in known_location_ids
+            ]
+            routes = [
+                row
+                for row in routes
+                if str(row["start_location_id"]) in known_location_ids
+                and str(row["end_location_id"]) in known_location_ids
+            ]
         result = row_to_dict(map_row)
         result["locations"] = [row_to_dict(row) for row in locations]
         result["routes"] = [row_to_dict(row) for row in routes]
         result["tokens"] = self.list_map_tokens(map_id, allowed_visibility=allowed_visibility)
+        if known_location_ids is not None:
+            result["tokens"] = [
+                token
+                for token in result["tokens"]
+                if str(token["location_id"]) in known_location_ids
+            ]
         revision = self.get_current_map_revision(map_id)
         if revision is not None:
             full_spec = revision["spec"]
             projected_spec = project_map_spec(full_spec, allowed_visibility)
+            if known_location_ids is not None:
+                projected_spec = self._restrict_map_spec_to_locations(
+                    projected_spec,
+                    known_location_ids,
+                )
             result.update(
                 {
                     "revision_id": revision["id"],
@@ -308,7 +330,9 @@ class MapRepository:
                 "layout_hash",
             ):
                 result.pop(private_key, None)
-        selected_asset = self._selected_public_asset(map_id)
+        selected_asset = (
+            None if known_location_ids is not None else self._selected_public_asset(map_id)
+        )
         result["render"] = {
             "background_asset_url": (
                 f"/map-assets/{selected_asset['id']}/content" if selected_asset else None
@@ -325,9 +349,53 @@ class MapRepository:
                 map_id, include_revealed=True
             )
         else:
-            result["fog_regions"] = self.list_map_fog_regions(
-                map_id, include_revealed=False
+            result["fog_regions"] = (
+                []
+                if known_location_ids is not None
+                else self.list_map_fog_regions(map_id, include_revealed=False)
             )
+        return result
+
+    @staticmethod
+    def _restrict_map_spec_to_locations(
+        spec: dict[str, Any],
+        known_location_ids: frozenset[str],
+    ) -> dict[str, Any]:
+        result = dict(spec)
+        result["locations"] = [
+            item
+            for item in spec.get("locations", [])
+            if str(item.get("id")) in known_location_ids
+        ]
+        result["connections"] = [
+            item
+            for item in spec.get("connections", [])
+            if str(item.get("from_location_id")) in known_location_ids
+            and str(item.get("to_location_id")) in known_location_ids
+        ]
+        result["features"] = [
+            item
+            for item in spec.get("features", [])
+            if item.get("location_id") is None
+            or str(item.get("location_id")) in known_location_ids
+        ]
+        result["spawn_points"] = [
+            item
+            for item in spec.get("spawn_points", [])
+            if str(item.get("location_id")) in known_location_ids
+        ]
+        visible_names = {
+            str(item.get("name") or "")
+            for collection in (result["locations"], result["features"])
+            for item in collection
+        }
+        coverage = dict(spec.get("coverage") or {})
+        coverage["required_element_names"] = [
+            name
+            for name in coverage.get("required_element_names", [])
+            if name in visible_names
+        ]
+        result["coverage"] = coverage
         return result
 
     def get_map_fog_region(self, fog_id: str) -> dict:
@@ -1172,10 +1240,20 @@ class MapRepository:
         ).fetchall()
         return [row_to_dict(row) for row in rows]
 
-    def list_map_location_ids(self, map_id: str) -> list[str]:
+    def list_map_location_ids(
+        self,
+        map_id: str,
+        allowed_visibility: tuple[str, ...] | None = None,
+    ) -> list[str]:
+        visibility_filter = ""
+        params: list[object] = [map_id]
+        if allowed_visibility:
+            placeholders = ",".join("?" for _ in allowed_visibility)
+            visibility_filter = f" AND visibility IN ({placeholders})"
+            params.extend(allowed_visibility)
         rows = self.connection.execute(
-            "SELECT id FROM map_locations WHERE map_id = ?",
-            (map_id,),
+            f"SELECT id FROM map_locations WHERE map_id = ?{visibility_filter}",
+            params,
         ).fetchall()
         return [str(row["id"]) for row in rows]
 
@@ -1303,8 +1381,9 @@ class MapRepository:
             UPDATE map_location_awareness
             SET state = 'seen', version = version + 1, updated_at = CURRENT_TIMESTAMP
             WHERE campaign_id = ? AND player_profile_id = ? AND state = 'current'
+              AND map_id = ?
             """,
-            (campaign_id, player_profile_id),
+            (campaign_id, player_profile_id, map_id),
         )
 
         self.upsert_map_location_awareness(
@@ -1318,11 +1397,17 @@ class MapRepository:
             """
             SELECT DISTINCT r.start_location_id AS neighbor_id
             FROM map_routes r
+            JOIN map_locations neighbor ON neighbor.id = r.start_location_id
             WHERE r.map_id = ? AND r.end_location_id = ?
+              AND r.visibility IN ('player', 'table')
+              AND neighbor.visibility IN ('player', 'table')
             UNION
             SELECT DISTINCT r.end_location_id AS neighbor_id
             FROM map_routes r
+            JOIN map_locations neighbor ON neighbor.id = r.end_location_id
             WHERE r.map_id = ? AND r.start_location_id = ?
+              AND r.visibility IN ('player', 'table')
+              AND neighbor.visibility IN ('player', 'table')
             """,
             (map_id, current_location_id, map_id, current_location_id),
         ).fetchall()

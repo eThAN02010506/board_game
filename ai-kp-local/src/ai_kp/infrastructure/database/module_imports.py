@@ -192,8 +192,8 @@ class ModuleImportRepository(SQLiteRepository):
                   (id, module_id, title, text, visibility, order_index, content_kind,
                    page_start, page_end, paragraph_start, paragraph_end, source_locator,
                    semantic_kind, classification_confidence, style_annotations_json,
-                   review_flags_json)
-                VALUES (?, ?, ?, ?, 'kp', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   review_flags_json, heading_level, section_path_json, scene_key)
+                VALUES (?, ?, ?, ?, 'kp', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     new_id("chunk"),
@@ -211,6 +211,9 @@ class ModuleImportRepository(SQLiteRepository):
                     chunk.classification_confidence,
                     json.dumps(chunk.style_annotations, ensure_ascii=False),
                     json.dumps(chunk.review_flags, ensure_ascii=False),
+                    chunk.heading_level,
+                    json.dumps(chunk.section_path, ensure_ascii=False),
+                    chunk.scene_key,
                 ),
             )
         for asset, content_hash, storage_path in assets:

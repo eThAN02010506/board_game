@@ -3,6 +3,8 @@ facts and NPC profiles (PRD 12.1 item 6)."""
 
 from pathlib import Path
 
+import pytest
+
 from ai_kp.application.module_campaign_import_service import (
     ImportLocationChoice,
     ImportNpcChoice,
@@ -217,6 +219,85 @@ def test_confirm_is_idempotent_for_locations_and_routes(tmp_path: Path) -> None:
     assert second["created_routes"] == []
     assert len(repo.list_travel_locations(campaign_id)) == 2
     assert len(repo.list_travel_routes(campaign_id)) == 1
+
+
+def test_confirm_rejects_duplicate_choices_before_writing(tmp_path: Path) -> None:
+    repo, campaign_id = _seed_campaign(tmp_path)
+    module_id, candidate_id = _module_with_candidate(repo, campaign_id)
+    lighthouse = _add_location(repo, module_id, "灯塔", candidate_id)
+    post_office = _add_location(repo, module_id, "邮局", candidate_id)
+    innkeeper = _add_npc(repo, module_id, "旅店老板", candidate_id)
+    route = _add_relation(
+        repo,
+        module_id,
+        lighthouse,
+        post_office,
+        "located_at",
+        candidate_id,
+    )
+    repo.commit()
+    service = _import_service(repo)
+
+    duplicate_commands = (
+        ModuleImportConfirmCommand(
+            locations=(
+                ImportLocationChoice(lighthouse["id"]),
+                ImportLocationChoice(lighthouse["id"], include=False),
+            )
+        ),
+        ModuleImportConfirmCommand(
+            routes=(
+                ImportRouteChoice(route["id"]),
+                ImportRouteChoice(route["id"], travel_minutes=15),
+            )
+        ),
+        ModuleImportConfirmCommand(
+            npcs=(
+                ImportNpcChoice(innkeeper["id"]),
+                ImportNpcChoice(innkeeper["id"], active_from_year=1920),
+            )
+        ),
+    )
+    for command in duplicate_commands:
+        with pytest.raises(ValueError, match="不能重复选择"):
+            service.confirm(campaign_id, module_id, command, member_id=None)
+
+    assert repo.list_travel_locations(campaign_id) == []
+    assert repo.list_module_campaign_imports(campaign_id) == []
+
+
+def test_confirm_rejects_non_positive_route_minutes_at_service_boundary(
+    tmp_path: Path,
+) -> None:
+    repo, campaign_id = _seed_campaign(tmp_path)
+    module_id, candidate_id = _module_with_candidate(repo, campaign_id)
+    lighthouse = _add_location(repo, module_id, "灯塔", candidate_id)
+    post_office = _add_location(repo, module_id, "邮局", candidate_id)
+    route = _add_relation(
+        repo,
+        module_id,
+        lighthouse,
+        post_office,
+        "located_at",
+        candidate_id,
+    )
+    repo.commit()
+
+    with pytest.raises(ValueError, match="必须大于 0"):
+        _import_service(repo).confirm(
+            campaign_id,
+            module_id,
+            ModuleImportConfirmCommand(
+                locations=(
+                    ImportLocationChoice(lighthouse["id"]),
+                    ImportLocationChoice(post_office["id"]),
+                ),
+                routes=(ImportRouteChoice(route["id"], travel_minutes=0),),
+            ),
+            member_id=None,
+        )
+
+    assert repo.list_travel_locations(campaign_id) == []
 
 
 def test_unlinked_npc_never_auto_links_or_creates_campaign_npc(tmp_path: Path) -> None:

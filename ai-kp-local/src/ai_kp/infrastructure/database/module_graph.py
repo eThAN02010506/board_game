@@ -29,6 +29,7 @@ class ModuleGraphRepository(SQLiteRepository):
         entity: ModuleEntityCreate,
         *,
         member_id: str,
+        extra_candidate_ids: tuple[str, ...] = (),
     ) -> dict:
         entity_id = new_id("modent")
         self.connection.execute(
@@ -51,6 +52,21 @@ class ModuleGraphRepository(SQLiteRepository):
                 member_id,
             ),
         )
+        candidate_ids = (entity.source_candidate_id, *extra_candidate_ids)
+        for index, candidate_id in enumerate(dict.fromkeys(candidate_ids)):
+            self.connection.execute(
+                """
+                INSERT INTO module_entity_candidates
+                  (id, entity_id, candidate_id, role)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    new_id("modentcand"),
+                    entity_id,
+                    candidate_id,
+                    "source" if index == 0 else "reference",
+                ),
+            )
         return self.get_module_entity(entity_id)
 
     def get_module_entity(self, entity_id: str) -> dict:
@@ -61,6 +77,50 @@ class ModuleGraphRepository(SQLiteRepository):
         if row is None:
             raise KeyError(f"Module entity not found: {entity_id}")
         return row_to_dict(row)
+
+    def find_module_entity(
+        self,
+        module_id: str,
+        *,
+        entity_type: str,
+        normalized_name: str,
+    ) -> dict | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM module_entities
+            WHERE module_id = ? AND entity_type = ? AND normalized_name = ?
+            """,
+            (module_id, entity_type, normalized_name),
+        ).fetchone()
+        return row_to_dict(row) if row is not None else None
+
+    def list_entity_candidates(self, entity_id: str) -> list[dict]:
+        rows = self.connection.execute(
+            """
+            SELECT c.*, ec.role AS entity_role
+            FROM module_entity_candidates ec
+            JOIN module_knowledge_candidates c ON c.id = ec.candidate_id
+            WHERE ec.entity_id = ?
+            ORDER BY c.created_at, c.id
+            """,
+            (entity_id,),
+        ).fetchall()
+        return [row_to_dict(row) for row in rows]
+
+    def link_candidate_to_entity(
+        self,
+        entity_id: str,
+        candidate_id: str,
+    ) -> dict:
+        self.connection.execute(
+            """
+            INSERT OR IGNORE INTO module_entity_candidates
+              (id, entity_id, candidate_id, role)
+            VALUES (?, ?, ?, 'reference')
+            """,
+            (new_id("modentcand"), entity_id, candidate_id),
+        )
+        return self.get_module_entity(entity_id)
 
     def list_module_entities(self, module_id: str) -> list[dict]:
         entities, _relations = self._current_module_graph(module_id)

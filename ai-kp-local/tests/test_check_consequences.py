@@ -8,9 +8,14 @@ import httpx
 
 from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
+from ai_kp.core.repository import Repository
 from ai_kp.infrastructure.database.schema import connect
 from ai_kp.platform.resolution import HIDDEN_CHECK_PUBLIC_NARRATION
-from tests.support_investigators import coc7_sheet, create_approved_player
+from tests.support_investigators import (
+    coc7_sheet,
+    confirm_current_session_zero,
+    create_approved_player,
+)
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -141,6 +146,11 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
         self.pc = approved_player["pc"]
         self.player = approved_player["bundle"]
         self.player_headers = approved_player["headers"]
+        await confirm_current_session_zero(
+            self.client,
+            campaign_id=self.campaign["id"],
+            member_headers=(self.kp_headers, self.player_headers),
+        )
 
     async def asyncTearDown(self) -> None:
         await self.client.aclose()
@@ -430,7 +440,7 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(duplicate_retry.status_code, 409)
 
-        foreign_job = await self.client.post(
+        invalid_public_job = await self.client.post(
             f"/campaigns/{self.campaign['id']}/auto-kp/jobs",
             headers=self.kp_headers,
             json={
@@ -443,9 +453,28 @@ class CheckConsequenceApiTests(unittest.IsolatedAsyncioTestCase):
                 },
             },
         )
-        self.assertEqual(foreign_job.status_code, 200, foreign_job.text)
+        self.assertIn(
+            invalid_public_job.status_code,
+            {403, 404, 409},
+            invalid_public_job.text,
+        )
+
+        # Retry authorization must remain safe for legacy durable jobs that
+        # predate typed enqueue validation.
+        connection = connect(self.settings.db_path)
+        try:
+            foreign_job = Repository(connection).enqueue_auto_kp_job(
+                campaign_id=self.campaign["id"],
+                job_type="world_expansion",
+                resource_id="legacy-private-world-gap",
+                idempotency_key="legacy-private-world-gap-job",
+                payload={"player_intent": "KP private"},
+            )
+            connection.commit()
+        finally:
+            connection.close()
         denied_retry = await self.client.post(
-            f"/auto-kp/jobs/{foreign_job.json()['id']}/retry",
+            f"/auto-kp/jobs/{foreign_job['id']}/retry",
             headers=self.player_headers,
         )
         self.assertEqual(denied_retry.status_code, 404)

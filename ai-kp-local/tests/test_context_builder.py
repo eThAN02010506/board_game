@@ -7,6 +7,7 @@ from ai_kp.application.module_graph_service import ModuleGraphService
 from ai_kp.application.module_knowledge_service import ModuleKnowledgeService
 from ai_kp.core.db import db_session
 from ai_kp.core.repository import Repository
+from ai_kp.director.context_sources.module import ModuleContextProvider
 from ai_kp.kp.context_builder import ContextBuilder
 from ai_kp.maps.generation import generate_map
 from ai_kp.modules.ingestion import chunk_plaintext_module
@@ -14,6 +15,52 @@ from ai_kp.platform.modules.graph import ModuleEntityCreate, ModuleRelationCreat
 
 
 class ContextBuilderTests(unittest.TestCase):
+    def test_current_location_keeps_bounded_following_rule_subsections(self) -> None:
+        anchors = {("module-1", 100)}
+
+        self.assertEqual(
+            ModuleContextProvider._following_section_distance(
+                "module-1", 108, anchors
+            ),
+            8,
+        )
+        self.assertIsNone(
+            ModuleContextProvider._following_section_distance(
+                "module-1", 113, anchors
+            )
+        )
+        self.assertIsNone(
+            ModuleContextProvider._following_section_distance(
+                "module-2", 108, anchors
+            )
+        )
+        sources = [
+            {"id": "semantic", "score": 100, "_section_distance": None},
+            {"id": "later-rule", "score": 2, "_section_distance": 4},
+            {"id": "first-rule", "score": 1, "_section_distance": 1},
+        ]
+        sources.sort(key=ModuleContextProvider._source_rank_key)
+        self.assertEqual(
+            [source["id"] for source in sources],
+            ["first-rule", "later-rule", "semantic"],
+        )
+
+    def test_keeper_only_italics_are_never_player_scene_baselines(self) -> None:
+        self.assertFalse(
+            ModuleContextProvider._player_scene_baseline_allowed(
+                semantic_kind="text",
+                style_annotations=("italic",),
+                text="给守密人的提示：这里可以即兴发挥。",
+            )
+        )
+        self.assertTrue(
+            ModuleContextProvider._player_scene_baseline_allowed(
+                semantic_kind="text",
+                style_annotations=("italic",),
+                text="门厅里弥漫着潮湿木头的气味。",
+            )
+        )
+
     def test_context_uses_approved_investigator_revision_and_live_campaign_state(
         self,
     ) -> None:
@@ -82,6 +129,26 @@ class ContextBuilderTests(unittest.TestCase):
                             '{"lost":["手电筒"]}', 4)
                     """,
                     (campaign["id"], investigator["id"], approved_revision_id),
+                )
+
+                san_target = repo.resolve_skill_target(
+                    campaign["id"], legacy_pc["id"], "SAN"
+                )
+                luck_target = repo.resolve_skill_target(
+                    campaign["id"], legacy_pc["id"], "luck"
+                )
+                self.assertEqual(san_target["target"], 41)
+                self.assertEqual(san_target["skill_key"], "san")
+                self.assertEqual(
+                    san_target["target_source"], "investigator_campaign_state"
+                )
+                self.assertEqual(luck_target["target"], 44)
+                listed_targets = repo.list_character_skill_targets(
+                    campaign["id"], legacy_pc["id"]
+                )
+                self.assertIn(
+                    {"skill_name": "SAN", "skill_key": "san", "target": 41},
+                    listed_targets,
                 )
 
                 context = ContextBuilder(connection).build(
@@ -770,6 +837,112 @@ class ContextBuilderTests(unittest.TestCase):
                         )
                     )
 
+    def test_entity_context_aggregates_multi_source_facts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "test.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("多来源聚合")
+                module = repo.create_module(
+                    campaign["id"],
+                    "末班电车",
+                    chunk_plaintext_module(
+                        """@visibility=player
+在这边发现了休克的乘务员，如果使用《急救》成功的话可以让乘务员意识苏醒过来。
+乘务员保管着驾驶室钥匙。
+乘务员会被怪物吞噬。""",
+                        title="末班电车",
+                    ),
+                )
+                chunk = repo.list_module_chunks(
+                    module["id"],
+                    allowed_visibility=("player",),
+                )[0]
+                service = ModuleKnowledgeService(repo)
+                candidate_ids = []
+                for title, statement, evidence in (
+                    (
+                        "乘务员休克",
+                        "在这边发现了休克的乘务员，如果使用《急救》成功的话可以让乘务员意识苏醒过来。",
+                        "在这边发现了休克的乘务员",
+                    ),
+                    (
+                        "乘务员保管钥匙",
+                        "乘务员保管着驾驶室钥匙。",
+                        "乘务员保管着驾驶室钥匙",
+                    ),
+                    (
+                        "乘务员被吞噬",
+                        "乘务员会被怪物吞噬。",
+                        "乘务员会被怪物吞噬",
+                    ),
+                ):
+                    candidate = service.create_manual_candidate(
+                        module["id"],
+                        {
+                            "kind": "module_canon",
+                            "title": title,
+                            "statement": statement,
+                            "entity_name": "乘务员",
+                            "entity_type": "npc",
+                            "visibility": "player",
+                            "citations": [
+                                {
+                                    "chunk_id": chunk["id"],
+                                    "evidence_text": evidence,
+                                }
+                            ],
+                        },
+                    )
+                    service.review_candidate(
+                        candidate["id"],
+                        decision="approved",
+                        member_id=None,
+                        note=None,
+                    )
+                    candidate_ids.append(candidate["id"])
+
+                graph = ModuleGraphService(repo)
+                conductor = graph.create_entity(
+                    module["id"],
+                    ModuleEntityCreate(
+                        entity_type="npc",
+                        name="乘务员",
+                        visibility="player",
+                        source_candidate_id=candidate_ids[0],
+                    ),
+                    member_id=None,
+                    extra_candidate_ids=tuple(candidate_ids[1:]),
+                )
+                repo.start_campaign_module_run(
+                    campaign_id=campaign["id"],
+                    module_id=module["id"],
+                    current_scene_key=None,
+                    active_spoiler_tags=[],
+                    state={},
+                    started_by_member_id=None,
+                )
+                pc = repo.create_pc(campaign["id"], "调查员", {})
+
+                context = ContextBuilder(connection).build(
+                    campaign_id=campaign["id"],
+                    pc_id=pc["id"],
+                    player_action="我检查乘务员。",
+                    visibility_scope="player",
+                )
+                entity_sources = [
+                    item
+                    for item in context.included_sources
+                    if item.get("kind") == "module_entity"
+                    and item.get("id") == conductor["id"]
+                ]
+                self.assertEqual(len(entity_sources), 1)
+                content = entity_sources[0]["content"]
+                self.assertIn("乘务员", content)
+                self.assertIn("相关事实", content)
+                self.assertIn("休克的乘务员", content)
+                self.assertIn("保管着驾驶室钥匙", content)
+                self.assertIn("会被怪物吞噬", content)
+
     def test_player_context_only_reads_published_maps(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             with db_session(Path(tmpdir) / "test.sqlite3") as connection:
@@ -932,6 +1105,144 @@ class ContextBuilderTests(unittest.TestCase):
                 self.assertEqual(loaded["proposal_id"], proposal["id"])
                 self.assertEqual(loaded["final_prompt"][1]["role"], "user")
                 self.assertTrue(any(item["kind"] == "campaign" for item in loaded["included_sources"]))
+
+
+class ModuleLocationBoostTests(unittest.TestCase):
+    """当前位置的模组剧情块优先进上下文，避免检索漏掉既定剧情节点。"""
+
+    def _module_with_locations(self, repo, campaign_id: str) -> None:
+        chunks = chunk_plaintext_module(
+            """# 4号车厢
+@visibility=kp
+在这边发现了休克的乘务员，如果使用《急救》成功的话可以让乘务员意识苏醒过来。
+
+# 4号车厢
+@visibility=kp
+乘务员会告诉调查员们自己之前保管着 驾驶室房间钥匙 以及 电车控制面板钥匙。
+
+# 3号车厢
+@visibility=kp
+透过3号车厢的门上的玻璃使用《侦查》或靠着门《聆听》可以知道3号车厢里面没有怪物。
+""",
+            title="末班电车",
+        )
+        repo.create_module(campaign_id, "末班电车", chunks)
+
+    def test_location_boost_surfaces_current_carriage_plot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "location.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("位置检索")
+                self._module_with_locations(repo, campaign["id"])
+
+                # 玩家在 4号车厢，行动本身不含"乘务员"，但当前位置应带出乘务员剧情。
+                context = ContextBuilder(connection).build(
+                    campaign_id=campaign["id"],
+                    player_action="我检查角落找线索",
+                    location="4号车厢",
+                )
+                module_sources = [
+                    source
+                    for source in context.included_sources
+                    if source["kind"] == "module_chunk"
+                ]
+                labels = [source["label"] for source in module_sources]
+                self.assertIn("4号车厢", labels, labels)
+                contents = " ".join(source.get("content", "") for source in module_sources)
+                self.assertIn("乘务员", contents)
+
+    def test_current_action_location_overrides_prior_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "action-location.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("跨场景连续性")
+                module = repo.create_module(
+                    campaign["id"],
+                    "鬼屋",
+                    chunk_plaintext_module(
+                        """# 罗克斯伯里疗养院
+@visibility=kp
+维托里奥抱着圣经。
+
+# 科比特的老房子
+@visibility=kp
+玄关后连着客厅和楼梯。
+
+# 房间 3: 科比特的隐秘老巢
+@visibility=kp
+只有打破地窖夹层后才能发现这里。
+
+# 房间 4: 科比特的藏身处
+@visibility=kp
+地窖最深处的平台上躺着一具尸体。
+
+# 1 号房间: 储藏室
+@visibility=kp
+橱柜里有三本日记。
+
+# 2 号房间: 另一个储藏室
+@visibility=kp
+这里只有旧家具。
+""",
+                        title="鬼屋",
+                    ),
+                )
+                repo.start_campaign_module_run(
+                    campaign_id=campaign["id"],
+                    module_id=module["id"],
+                    current_scene_key="introduction",
+                    active_spoiler_tags=[],
+                    state={},
+                    started_by_member_id=None,
+                )
+                pc = repo.create_pc(campaign["id"], "调查员", {})
+                prior = repo.create_turn_proposal(
+                    campaign["id"],
+                    pc_id=pc["id"],
+                    player_action="我访问疗养院。",
+                    public_narration="维托里奥点了点头。",
+                    source_model="test",
+                )
+                repo.add_proposal_action(
+                    prior["id"],
+                    "action_ruling",
+                    actor="system",
+                    payload={
+                        "goal": "访问维托里奥",
+                        "method": "交谈",
+                        "target": "罗克斯伯里疗养院",
+                        "feasibility": "possible",
+                        "resolution": "automatic",
+                        "reason": "可以访问",
+                        "maximum_effect": "对方回答愿意透露的内容",
+                        "forbidden_outcome_claims": [],
+                        "alternative": "",
+                    },
+                )
+                connection.execute(
+                    "UPDATE turn_proposals SET status = 'approved' WHERE id = ?",
+                    (prior["id"],),
+                )
+
+                context = ContextBuilder(connection).build(
+                    campaign_id=campaign["id"],
+                    pc_id=pc["id"],
+                    player_action="我离开疗养院，前往科比特老房子用钥匙开门。",
+                )
+
+                explicit = next(
+                    source
+                    for source in context.included_sources
+                    if source["kind"] == "explicit_action_location"
+                )
+                self.assertEqual(explicit["content"], "玩家当前行动明确移动到：科比特的老房子")
+                prompt = context.messages[-1]["content"]
+                self.assertIn("玄关后连着客厅和楼梯", prompt)
+                inferred_storage = ModuleContextProvider(connection).infer_action_location(
+                    (module["id"],),
+                    "我进入1号储藏室，用手电检查深处的橱柜。",
+                )
+                self.assertEqual(inferred_storage, "1 号房间: 储藏室")
 
 
 if __name__ == "__main__":

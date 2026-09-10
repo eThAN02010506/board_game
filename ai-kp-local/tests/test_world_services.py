@@ -62,6 +62,12 @@ class WorldServiceTests(unittest.TestCase):
                         ),
                     ),
                 )
+                connection.execute(
+                    """
+                    INSERT INTO modules (id, campaign_id, title, source_type)
+                    VALUES ('legacy_global_module', NULL, '旧版全局模组', 'plaintext')
+                    """
+                )
 
                 player_chunks = service.list_module_chunks(
                     module["id"],
@@ -75,7 +81,10 @@ class WorldServiceTests(unittest.TestCase):
                 )
 
                 self.assertEqual(service.get_module(module["id"])["campaign_id"], campaign["id"])
-                self.assertEqual(service.list_modules(campaign["id"])[0]["id"], module["id"])
+                self.assertEqual(
+                    [item["id"] for item in service.list_modules(campaign["id"])],
+                    [module["id"]],
+                )
                 self.assertEqual([item["text"] for item in player_chunks], ["已公开线索。"])
                 self.assertEqual(len(kp_chunks), 3)
 
@@ -117,8 +126,19 @@ class WorldServiceTests(unittest.TestCase):
                 linked = service.link_npc(
                     campaign["id"],
                     npc["id"],
-                    LinkNpcCommand(relationship_score=2, notes="曾提供走私线索。"),
+                    LinkNpcCommand(
+                        first_seen_time="1928-10-03 21:15",
+                        relationship_score=2,
+                        notes="曾提供走私线索。",
+                    ),
                 )
+                campaign_npc = repo.connection.execute(
+                    """
+                    SELECT first_seen_time FROM campaign_npcs
+                    WHERE campaign_id = ? AND npc_id = ?
+                    """,
+                    (campaign["id"], npc["id"]),
+                ).fetchone()
 
                 memories = service.search_memory(
                     campaign["id"],
@@ -134,6 +154,7 @@ class WorldServiceTests(unittest.TestCase):
                 )
 
                 self.assertTrue(linked["ok"])
+                self.assertEqual(campaign_npc["first_seen_time"], "1928-10-03 21:15")
                 self.assertEqual(memories[0]["scope"], "pc_major")
                 self.assertEqual(candidates[0]["npc_id"], npc["id"])
                 self.assertGreaterEqual(candidates[0]["score"], 7)

@@ -1,0 +1,4 @@
+interface:
+  display_name: "敌方回合选择"
+  short_description: "Choose one bounded encounter action without owning rules or state."
+  default_prompt: "Use $select-enemy-turn to propose one legal NPC encounter action."

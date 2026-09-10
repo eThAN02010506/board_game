@@ -36,11 +36,21 @@ class EncounterNpcInput(BaseModel):
         return self
 
 
+class EncounterEntityInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    local_ref: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
+    name: str = Field(min_length=1, max_length=240)
+    description: str = Field(default="", max_length=4000)
+    visibility: Literal["table", "kp", "secret"] = "table"
+
+
 class EncounterMapPlacementInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     map_id: str = Field(min_length=1, max_length=100)
     location_name: str = Field(min_length=1, max_length=300)
+    entity_ref: str | None = Field(default=None, max_length=200)
     visibility: Literal["table", "kp"] = "table"
     color: str = Field(
         default="#b93f2d",
@@ -59,6 +69,7 @@ class WorldExpansionEncounterRequest(BaseModel):
     summary: str = Field(min_length=1, max_length=2000)
     happened_at: str | None = Field(default=None, max_length=120)
     facts: list[EncounterFactInput] = Field(min_length=1, max_length=8)
+    entities: list[EncounterEntityInput] = Field(default_factory=list, max_length=12)
     npc: EncounterNpcInput | None = None
     map_placement: EncounterMapPlacementInput | None = None
     participant_investigator_ids: list[str] = Field(
@@ -70,10 +81,17 @@ class WorldExpansionEncounterRequest(BaseModel):
 
     @model_validator(mode="after")
     def map_requires_npc(self) -> "WorldExpansionEncounterRequest":
-        if self.map_placement is not None and self.npc is None:
-            raise ValueError("map_placement requires npc")
-        if self.participant_investigator_ids and self.npc is None:
-            raise ValueError("participant_investigator_ids requires npc")
+        if (
+            self.map_placement is not None
+            and self.npc is None
+            and self.map_placement.entity_ref is None
+        ):
+            raise ValueError("map_placement requires npc or entity_ref")
+        if self.participant_investigator_ids and self.npc is None and not self.entities:
+            raise ValueError("participant_investigator_ids requires npc or entities")
+        entity_refs = [item.local_ref for item in self.entities]
+        if len(entity_refs) != len(set(entity_refs)):
+            raise ValueError("entity local refs must be unique")
         normalized_ids = [item.strip() for item in self.participant_investigator_ids]
         if any(not item or len(item) > 100 for item in normalized_ids):
             raise ValueError("participant investigator IDs must contain 1-100 characters")
@@ -84,6 +102,7 @@ class WorldExpansionEncounterRequest(BaseModel):
 
 
 __all__ = [
+    "EncounterEntityInput",
     "EncounterFactInput",
     "EncounterMapPlacementInput",
     "EncounterNpcInput",

@@ -13,6 +13,10 @@ def _is_gpt_oss(model: str) -> bool:
     return "gpt-oss" in model.casefold()
 
 
+def _is_deepseek_v4(model: str) -> bool:
+    return model.casefold().startswith("deepseek-v4-")
+
+
 def _default_chat_template_kwargs(model: str) -> dict[str, Any] | None:
     """Return narrowly scoped hints for model families that require them."""
 
@@ -61,6 +65,13 @@ class OpenAICompatibleClient:
             "max_tokens": self.max_tokens,
             "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
         }
+        if _is_deepseek_v4(self.model):
+            # DeepSeek v4 enables thinking by default. Structured Agent calls
+            # can otherwise spend the entire completion budget on private
+            # reasoning and return no final JSON. Our deterministic validators
+            # provide the safety boundary, so non-thinking mode is the bounded
+            # default for this provider family.
+            payload["thinking"] = {"type": "disabled"}
         if is_gpt_oss:
             payload["top_p"] = 1.0
             # llama.cpp's generic schema grammar can reject otherwise useful
@@ -73,15 +84,16 @@ class OpenAICompatibleClient:
 
         try:
             response_content, status_code = await self._post_bounded(payload, headers)
-            if (
-                "chat_template_kwargs" in payload
-                and status_code in {400, 422}
-            ):
-                # `chat_template_kwargs` is a llama.cpp extension, not part of
-                # the OpenAI contract. Strict compatible providers get one
-                # safe retry without the optional hint.
+            optional_fields = {
+                key for key in ("chat_template_kwargs", "thinking") if key in payload
+            }
+            if optional_fields and status_code in {400, 422}:
+                # Optional provider controls are outside the base OpenAI
+                # contract. Strict compatible proxies get one safe retry
+                # without them; response validation remains unchanged.
                 standard_payload = dict(payload)
-                standard_payload.pop("chat_template_kwargs")
+                for key in optional_fields:
+                    standard_payload.pop(key)
                 response_content, status_code = await self._post_bounded(
                     standard_payload,
                     headers,

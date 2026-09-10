@@ -2,8 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from ai_kp.application.fact_service import AssertWorldFactCommand, FactService
+from ai_kp.application.session_service import SessionService
+from ai_kp.application.turn_service import ManualProposalCommand, TurnService
 from ai_kp.core.db import db_session
 from ai_kp.core.repository import Repository
+from ai_kp.platform.modules.ingestion import ModuleChunk
 
 
 def count_events(repo: Repository, campaign_id: str) -> int:
@@ -15,6 +19,83 @@ def count_events(repo: Repository, campaign_id: str) -> int:
 
 
 class TurnProposalTests(unittest.TestCase):
+    def test_ai_kp_replaces_changed_authoritative_fact_instead_of_dropping_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "facts.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("自动事实修订")
+                session = SessionService(repo).create(campaign["id"])
+                identity = repo.authenticate_access_token(session["access_token"])
+                assert identity is not None
+                module = repo.create_module(
+                    campaign["id"],
+                    "测试模组",
+                    [
+                        ModuleChunk(
+                            title="入口",
+                            text="门起初锁着。",
+                            visibility="kp",
+                            order_index=0,
+                        )
+                    ],
+                )
+                run = repo.start_campaign_module_run(
+                    campaign_id=campaign["id"],
+                    module_id=module["id"],
+                    current_scene_key="入口",
+                    active_spoiler_tags=[],
+                    state={},
+                    started_by_member_id=identity.member_id,
+                )
+                repo.set_module_run_automation_level(
+                    run["id"],
+                    expected_version=run["version"],
+                    level="ai_kp",
+                    reason="测试自动事实替换",
+                    member_id=identity.member_id,
+                )
+                FactService(repo).assert_fact(
+                    campaign["id"],
+                    identity,
+                    AssertWorldFactCommand(
+                        fact_type="canonical_fact",
+                        subject="档案室门",
+                        predicate="状态",
+                        object_text="锁住",
+                    ),
+                )
+                proposal = TurnService(repo).create_manual_proposal(
+                    campaign["id"],
+                    identity,
+                    ManualProposalCommand(
+                        player_action="我用钥匙开门。",
+                        public_narration="门锁咔哒一声打开了。",
+                        proposed_facts=(
+                            {
+                                "fact_type": "canonical_fact",
+                                "subject": "档案室门",
+                                "predicate": "状态",
+                                "object_text": "打开",
+                            },
+                        ),
+                    ),
+                )
+
+                TurnService(repo).approve(
+                    proposal["id"], campaign["id"], identity, note="自动结算"
+                )
+
+                heads = repo.list_fact_heads(campaign["id"])
+                active = [entry for entry in heads if entry.active]
+                self.assertEqual(len(active), 1)
+                self.assertEqual(active[0].fact.object_text, "打开")
+                history = repo.list_fact_entries(campaign["id"])
+                self.assertEqual(len(history), 3)
+                self.assertEqual(
+                    [entry.fact.category for entry in history].count("retconned"),
+                    1,
+                )
+
     def test_draft_proposal_does_not_write_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.sqlite3"

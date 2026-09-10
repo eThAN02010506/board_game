@@ -21,6 +21,7 @@ from ai_kp.api.schemas import (
     TravelLocationCreate,
     TravelRouteCreate,
     TravelRoutePreviewRequest,
+    WorldEntityStateUpdateRequest,
 )
 from ai_kp.application.npc_reappearance_service import NpcReappearanceService
 from ai_kp.application.private_random_resolution_service import (
@@ -32,6 +33,10 @@ from ai_kp.application.travel_graph_service import (
     TravelGraphService,
     TravelLocationCommand,
     TravelRouteCommand,
+)
+from ai_kp.application.world_entity_state_service import (
+    SetWorldEntityStateCommand,
+    WorldEntityStateService,
 )
 from ai_kp.application.world_service import (
     AddMemoryCommand,
@@ -95,6 +100,39 @@ def list_pcs(
         }
         for pc in pcs
     ]
+
+
+@router.get("/campaigns/{campaign_id}/world-entities")
+def list_world_entities(
+    campaign_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id)
+    return WorldService(repo).list_world_entities(
+        campaign_id,
+        view="kp" if identity.role == "kp" else "player",
+    )
+
+
+@router.post("/campaigns/{campaign_id}/world-entities/{entity_id}/states")
+def update_world_entity_state(
+    campaign_id: str,
+    entity_id: str,
+    payload: WorldEntityStateUpdateRequest,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp",))
+    return WorldEntityStateService(repo).set_state(
+        campaign_id,
+        entity_id,
+        identity,
+        SetWorldEntityStateCommand(
+            **payload.model_dump(),
+            source_kind="human_kp",
+        ),
+    )
 
 
 @router.post("/campaigns/{campaign_id}/events")

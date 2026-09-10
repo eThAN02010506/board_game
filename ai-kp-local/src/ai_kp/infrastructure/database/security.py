@@ -3,6 +3,7 @@
 import sqlite3
 
 from ai_kp.core.ids import new_id
+from ai_kp.infrastructure.database.player_action_authority import PlayerActionAuthority
 from ai_kp.infrastructure.security.tokens import (
     generate_access_token,
     generate_join_code,
@@ -21,6 +22,11 @@ def _public_row(row: sqlite3.Row, *hidden: str) -> dict:
 
 class SecurityRepository:
     connection: sqlite3.Connection
+
+    def player_action_block_reason(
+        self, identity: AuthenticatedMember
+    ) -> str | None:
+        return PlayerActionAuthority(self.connection).block_reason(identity)
 
     def create_campaign_session(
         self,
@@ -84,10 +90,13 @@ class SecurityRepository:
         join_code: str,
         *,
         display_name: str,
+        role: str = "player",
     ) -> dict:
         # The code check and member creation are one linearizable operation.
         # Otherwise a concurrent rotation can commit after this SELECT but
         # before the INSERT, allowing the retired code to create a live token.
+        if role not in {"player", "observer"}:
+            raise ValueError("Only player or observer may join a session")
         self.begin_immediate()
         session = self.connection.execute(
             """
@@ -100,18 +109,26 @@ class SecurityRepository:
             raise KeyError("Active session not found for join code")
         member_id = new_id("member")
         access_token = generate_access_token()
+        private_history_from_sequence = int(
+            self.connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM table_messages"
+            ).fetchone()[0]
+        )
         self.connection.execute(
             """
             INSERT INTO session_members
-              (id, session_id, campaign_id, role, display_name, token_hash)
-            VALUES (?, ?, ?, 'player', ?, ?)
+              (id, session_id, campaign_id, role, display_name, token_hash,
+               private_history_from_sequence)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 member_id,
                 session["id"],
                 session["campaign_id"],
+                role,
                 display_name,
                 hash_access_token(access_token),
+                private_history_from_sequence,
             ),
         )
         self.append_realtime_event(
@@ -121,7 +138,7 @@ class SecurityRepository:
             event_type="session.member_joined",
             resource_type="session_member",
             resource_id=member_id,
-            payload={"role": "player"},
+            payload={"role": role},
         )
         campaign = self.connection.execute(
             "SELECT * FROM campaigns WHERE id = ?", (session["campaign_id"],)
@@ -295,7 +312,7 @@ class SecurityRepository:
         ).fetchone()
         if row is None:
             raise KeyError(f"Session member not found: {member_id}")
-        return _public_row(row, "token_hash")
+        return _public_row(row, "token_hash", "private_history_from_sequence")
 
     def list_session_members(self, session_id: str) -> list[dict]:
         rows = self.connection.execute(
@@ -305,7 +322,10 @@ class SecurityRepository:
             """,
             (session_id,),
         ).fetchall()
-        return [_public_row(row, "token_hash") for row in rows]
+        return [
+            _public_row(row, "token_hash", "private_history_from_sequence")
+            for row in rows
+        ]
 
     def close_campaign_session(self, session_id: str) -> dict:
         updated = self.connection.execute(

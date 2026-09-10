@@ -6,6 +6,7 @@ from ai_kp.rulesets.coc7.mechanics.gameplay import (
     apply_first_aid,
     apply_medicine,
     apply_natural_healing,
+    apply_resolved_sanity_loss,
     apply_sanity_loss,
     chase_action_points,
     evaluate_recorded_dice,
@@ -220,6 +221,23 @@ def test_sanity_thresholds_produce_replayable_follow_up_requirements() -> None:
     )
     assert destroyed["current_san"] == 0
     assert destroyed["permanent_insanity"]
+
+
+def test_resolved_sanity_loss_does_not_roll_the_san_check_again() -> None:
+    result = apply_resolved_sanity_loss(
+        current_san=50,
+        maximum_san=99,
+        intelligence=70,
+        loss=6,
+        daily_loss_before=0,
+        daily_starting_san=50,
+        intelligence_roll=80,
+    )
+
+    assert result["loss"] == 6
+    assert result["current_san"] == 44
+    assert result["temporary_insanity"] is False
+    assert "passed" not in result
 
 
 def test_chase_and_development_rules_are_deterministic() -> None:

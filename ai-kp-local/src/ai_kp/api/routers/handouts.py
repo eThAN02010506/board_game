@@ -42,7 +42,7 @@ def list_handouts(
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> list[dict]:
-    require_campaign_role(identity, campaign_id, ("kp", "player"))
+    require_campaign_role(identity, campaign_id, ("kp", "player", "observer"))
     rows = repo.list_handouts(campaign_id, include_drafts=identity.role == "kp")
     return rows if identity.role == "kp" else [
         _player_projection(row, identity.member_id) for row in rows

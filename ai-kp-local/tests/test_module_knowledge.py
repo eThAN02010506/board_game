@@ -275,6 +275,10 @@ def test_module_llm_call_does_not_hold_sqlite_writer(tmp_path: Path) -> None:
     )
 
     assert result["accepted_count"] == 1
+    assert len(result["accepted_candidate_ids"]) == 1
+    assert repo.get_module_knowledge_candidate(
+        result["accepted_candidate_ids"][0]
+    )["title"] == "仓库线索"
     assert repo.get_module_chunk(chunk_id)["knowledge_status"] == "completed"
     repo.connection.close()
 
@@ -716,3 +720,53 @@ def test_openai_compatible_vision_streams_with_a_decoded_body_limit() -> None:
                 )
 
     asyncio.run(exercise())
+
+
+def test_candidate_entity_attribution_round_trips(tmp_path: Path) -> None:
+    repo, module_id, chunk_id = _module_repo(tmp_path)
+    payload = {
+        "kind": "module_canon",
+        "title": "仓库线索",
+        "statement": "码头仓库中藏着一张旧照片。",
+        "confidence": 0.9,
+        "visibility": "kp",
+        "spoiler_tag": None,
+        "entity_name": "仓库",
+        "entity_type": "location",
+        "citations": [
+            {
+                "chunk_id": chunk_id,
+                "evidence_text": "码头仓库中藏着一张旧照片",
+            }
+        ],
+    }
+    candidate = ModuleKnowledgeService(repo).create_manual_candidate(
+        module_id, payload
+    )
+    assert candidate["entity_name"] == "仓库"
+    assert candidate["entity_type"] == "location"
+    fetched = repo.get_module_knowledge_candidate(candidate["id"])
+    assert fetched["entity_name"] == "仓库"
+    assert fetched["entity_type"] == "location"
+    repo.connection.close()
+
+
+def test_candidate_entity_type_requires_entity_name(tmp_path: Path) -> None:
+    repo, module_id, chunk_id = _module_repo(tmp_path)
+    with pytest.raises(ValueError, match="entity_type requires entity_name"):
+        ModuleKnowledgeService(repo).create_manual_candidate(
+            module_id,
+            {
+                "kind": "module_canon",
+                "title": "乘务员休克",
+                "statement": "在这边发现了休克的乘务员。",
+                "entity_type": "npc",
+                "citations": [
+                    {
+                        "chunk_id": chunk_id,
+                        "evidence_text": "在这边发现了休克的乘务员",
+                    }
+                ],
+            },
+        )
+    repo.connection.close()

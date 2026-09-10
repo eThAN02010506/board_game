@@ -12,10 +12,6 @@ from ai_kp.application.map_service import (
     MoveTokenCommand,
     PlaceTokenCommand,
 )
-from ai_kp.application.parallel_action_settlement_service import (
-    ParallelActionSettlementCommand,
-    ParallelActionSettlementService,
-)
 from ai_kp.application.session_service import SessionService
 from ai_kp.application.turn_service import KpTurnCommand, ManualProposalCommand, TurnService
 from ai_kp.core.db import db_session
@@ -27,6 +23,41 @@ from ai_kp.platform.modules.ingestion import ModuleChunk
 
 
 class ApplicationServiceTests(unittest.TestCase):
+    def test_player_action_acquires_writer_before_authority_reads(self) -> None:
+        events: list[str] = []
+
+        class SubmissionStore:
+            def begin_immediate(self) -> None:
+                events.append("begin_immediate")
+
+            def player_action_block_reason(self, identity) -> None:
+                assert events == ["begin_immediate"]
+                events.append("authority")
+
+            def get_active_campaign_module_run(self, campaign_id):
+                events.append("active_run")
+
+            def list_campaign_module_runs(self, campaign_id, *, limit):
+                events.append("recent_runs")
+                return []
+
+            def create_player_action(self, identity, **values):
+                events.append("insert")
+                return {"id": "action-1", **values}
+
+        identity = type("Identity", (), {"campaign_id": "campaign-1"})()
+
+        action = TurnService(SubmissionStore()).submit_player_action(
+            identity,
+            action_text="I inspect the shared scene.",
+            client_action_id="concurrent-action-1",
+        )
+
+        self.assertEqual(action["id"], "action-1")
+        self.assertEqual(
+            events,
+            ["begin_immediate", "authority", "active_run", "recent_runs", "insert"],
+        )
     def test_session_revoke_rotates_code_in_the_same_use_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             with db_session(Path(tmpdir) / "services.sqlite3") as connection:
@@ -256,122 +287,6 @@ class AiTurnServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(proposal_count["total"], 0)
 
 
-class ParallelActionSettlementServiceTests(unittest.IsolatedAsyncioTestCase):
-    async def test_parallel_actions_are_linked_and_resolved_together(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with db_session(Path(tmpdir) / "parallel-actions.sqlite3") as connection:
-                repo = Repository(connection)
-                campaign = repo.create_campaign("Parallel actions")
-                sessions = SessionService(repo)
-                kp_bundle = sessions.create(campaign["id"])
-                first = sessions.join(kp_bundle["join_code"], display_name="Ada")
-                second = sessions.join(kp_bundle["join_code"], display_name="Bert")
-                kp_identity = repo.authenticate_access_token(kp_bundle["access_token"])
-                first_identity = repo.authenticate_access_token(first["access_token"])
-                second_identity = repo.authenticate_access_token(second["access_token"])
-                assert kp_identity is not None
-                assert first_identity is not None
-                assert second_identity is not None
-                turns = TurnService(repo)
-                first_action = turns.submit_player_action(
-                    first_identity,
-                    action_text="I watch the alley.",
-                    client_action_id="parallel-action-001",
-                )
-                second_action = turns.submit_player_action(
-                    second_identity,
-                    action_text="I check the back door.",
-                    client_action_id="parallel-action-002",
-                )
-
-                result = await ParallelActionSettlementService(repo).settle(
-                    campaign["id"],
-                    kp_identity,
-                    ParallelActionSettlementCommand(
-                        action_ids=(first_action["id"], second_action["id"]),
-                    ),
-                    FakeTurnDirector("The alley stays quiet while the back door gives way."),
-                    source_model="fake-parallel",
-                )
-
-                self.assertEqual(result.status, "approved")
-                self.assertIsNotNone(result.proposal)
-                self.assertIn("多人并行动作统一结算", result.proposal["player_action"])
-                self.assertEqual(
-                    [repo.get_player_action(item["id"])["status"] for item in result.actions],
-                    ["resolved", "resolved"],
-                )
-                actions = repo.list_proposal_actions(result.proposal["id"])
-                self.assertIn(
-                    "parallel_action_batch",
-                    [item["action_type"] for item in actions],
-                )
-
-    async def test_parallel_player_confirmation_requires_every_owner(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with db_session(Path(tmpdir) / "parallel-consent.sqlite3") as connection:
-                repo = Repository(connection)
-                campaign = repo.create_campaign("Parallel consent")
-                sessions = SessionService(repo)
-                kp = sessions.create(campaign["id"])
-                first = sessions.join(kp["join_code"], display_name="Ada")
-                second = sessions.join(kp["join_code"], display_name="Bert")
-                kp_identity = repo.authenticate_access_token(kp["access_token"])
-                first_identity = repo.authenticate_access_token(first["access_token"])
-                second_identity = repo.authenticate_access_token(second["access_token"])
-                assert kp_identity and first_identity and second_identity
-                turns = TurnService(repo)
-                first_action = turns.submit_player_action(
-                    first_identity,
-                    action_text="I watch the alley.",
-                    client_action_id="parallel-consent-001",
-                )
-                second_action = turns.submit_player_action(
-                    second_identity,
-                    action_text="I check the door.",
-                    client_action_id="parallel-consent-002",
-                )
-                result = await ParallelActionSettlementService(repo).settle(
-                    campaign["id"],
-                    kp_identity,
-                    ParallelActionSettlementCommand(
-                        action_ids=(first_action["id"], second_action["id"]),
-                        auto_approve=False,
-                        player_confirmation=True,
-                    ),
-                    FakeTurnDirector("Both actions unfold together."),
-                    source_model="fake-parallel",
-                )
-                self.assertEqual(result.status, "awaiting_confirmation")
-                self.assertEqual(len(result.adjudications), 2)
-
-                _, draft, _, applied = ActionAdjudicationService(repo).confirm(
-                    first_action["id"],
-                    expected_version=result.adjudications[0]["version"],
-                    selected_skill=None,
-                    identity=first_identity,
-                )
-                self.assertFalse(applied)
-                self.assertEqual(draft["status"], "draft")
-                self.assertEqual(repo.get_player_action(first_action["id"])["status"], "reviewed")
-
-                _, approved, _, applied = ActionAdjudicationService(repo).confirm(
-                    second_action["id"],
-                    expected_version=result.adjudications[1]["version"],
-                    selected_skill=None,
-                    identity=second_identity,
-                )
-                self.assertTrue(applied)
-                self.assertEqual(approved["status"], "approved")
-                self.assertEqual(
-                    [
-                        repo.get_player_action(first_action["id"])["status"],
-                        repo.get_player_action(second_action["id"])["status"],
-                    ],
-                    ["resolved", "resolved"],
-                )
-
-
 class AutoTurnServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_auto_turn_does_not_bypass_safety_pause_with_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -512,6 +427,11 @@ class AutoTurnServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.status, "awaiting_confirmation")
                 self.assertEqual(result.proposal["status"], "draft")
                 self.assertEqual(repo.get_player_action(action["id"])["status"], "reviewed")
+                previews = repo.list_action_resolution_previews(action["id"])
+                self.assertEqual(len(previews), 1)
+                self.assertEqual(previews[0]["source"], "legacy_projection")
+                self.assertEqual(previews[0]["preview"]["policy"], "automatic")
+                self.assertEqual(len(previews[0]["preview_hash"]), 64)
                 skill_audit = next(
                     item
                     for item in result.proposal["actions"]
@@ -578,6 +498,32 @@ class AutoTurnServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(result.adjudication["source_error"])
                 self.assertEqual(repo.get_player_action(action["id"])["status"], "reviewed")
 
+    async def test_unbound_full_ai_does_not_persist_model_world_claims(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with db_session(Path(tmpdir) / "auto-turn-unbound-facts.sqlite3") as connection:
+                repo = Repository(connection)
+                campaign = repo.create_campaign("Unbound AI narration")
+                session = SessionService(repo).create(campaign["id"])
+                joined = SessionService(repo).join(
+                    session["join_code"], display_name="Player"
+                )
+                player_identity = repo.authenticate_access_token(joined["access_token"])
+                assert player_identity is not None
+                action = TurnService(repo).submit_player_action(
+                    player_identity,
+                    action_text="I observe the target.",
+                    client_action_id="auto-action-unbound-fact",
+                )
+
+                result = await AutoTurnService(repo).advance_player_action(
+                    action["id"],
+                    director=FactClaimingTurnDirector("The target might react."),
+                    source_model="weak-fake",
+                )
+
+                self.assertEqual(result.status, "awaiting_confirmation")
+                self.assertEqual(result.proposal["proposed_facts"], [])
+
 
 class FakeTurnDirector:
     def __init__(self, narration: str) -> None:
@@ -622,6 +568,29 @@ class FakeTurnDirector:
                 "platform.output_safety_review",
             ),
             skill_versions=("1.0.0", "1.0.0"),
+        )
+
+
+class FactClaimingTurnDirector(FakeTurnDirector):
+    async def handle_player_action(self, **kwargs):
+        result = await super().handle_player_action(**kwargs)
+        fact = {
+            "fact_type": "canonical_fact",
+            "subject": "unverified target",
+            "predicate": "reacted",
+            "object_text": "yes",
+            "evidence_event_ids": [],
+        }
+        payload = result.output.model_dump(mode="json")
+        payload["proposed_facts"] = [fact]
+        return result.__class__(
+            output=KpTurnOutput.model_validate(payload),
+            context=result.context,
+            repaired=result.repaired,
+            skill_id=result.skill_id,
+            skill_version=result.skill_version,
+            skill_ids=result.skill_ids,
+            skill_versions=result.skill_versions,
         )
 
 

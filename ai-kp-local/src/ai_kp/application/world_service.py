@@ -2,6 +2,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 from ai_kp.application.ports.repositories import WorldStore
+from ai_kp.application.scenario_entity_identity import validate_scenario_entity_identities
 from ai_kp.platform.modules.ingestion import chunk_plaintext_module
 
 WorldView = Literal["player", "kp"]
@@ -88,6 +89,100 @@ class WorldService:
 
     def list_pcs(self, campaign_id: str) -> list[dict]:
         return self.repo.list_pcs(campaign_id)
+
+    def list_world_entities(self, campaign_id: str, *, view: WorldView) -> dict:
+        allowed_visibility = (
+            {"table"} if view == "player" else {"table", "kp", "secret"}
+        )
+        base_entities = [
+            item
+            for item in self.repo.list_campaign_world_entities(campaign_id)
+            if item["visibility"] in allowed_visibility
+        ]
+        visible_ids = {str(item["id"]) for item in base_entities}
+        states_by_entity: dict[str, list[dict]] = {}
+        for state in self.repo.list_campaign_world_entity_states(campaign_id):
+            if (
+                state["entity_id"] in visible_ids
+                and state["visibility"] in allowed_visibility
+            ):
+                states_by_entity.setdefault(str(state["entity_id"]), []).append(state)
+        entities = [
+            {**item, "states": states_by_entity.get(str(item["id"]), [])}
+            for item in base_entities
+        ]
+        if view == "kp":
+            identities = self._scenario_identities(campaign_id)
+            entities = [
+                {
+                    **item,
+                    "scenario_identity": identities.get(str(item["origin_ref"]))
+                    if item["origin_kind"] == "module_source" else None,
+                }
+                for item in entities
+            ]
+        relations = [
+            item
+            for item in self.repo.list_campaign_world_entity_relations(campaign_id)
+            if item["source_entity_id"] in visible_ids
+            and item["target_entity_id"] in visible_ids
+        ]
+        state_changes = [
+            self._project_world_entity_state_change(item, view=view)
+            for item in self.repo.list_campaign_world_entity_state_changes(campaign_id)
+            if item["entity_id"] in visible_ids
+            and item["visibility"] in allowed_visibility
+        ]
+        return {
+            "entities": entities,
+            "relations": relations,
+            "state_changes": state_changes,
+        }
+
+    def _scenario_identities(self, campaign_id: str) -> dict[str, dict]:
+        run = self.repo.get_active_campaign_module_run(campaign_id)
+        if run is None:
+            return {}
+        try:
+            binding = self.repo.get_module_run_contract_binding(str(run["id"]))
+        except KeyError:
+            return {}
+        contract = binding["contract"]
+        if not any(item.module_entity_id for item in contract.entities):
+            return {}
+        if validate_scenario_entity_identities(
+            contract, self.repo.list_module_entities(str(run["module_id"]))
+        ):
+            return {}
+        return {
+            item.module_entity_id: {
+                "run_id": run["id"], "entity_id": item.entity_id,
+                "contract_hash": binding["contract_hash"],
+            }
+            for item in contract.entities if item.module_entity_id is not None
+        }
+
+    @staticmethod
+    def _project_world_entity_state_change(item: dict, *, view: WorldView) -> dict:
+        keys = (
+            "id",
+            "campaign_id",
+            "entity_id",
+            "dimension",
+            "from_value",
+            "to_value",
+            "visibility",
+            "note",
+            "source_kind",
+            "state_version",
+            "event_id",
+            "created_at",
+        )
+        projected = {key: item[key] for key in keys}
+        if view == "player":
+            projected.pop("note", None)
+            projected.pop("source_kind", None)
+        return projected
 
     def append_event(self, campaign_id: str, command: AppendEventCommand) -> dict:
         return self.repo.append_event(

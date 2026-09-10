@@ -104,3 +104,91 @@ def test_moving_to_another_location_updates_current_and_seen(tmp_path: Path) -> 
         assert by_name["6号车厢"] in seen_ids
     finally:
         context.__exit__(None, None, None)
+
+
+def test_player_map_projection_omits_unknown_locations_and_geometry(tmp_path: Path) -> None:
+    context, repo, campaign, saved_map, profile_id = _world(
+        tmp_path / "awareness-projection.sqlite3"
+    )
+    try:
+        map_id = saved_map["id"]
+        locations = repo.connection.execute(
+            "SELECT id, name FROM map_locations WHERE map_id = ?",
+            (map_id,),
+        ).fetchall()
+        by_name = {str(row["name"]): str(row["id"]) for row in locations}
+        states = repo.refresh_player_location_awareness(
+            map_id,
+            campaign["id"],
+            profile_id,
+            by_name["5号车厢"],
+        )
+        known = frozenset(
+            str(item["location_id"])
+            for item in states
+            if item["state"] in {"current", "seen"}
+        )
+
+        projected = repo.get_map(
+            map_id,
+            allowed_visibility=("player", "table"),
+            known_location_ids=known,
+        )
+
+        names = {item["name"] for item in projected["locations"]}
+        assert names == {"6号车厢", "5号车厢", "4号车厢"}
+        assert "7号车厢" not in projected["svg_text"]
+        assert "7号车厢" not in str(projected["map_spec"])
+        assert all(
+            route["start_location_id"] in known
+            and route["end_location_id"] in known
+            for route in projected["routes"]
+        )
+        assert projected["render"]["background_asset_url"] is None
+    finally:
+        context.__exit__(None, None, None)
+
+
+def test_hidden_route_does_not_reveal_its_neighbor(tmp_path: Path) -> None:
+    context, repo, campaign, saved_map, profile_id = _world(
+        tmp_path / "awareness-hidden-route.sqlite3"
+    )
+    try:
+        map_id = saved_map["id"]
+        locations = repo.connection.execute(
+            "SELECT id, name FROM map_locations WHERE map_id = ?",
+            (map_id,),
+        ).fetchall()
+        by_name = {str(row["name"]): str(row["id"]) for row in locations}
+        repo.connection.execute(
+            """
+            UPDATE map_routes SET visibility = 'kp'
+            WHERE map_id = ?
+              AND ((start_location_id = ? AND end_location_id = ?)
+                OR (start_location_id = ? AND end_location_id = ?))
+            """,
+            (
+                map_id,
+                by_name["5号车厢"],
+                by_name["4号车厢"],
+                by_name["4号车厢"],
+                by_name["5号车厢"],
+            ),
+        )
+
+        states = repo.refresh_player_location_awareness(
+            map_id,
+            campaign["id"],
+            profile_id,
+            by_name["5号车厢"],
+        )
+
+        seen_ids = {
+            str(item["location_id"])
+            for item in states
+            if item["state"] == "seen"
+        }
+        assert by_name["6号车厢"] in seen_ids
+        assert by_name["4号车厢"] not in seen_ids
+    finally:
+        context.__exit__(None, None, None)

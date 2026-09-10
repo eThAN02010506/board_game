@@ -1,26 +1,51 @@
 import type {
+  ActionAdjudication,
   AiSkillManifest,
   Capability,
+  CampaignObjective,
+  CampaignWorldEntityGraph,
+  CampaignSetupConfig,
+  CharacterLifecycleView,
+  ConfiguredRegion,
+  SettingProfileDocument,
   ModuleRun,
+  ModuleSettingAnalysis,
+  ModuleSettingProfile,
+  ScenarioContractBinding,
+  ScenarioContractJob,
+  ScenarioSourceScope,
+  ScenarioContractValidationReport,
+  ScenarioContractVersion,
   ModuleRunDirectorState,
   ModuleRuntimeEntityStatus,
   SceneTransitionInput,
   DirectorAnalysis,
+  DirectorHelpAdvice,
+  DirectorHelpAuditPage,
   DynamicBranchRun,
   InstalledRuleset,
   ModuleRunStart,
   ModuleRunUpdate,
   NpcReappearanceCandidate,
+  ParallelActionAttentionBatch,
+  ParallelActionPlayerBatch,
+  ParallelActionPlayerRegather,
   CampaignNpcRecord,
   NpcAvailabilityProfile,
   NpcReappearancePolicy,
   HiddenAppearanceDestination,
+  InventoryState,
   MemoryClassification,
   MemoryCurationInput,
   MemoryTimelineItem,
   SessionRecapCandidate,
   SessionRecapReviewInput,
   SessionRecapRun,
+  SessionZeroView,
+  SafeTableMember,
+  TableMessage,
+  TableMessageAudience,
+  SessionContinuityView,
   NpcHiddenAppearanceResolution,
   TravelGraph,
   TravelLocation,
@@ -29,12 +54,322 @@ import type {
   RuleReviewCandidate,
   RuleReviewSubmission,
   Role,
+  RunSettingSelection,
   TurnProposal,
+  ManualKernelCandidate,
   WorldExpansionEncounterInput,
   WorldFactCreateInput,
   WorldFactEntry,
   WorldFactType
 } from "./types";
+
+export function listSettingCatalogs() {
+  return requestJson<import("./types").SettingCatalog[]>("/setting-catalogs");
+}
+
+export function listCampaignWorldEntities(
+  campaignId: string
+): Promise<CampaignWorldEntityGraph> {
+  return requestJson<CampaignWorldEntityGraph>(
+    `/campaigns/${encodeURIComponent(campaignId)}/world-entities`
+  );
+}
+
+export function updateCampaignWorldEntityState(
+  campaignId: string,
+  entityId: string,
+  input: import("./types").WorldEntityStateUpdateInput
+): Promise<import("./types").WorldEntityStateUpdateResult> {
+  return requestJson<import("./types").WorldEntityStateUpdateResult>(
+    `/campaigns/${encodeURIComponent(campaignId)}/world-entities/${encodeURIComponent(entityId)}/states`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function listModuleSettingProfiles(moduleId: string) {
+  return requestJson<ModuleSettingProfile[]>(
+    `/modules/${encodeURIComponent(moduleId)}/setting-profiles`
+  );
+}
+
+export function createModuleSettingProfile(
+  moduleId: string,
+  input: { title: string; setting_pack_id: string; regions: ConfiguredRegion[] }
+) {
+  return requestJson<ModuleSettingProfile>(
+    `/modules/${encodeURIComponent(moduleId)}/setting-profiles`,
+    { method: "POST", body: JSON.stringify(input) }
+  );
+}
+
+export function updateModuleSettingProfile(
+  profileId: string,
+  input: { expected_version: number; title: string; document: SettingProfileDocument }
+) {
+  return requestJson<ModuleSettingProfile>(
+    `/setting-profiles/${encodeURIComponent(profileId)}`,
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+}
+
+export function getRunSettingSelection(runId: string) {
+  return requestJson<RunSettingSelection | null>(
+    `/module-runs/${encodeURIComponent(runId)}/setting-selection`
+  );
+}
+
+export function setRunSettingSelection(
+  runId: string,
+  input: {
+    expected_run_version: number;
+    profile_id: string;
+    profile_version: number;
+    settlement_id: string;
+    reason: string;
+  }
+) {
+  return requestJson<{ run: ModuleRun; selection: RunSettingSelection }>(
+    `/module-runs/${encodeURIComponent(runId)}/setting-selection`,
+    { method: "PUT", body: JSON.stringify(input) }
+  );
+}
+
+export function analyzeSettingProfileSettlement(
+  profileId: string,
+  version: number,
+  settlementId: string
+) {
+  const query = new URLSearchParams({ version: String(version) });
+  return requestJson<ModuleSettingAnalysis>(
+    `/setting-profiles/${encodeURIComponent(profileId)}/settlements/${encodeURIComponent(settlementId)}/analysis?${query}`
+  );
+}
+
+export function getCharacterLifecycle(campaignId: string): Promise<CharacterLifecycleView> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/character-lifecycle`);
+}
+
+export function proposeCharacterLifecycle(
+  campaignId: string,
+  input: {
+    member_id: string;
+    action: "observe" | "replace" | "retire" | "temporary_leave" | "npc_control" | "return" | "resurrect";
+    reason: string;
+    replacement_investigator_id?: string;
+  }
+): Promise<unknown> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/character-lifecycle/requests`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function decideCharacterLifecycle(
+  requestId: string,
+  input: { action: "accept" | "reject"; reason: string; expected_version: number }
+): Promise<unknown> {
+  return requestJson(`/character-lifecycle/requests/${encodeURIComponent(requestId)}/decision`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function getInventory(campaignId: string): Promise<InventoryState> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/inventory`);
+}
+
+export function createInventoryItem(
+  campaignId: string,
+  input: {
+    command_id: string;
+    item_type: string;
+    public_name: string;
+    public_description: string;
+    publicly_listed: boolean;
+    quantity: number;
+    is_unique: boolean;
+    holder_kind: "investigator" | "party" | "npc" | "location" | "loot" | "none";
+    holder_id: string;
+    weight_units?: number;
+    unit_value_minor?: number;
+    currency_code?: string;
+    use_effect?: Record<string, unknown>;
+    hidden_properties?: Record<string, unknown>;
+    source_refs?: Array<Record<string, unknown>>;
+    reason?: string;
+  }
+): Promise<unknown> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/inventory/items`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function commandInventoryItem(
+  itemId: string,
+  input: {
+    command_id: string;
+    command_type: "pickup" | "drop" | "equip" | "unequip" | "consume";
+    expected_version: number;
+    quantity?: number;
+    holder_kind?: "party" | "location" | "loot";
+    holder_id?: string;
+    equipped_slot?: string;
+  }
+): Promise<unknown> {
+  return requestJson(`/inventory/items/${encodeURIComponent(itemId)}/commands`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function createInventoryOffer(
+  campaignId: string,
+  input: {
+    command_id: string;
+    item_id: string;
+    expected_item_version: number;
+    quantity: number;
+    to_investigator_id: string;
+  }
+): Promise<unknown> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/inventory/offers`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function decideInventoryOffer(
+  offerId: string,
+  input: {
+    command_id: string;
+    expected_version: number;
+    decision: "accept" | "decline" | "cancel";
+  }
+): Promise<unknown> {
+  return requestJson(`/inventory/offers/${encodeURIComponent(offerId)}/decisions`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function tradeInventoryItem(
+  campaignId: string,
+  input: {
+    command_id: string;
+    direction: "purchase" | "sell";
+    item_id: string;
+    expected_item_version: number;
+    quantity: number;
+    investigator_id: string;
+    counterparty_kind: "npc" | "vendor";
+    counterparty_id: string;
+    currency_code: string;
+    expected_investigator_balance_version: number | null;
+    expected_counterparty_balance_version: number | null;
+  }
+): Promise<unknown> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/inventory/trades`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function listTableMembers(campaignId: string): Promise<SafeTableMember[]> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/table-members`);
+}
+
+export function listTableMessages(campaignId: string): Promise<TableMessage[]> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/messages`);
+}
+
+export function sendTableMessage(
+  campaignId: string,
+  input: {
+    audience: TableMessageAudience;
+    content: string;
+    recipient_member_id: string | null;
+    client_message_id: string;
+  }
+): Promise<TableMessage> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function getSessionContinuity(campaignId: string): Promise<SessionContinuityView> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/continuity`);
+}
+
+export function listCampaignObjectives(campaignId: string): Promise<CampaignObjective[]> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/objectives`);
+}
+
+export function createCampaignObjective(
+  campaignId: string,
+  input: {
+    command_id: string;
+    title: string;
+    public_description: string;
+    kp_notes: string;
+    visibility: "table" | "kp";
+    source_refs: Array<Record<string, unknown>>;
+  }
+): Promise<CampaignObjective> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/objectives`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateCampaignObjective(
+  objectiveId: string,
+  input: {
+    command_id: string;
+    expected_version: number;
+    status: CampaignObjective["status"];
+    public_progress: string;
+    kp_notes: string;
+    source_refs: Array<Record<string, unknown>>;
+  }
+): Promise<CampaignObjective> {
+  return requestJson(`/objectives/${encodeURIComponent(objectiveId)}/commands`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function endSessionEpisode(
+  campaignId: string,
+  clientEndId: string
+): Promise<SessionContinuityView> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/session-end`, {
+    method: "POST",
+    body: JSON.stringify({ client_end_id: clientEndId })
+  });
+}
+
+export function continueCampaign(
+  campaignId: string,
+  clientContinueId: string
+): Promise<SessionContinuityView> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/continue`, {
+    method: "POST",
+    body: JSON.stringify({ client_continue_id: clientContinueId })
+  });
+}
+
+export function transitionSessionEpisode(
+  campaignId: string,
+  target: "paused" | "in_progress",
+  expectedVersion: number
+): Promise<SessionContinuityView> {
+  return requestJson(`/campaigns/${encodeURIComponent(campaignId)}/episode/transition`, {
+    method: "POST",
+    body: JSON.stringify({ target, expected_version: expectedVersion })
+  });
+}
 
 export const apiBase = "/api";
 const defaultRequestTimeoutMs = 310_000;
@@ -94,11 +429,12 @@ async function responseError(response: Response): Promise<ApiError> {
   return new ApiError(text, response.status);
 }
 
-async function fetchWithTimeout(
+async function requestWithTimeout<T>(
   input: RequestInfo | URL,
   init: RequestInit = {},
+  consume: (response: Response) => Promise<T>,
   timeoutMs = defaultRequestTimeoutMs
-): Promise<Response> {
+): Promise<T> {
   const controller = new AbortController();
   const upstreamSignal = init.signal;
   const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
@@ -109,7 +445,11 @@ async function fetchWithTimeout(
     timeoutMs
   );
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    // Keep the timeout and abort signal alive until the response body has been
+    // consumed. Fetch resolves after headers, while json/text/blob can still
+    // block indefinitely on a stalled or truncated response stream.
+    return await consume(response);
   } catch (error) {
     if (controller.signal.reason instanceof DOMException &&
         controller.signal.reason.name === "TimeoutError") {
@@ -156,11 +496,12 @@ async function sendJson<T>(
   if (credentials.playerToken) {
     headers.set("X-AI-KP-Player-Token", credentials.playerToken);
   }
-  const response = await fetchWithTimeout(`${apiBase}${url}`, { ...init, headers });
-  if (!response.ok) {
-    throw await responseError(response);
-  }
-  return response.json() as Promise<T>;
+  return requestWithTimeout(`${apiBase}${url}`, { ...init, headers }, async (response) => {
+    if (!response.ok) {
+      throw await responseError(response);
+    }
+    return response.json() as Promise<T>;
+  });
 }
 
 export function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -239,11 +580,12 @@ export async function requestBlob(url: string, signal?: AbortSignal): Promise<Bl
   if (credentials.adminToken) {
     headers.set("X-AI-KP-Admin-Token", credentials.adminToken);
   }
-  const response = await fetchWithTimeout(`${apiBase}${url}`, { headers, signal });
-  if (!response.ok) {
-    throw await responseError(response);
-  }
-  return response.blob();
+  return requestWithTimeout(`${apiBase}${url}`, { headers, signal }, async (response) => {
+    if (!response.ok) {
+      throw await responseError(response);
+    }
+    return response.blob();
+  });
 }
 
 export function fetchCapabilities(): Promise<Capability[]> {
@@ -260,11 +602,18 @@ export function fetchInstalledAiSkills(): Promise<AiSkillManifest[]> {
 
 export function settleParallelPlayerActions(
   campaignId: string,
-  payload: { action_ids: string[]; auto_approve?: boolean }
+  payload: { action_ids: string[] }
 ): Promise<{
-  status: "approved" | "needs_attention" | "failed";
-  proposal: TurnProposal | null;
+  status:
+    | "awaiting_confirmation"
+    | "awaiting_checks"
+    | "ready"
+    | "settled"
+    | "needs_attention";
+  batch: Record<string, unknown> | null;
   actions: unknown[];
+  checks: unknown[];
+  unsupported: unknown[];
   message: string;
 }> {
   return requestJson(
@@ -273,6 +622,75 @@ export function settleParallelPlayerActions(
       method: "POST",
       body: JSON.stringify(payload)
     }
+  );
+}
+
+export function getCurrentParallelActionPlayerBatch(
+  campaignId: string
+): Promise<ParallelActionPlayerBatch | null> {
+  return requestJson<ParallelActionPlayerBatch | null>(
+    `/campaigns/${encodeURIComponent(campaignId)}/parallel-action-batches/current`
+  );
+}
+
+export function getCurrentParallelActionPlayerRegather(
+  campaignId: string
+): Promise<ParallelActionPlayerRegather | null> {
+  return requestJson<ParallelActionPlayerRegather | null>(
+    `/campaigns/${encodeURIComponent(campaignId)}/parallel-action-regathers/current`
+  );
+}
+
+export function listParallelActionAttentionBatches(
+  campaignId: string
+): Promise<ParallelActionAttentionBatch[]> {
+  return requestJson<ParallelActionAttentionBatch[]>(
+    `/campaigns/${encodeURIComponent(campaignId)}/parallel-action-batches?status=needs_attention`
+  );
+}
+
+export function resumeParallelActionBatch(
+  batchId: string,
+  payload: { expected_version: number; reason: string }
+): Promise<Record<string, unknown>> {
+  return requestJson(
+    `/parallel-action-batches/${encodeURIComponent(batchId)}/resume`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function abandonParallelActionBatch(
+  batchId: string,
+  payload: { expected_version: number; reason: string }
+): Promise<Record<string, unknown>> {
+  return requestJson(
+    `/parallel-action-batches/${encodeURIComponent(batchId)}/abandon`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+}
+
+export function listManualKernelCandidates(actionId: string): Promise<{
+  action_id: string;
+  action_text: string;
+  candidates: ManualKernelCandidate[];
+}> {
+  return requestJson(
+    `/player-actions/${encodeURIComponent(actionId)}/kernel-candidates`
+  );
+}
+
+export function prepareManualKernelSelection(
+  actionId: string,
+  payload: { operator_id: string; requested_skill_key?: string | null }
+): Promise<{
+  proposal: TurnProposal;
+  adjudication: ActionAdjudication;
+  preview_hash: string;
+  message: string;
+}> {
+  return requestJson(
+    `/player-actions/${encodeURIComponent(actionId)}/kernel-selection`,
+    { method: "POST", body: JSON.stringify(payload) }
   );
 }
 
@@ -336,9 +754,13 @@ export function listModuleRuns(
   );
 }
 
-export function getCurrentModuleRun(campaignId: string): Promise<ModuleRun | null> {
+export function getCurrentModuleRun(
+  campaignId: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<ModuleRun | null> {
   return requestJson<ModuleRun | null>(
-    `/campaigns/${encodeURIComponent(campaignId)}/module-runs/current`
+    `/campaigns/${encodeURIComponent(campaignId)}/module-runs/current`,
+    { signal: options.signal }
   );
 }
 
@@ -367,6 +789,101 @@ export function getModuleRunDirectorState(
 ): Promise<ModuleRunDirectorState> {
   return requestJson<ModuleRunDirectorState>(
     `/module-runs/${encodeURIComponent(runId)}/director-state`
+  );
+}
+
+export function listScenarioContracts(
+  moduleId: string
+): Promise<ScenarioContractVersion[]> {
+  return requestJson<ScenarioContractVersion[]>(
+    `/modules/${encodeURIComponent(moduleId)}/scenario-contracts`
+  );
+}
+
+export function generateScenarioContract(
+  moduleId: string,
+  rulesetId = "coc7",
+  sourceScopeKey?: string
+): Promise<ScenarioContractJob> {
+  return requestJson<ScenarioContractJob>(
+    `/modules/${encodeURIComponent(moduleId)}/scenario-contracts/generate`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ruleset_id: rulesetId,
+        ...(sourceScopeKey ? { source_scope_key: sourceScopeKey } : {})
+      })
+    }
+  );
+}
+
+export function listScenarioSourceScopes(
+  moduleId: string
+): Promise<ScenarioSourceScope[]> {
+  return requestJson<ScenarioSourceScope[]>(
+    `/modules/${encodeURIComponent(moduleId)}/scenario-source-scopes`
+  );
+}
+
+export function listScenarioContractJobs(
+  moduleId: string
+): Promise<ScenarioContractJob[]> {
+  return requestJson<ScenarioContractJob[]>(
+    `/modules/${encodeURIComponent(moduleId)}/scenario-contract-jobs`
+  );
+}
+
+export function retryScenarioContractJob(jobId: string): Promise<ScenarioContractJob> {
+  return requestJson<ScenarioContractJob>(
+    `/scenario-contract-jobs/${encodeURIComponent(jobId)}/retry`,
+    { method: "POST" }
+  );
+}
+
+export function compileScenarioContract(
+  moduleId: string,
+  contract: Record<string, unknown>
+): Promise<{
+  compilation: { report: ScenarioContractValidationReport };
+  version: ScenarioContractVersion | null;
+}> {
+  return requestJson(
+    `/modules/${encodeURIComponent(moduleId)}/scenario-contracts/compile`,
+    { method: "POST", body: JSON.stringify({ contract }) }
+  );
+}
+
+export function publishScenarioContract(
+  versionId: string,
+  expectedRowVersion: number
+): Promise<ScenarioContractVersion> {
+  return requestJson<ScenarioContractVersion>(
+    `/scenario-contracts/${encodeURIComponent(versionId)}/publish`,
+    {
+      method: "POST",
+      body: JSON.stringify({ expected_row_version: expectedRowVersion })
+    }
+  );
+}
+
+export function getScenarioContractBinding(
+  runId: string
+): Promise<ScenarioContractBinding | null> {
+  return requestJson<ScenarioContractBinding | null>(
+    `/module-runs/${encodeURIComponent(runId)}/scenario-contract-binding`
+  );
+}
+
+export function bindScenarioContract(
+  runId: string,
+  contractVersionId: string
+): Promise<ScenarioContractBinding> {
+  return requestJson<ScenarioContractBinding>(
+    `/module-runs/${encodeURIComponent(runId)}/scenario-contract-binding`,
+    {
+      method: "POST",
+      body: JSON.stringify({ contract_version_id: contractVersionId })
+    }
   );
 }
 
@@ -414,6 +931,35 @@ export function analyzeModuleRunIntent(
   );
 }
 
+export function askDirectorHelp(
+  runId: string,
+  question: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<DirectorHelpAdvice> {
+  return requestJson<DirectorHelpAdvice>(
+    `/module-runs/${encodeURIComponent(runId)}/director/help`,
+    {
+      method: "POST",
+      body: JSON.stringify({ question }),
+      signal: options.signal
+    }
+  );
+}
+
+export function listDirectorHelpAudits(
+  campaignId: string,
+  options: { limit?: number; beforeId?: string; signal?: AbortSignal } = {}
+): Promise<DirectorHelpAuditPage> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  if (options.beforeId !== undefined) params.set("before_id", options.beforeId);
+  const query = params.size ? `?${params.toString()}` : "";
+  return requestJson<DirectorHelpAuditPage>(
+    `/campaigns/${encodeURIComponent(campaignId)}/director-help/audits${query}`,
+    { signal: options.signal }
+  );
+}
+
 export function updateDirectorControl(
   runId: string,
   payload: {
@@ -444,8 +990,11 @@ export function updateAutomationLevel(
 
 type WorldExpansionProposalPayload = {
   player_intent: string;
+  requested_expansion_kind?: "environment" | "reactive_branch" | "anchor_bridge";
   pc_id?: string | null;
   map_id?: string | null;
+  setting_pack_id?: string | null;
+  settlement_kind?: "city" | "town" | "village" | "rural" | null;
 };
 
 type AutoWorldExpansionResult = {
@@ -705,6 +1254,73 @@ export function listRuleReviewCandidates(
   );
 }
 
+export function getSessionZero(campaignId: string): Promise<SessionZeroView> {
+  return requestJson<SessionZeroView>(
+    `/campaigns/${encodeURIComponent(campaignId)}/session-zero`
+  );
+}
+
+export function saveSessionZeroConfig(
+  campaignId: string,
+  payload: CampaignSetupConfig & { expected_version: number }
+): Promise<SessionZeroView> {
+  return requestJson<SessionZeroView>(
+    `/campaigns/${encodeURIComponent(campaignId)}/session-zero/config`,
+    { method: "PUT", body: JSON.stringify(payload) }
+  );
+}
+
+export function saveSessionZeroPreferences(
+  campaignId: string,
+  payload: {
+    expected_version: number;
+    public_style: Record<string, number | string>;
+    private_style: Record<string, number | string>;
+    lines: string[];
+    veils: string[];
+  }
+): Promise<SessionZeroView> {
+  return requestJson<SessionZeroView>(
+    `/campaigns/${encodeURIComponent(campaignId)}/session-zero/preferences`,
+    { method: "PUT", body: JSON.stringify(payload) }
+  );
+}
+
+export function confirmSessionZero(
+  campaignId: string,
+  revisionId: string,
+  expectedVersion: number
+): Promise<SessionZeroView> {
+  return requestJson<SessionZeroView>(
+    `/campaigns/${encodeURIComponent(campaignId)}/session-zero/confirm`,
+    {
+      method: "POST",
+      body: JSON.stringify({ revision_id: revisionId, expected_version: expectedVersion })
+    }
+  );
+}
+
+export function triggerSessionSafety(
+  campaignId: string,
+  responseKind: "pause" | "fade" | "change" | "rewind"
+): Promise<{ event: Record<string, unknown>; session_zero: SessionZeroView }> {
+  return requestJson(
+    `/campaigns/${encodeURIComponent(campaignId)}/safety-tool`,
+    { method: "POST", body: JSON.stringify({ response_kind: responseKind }) }
+  );
+}
+
+export function resolveSessionSafety(
+  campaignId: string,
+  eventId: string,
+  resolutionKind: "fade" | "change" | "rewind" | "resume"
+): Promise<{ event: Record<string, unknown>; session_zero: SessionZeroView }> {
+  return requestJson(
+    `/campaigns/${encodeURIComponent(campaignId)}/safety-tool/${encodeURIComponent(eventId)}/resolve`,
+    { method: "POST", body: JSON.stringify({ resolution_kind: resolutionKind }) }
+  );
+}
+
 export function reviewRuleCandidate(
   candidateId: string,
   payload: RuleReviewSubmission
@@ -736,12 +1352,14 @@ export async function requestBinary<T>(
   if (credentials.playerToken) {
     headers.set("X-AI-KP-Player-Token", credentials.playerToken);
   }
-  const response = await fetchWithTimeout(
+  return requestWithTimeout(
     `${apiBase}${url}`,
-    { method: "POST", headers, body: file }
+    { method: "POST", headers, body: file },
+    async (response) => {
+      if (!response.ok) {
+        throw await responseError(response);
+      }
+      return response.json() as Promise<T>;
+    }
   );
-  if (!response.ok) {
-    throw await responseError(response);
-  }
-  return response.json() as Promise<T>;
 }

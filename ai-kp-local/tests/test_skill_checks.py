@@ -329,6 +329,7 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_hidden_checks_and_state_transitions_are_server_authorized(self) -> None:
         hidden = await self.create_check(hidden=True, bonus_dice=0, target=40)
+        self.assertFalse(hidden["allow_push"])
         player_list = await self.client.get(
             f"/campaigns/{self.campaign['id']}/checks", headers=self.player_headers
         )
@@ -356,12 +357,37 @@ class SkillCheckApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(failed_response.json()["passed"])
         pushed = await self.client.post(
             f"/checks/{failed['id']}/push",
-            headers=self.kp_headers,
+            headers=self.player_headers,
             json={"reason": "Failure will alert the guard."},
         )
         self.assertEqual(pushed.status_code, 200, pushed.text)
         self.assertEqual(pushed.json()["pushed_from_check_id"], failed["id"])
         self.assertFalse(pushed.json()["allow_push"])
+
+        accepted_failure = await self.create_check(
+            bonus_dice=0, difficulty="regular", target=20
+        )
+        await self.client.post(
+            f"/checks/{accepted_failure['id']}/resolve",
+            headers=self.player_headers,
+            json={"input_method": "physical", "ones_digit": 0, "tens_digits": [8]},
+        )
+        declined = await self.client.post(
+            f"/checks/{accepted_failure['id']}/decline-push",
+            headers=self.player_headers,
+            json={"reason": "I accept the ordinary failure consequence."},
+        )
+        self.assertEqual(declined.status_code, 200, declined.text)
+        self.assertFalse(declined.json()["allow_push"])
+        self.assertEqual(
+            declined.json()["push_decision"]["decision"], "accept_failure"
+        )
+        denied_late_push = await self.client.post(
+            f"/checks/{accepted_failure['id']}/push",
+            headers=self.player_headers,
+            json={"reason": "Changed my mind."},
+        )
+        self.assertEqual(denied_late_push.status_code, 409)
 
         parent_override = await self.client.post(
             f"/checks/{failed['id']}/override",

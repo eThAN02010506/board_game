@@ -27,6 +27,7 @@ class ProposalApprovalPolicyTests(unittest.TestCase):
         self.assertEqual(plans[0].skill_name, "侦查")
         self.assertEqual(plans[0].difficulty, "hard")
         self.assertTrue(plans[0].hidden)
+        self.assertFalse(plans[0].allow_push)
         self.assertEqual(plans[0].pc_id, "pc-default")
 
     def test_invalid_difficulty_is_rejected_before_persistence(self) -> None:

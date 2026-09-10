@@ -33,15 +33,16 @@ class CapabilityPlaceholderTests(unittest.TestCase):
             "scene_director",
             "world_expansion",
             "check_resolution",
+            "parallel_action_resolution",
             "ruleset_plugins",
             "npc_reappearance",
             "world_fact_ledger",
+            "long_campaign_validation",
             "semantic_memory_search",
             "map_asset_revisions",
             "map_reveal_editor",
             "image_map_generation",
             "model_quantization_profiles",
-            "human_kp_modes",
             "player_handouts",
             "simulated_campaign_evaluation",
             "operational_safety",
@@ -50,6 +51,100 @@ class CapabilityPlaceholderTests(unittest.TestCase):
         }
         self.assertEqual(expected, set(unfinished))
         self.assertTrue(all(status in {"partial", "planned"} for status in unfinished.values()))
+
+    def test_long_term_product_journeys_are_reported_conservatively(self) -> None:
+        capabilities = {item.id: item for item in CAPABILITIES}
+
+        self.assertEqual("available", capabilities["session_zero_safety"].status)
+        self.assertTrue(capabilities["session_zero_safety"].evidence_refs)
+        self.assertEqual("available", capabilities["observer_access"].status)
+        self.assertEqual("available", capabilities["table_communications"].status)
+        self.assertTrue(capabilities["observer_access"].evidence_refs)
+        self.assertTrue(capabilities["table_communications"].evidence_refs)
+        self.assertEqual("available", capabilities["session_continuity"].status)
+        self.assertEqual("available", capabilities["combat_encounters"].status)
+        self.assertEqual("available", capabilities["inventory_economy"].status)
+        self.assertTrue(capabilities["inventory_economy"].evidence_refs)
+        self.assertEqual("available", capabilities["character_lifecycle"].status)
+        self.assertTrue(capabilities["character_lifecycle"].evidence_refs)
+        self.assertEqual("available", capabilities["human_kp_modes"].status)
+        self.assertTrue(capabilities["human_kp_modes"].evidence_refs)
+        human_kp_text = " ".join(
+            (
+                capabilities["human_kp_modes"].summary,
+                *capabilities["human_kp_modes"].acceptance,
+            )
+        )
+        self.assertIn("来源无关准备器", human_kp_text)
+        self.assertIn("Need Help", human_kp_text)
+        self.assertIn("preview hash", human_kp_text)
+        self.assertIn("并行行动", human_kp_text)
+        self.assertIn("request_abandoned", human_kp_text)
+        self.assertEqual("partial", capabilities["long_campaign_validation"].status)
+
+        combat_text = " ".join(
+            (
+                capabilities["combat_encounters"].summary,
+                *capabilities["combat_encounters"].acceptance,
+            )
+        )
+        self.assertIn("玩家已有本人回合", combat_text)
+        self.assertIn("真实玩家浏览器", combat_text)
+        self.assertIn("关闭并重开数据库", combat_text)
+        self.assertIn("20 Session/3000 分钟", capabilities["long_campaign_validation"].summary)
+
+    def test_new_prd_capabilities_have_stable_requirement_traceability(self) -> None:
+        capabilities = {item.id: item for item in CAPABILITIES}
+        expected_requirements = {
+            "session_zero_safety": ("FR-16",),
+            "observer_access": ("FR-17",),
+            "table_communications": ("FR-17",),
+            "session_continuity": ("FR-18",),
+            "parallel_action_resolution": ("FR-09",),
+            "combat_encounters": ("FR-19",),
+            "inventory_economy": ("FR-20",),
+            "character_lifecycle": ("FR-21",),
+            "human_kp_modes": ("FR-13A",),
+            "long_campaign_validation": ("NFR-05", "AC-LONG"),
+        }
+
+        for capability_id, requirement_ids in expected_requirements.items():
+            capability = capabilities[capability_id]
+            self.assertEqual(requirement_ids, capability.requirement_ids)
+            if capability.status == "partial":
+                self.assertTrue(capability.evidence_refs)
+
+    def test_catalog_evidence_references_resolve_inside_the_repository(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+
+        for capability in CAPABILITIES:
+            for evidence_ref in capability.evidence_refs:
+                evidence_path = repository_root / evidence_ref
+                self.assertTrue(
+                    evidence_path.is_file(),
+                    f"{capability.id} references missing evidence: {evidence_ref}",
+                )
+
+    def test_module_and_npc_claims_match_current_release_boundaries(self) -> None:
+        capabilities = {item.id: item for item in CAPABILITIES}
+        module_text = " ".join(
+            (
+                capabilities["module_library"].summary,
+                *capabilities["module_library"].acceptance,
+            )
+        )
+        npc_text = " ".join(
+            (
+                capabilities["npc_reappearance"].summary,
+                *capabilities["npc_reappearance"].acceptance,
+            )
+        )
+
+        self.assertIn("持久化每个分区结果", module_text)
+        self.assertIn("覆盖率", module_text)
+        self.assertNotIn("分区持久化/恢复和覆盖率闸门尚未完成", module_text)
+        self.assertIn("已存在且已关联本团", npc_text)
+        self.assertIn("不会自动建档或入团", npc_text)
 
     def test_backup_is_available_and_semantic_search_has_a_lexical_baseline(self) -> None:
         capabilities = {item.id: item for item in CAPABILITIES}
@@ -128,6 +223,8 @@ class CapabilityPlaceholderTests(unittest.TestCase):
         self.assertTrue(payload)
         self.assertTrue(all(item["status"] in {"partial", "planned"} for item in payload))
         self.assertTrue(all(item["acceptance"] for item in payload))
+        self.assertTrue(all("requirement_ids" in item for item in payload))
+        self.assertTrue(all("evidence_refs" in item for item in payload))
 
     def test_character_sheet_plan_keeps_player_ownership_and_excel_import(self) -> None:
         character_sheets = next(
@@ -198,6 +295,34 @@ class CapabilityPlaceholderTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "dependency cycle"):
             validate_capabilities(cyclic)
+
+    def test_catalog_rejects_duplicate_or_empty_traceability_entries(self) -> None:
+        invalid_cases = (
+            Capability(
+                id="duplicate-requirement",
+                label="Duplicate",
+                status="planned",
+                phase="test",
+                audience="all",
+                summary="test",
+                acceptance=("test",),
+                requirement_ids=("FR-X", "FR-X"),
+            ),
+            Capability(
+                id="empty-evidence",
+                label="Empty",
+                status="partial",
+                phase="test",
+                audience="all",
+                summary="test",
+                acceptance=("test",),
+                evidence_refs=("",),
+            ),
+        )
+
+        for capability in invalid_cases:
+            with self.assertRaises(ValueError):
+                validate_capabilities((capability,))
 
 
 if __name__ == "__main__":

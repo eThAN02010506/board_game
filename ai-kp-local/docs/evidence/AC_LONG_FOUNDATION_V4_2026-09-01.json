@@ -1,0 +1,452 @@
+{
+  "authority_fingerprint_stable": true,
+  "durability": {
+    "authority_fingerprint": "88cb2a4212ed70a56bb1246228d9aeec57d3141da8358908327930114b40cbe2",
+    "authority_fingerprint_stable": true,
+    "counts": {
+      "campaign_episodes": 20,
+      "campaign_investigator_lifecycle": 4,
+      "campaign_member_presence": 5,
+      "campaign_objective_events": 22,
+      "campaign_objectives": 2,
+      "character_lifecycle_events": 8,
+      "character_lifecycle_requests": 6,
+      "events": 142,
+      "memories": 60,
+      "session_continuity_snapshots": 20
+    },
+    "episodes": [
+      {
+        "episode_id": "episode_8782ed7e41cd4fa6",
+        "event_window_hash": "1b3d8ea2959c1c810de2ae189b0abd0b32d85df0041e3e93c4d3a2b36320faa4",
+        "memory_probe_hash": "807f1fc169bcb8b8abb4a337f4d64a7e839c00fb02dbe8f3577b0cfb45c79e62",
+        "milestone": "first_adventure",
+        "objective_status": "open",
+        "objective_version": 2,
+        "session": 1
+      },
+      {
+        "episode_id": "episode_842120f84c714136",
+        "event_window_hash": "caaa403c2e1dac20f3f7125e2c3c9f12516c313ef57a3c88d72b581a4d8a4b78",
+        "memory_probe_hash": "71a7243b5c1869fa5538140ab513359637076b57538e2993c59c238be99fb982",
+        "milestone": "system_familiarity",
+        "objective_status": "open",
+        "objective_version": 3,
+        "session": 2
+      },
+      {
+        "episode_id": "episode_42934a6ece0a4fea",
+        "event_window_hash": "f1fdadb0d75c685751a06489128cdad13e18088ddc2da8b485ab14cbc1aa5d3b",
+        "memory_probe_hash": "e0ef0d82d0bfca6e7215dc5a838b5a8d0e773fdeec68f0f9071ed5ed5bb5d169",
+        "milestone": "complex_npc",
+        "objective_status": "open",
+        "objective_version": 4,
+        "session": 3
+      },
+      {
+        "episode_id": "episode_3b7e1367b70741ec",
+        "event_window_hash": "4ac65dd1363038d45a415885f5d5effbc2341ad8081dc02d982a959a05190120",
+        "memory_probe_hash": "e3c2b400271b43f532146e0a79bd31fd59de54fcce8f3764968b9c4a64e9b056",
+        "milestone": "open_world_deviation",
+        "objective_status": "blocked",
+        "objective_version": 5,
+        "session": 4
+      },
+      {
+        "episode_id": "episode_f8b0afaf2bac4b44",
+        "event_window_hash": "a7e5b4b0c311dc935b8695414c48414aaeeab835044206fdd694954e8e0fa3bc",
+        "memory_probe_hash": "ce477f9739d34d1de9b262f9950985dfa2c0a21b468195650c248520d32ca458",
+        "milestone": "major_choice",
+        "objective_status": "open",
+        "objective_version": 6,
+        "session": 5
+      },
+      {
+        "episode_id": "episode_d3246798468948e0",
+        "event_window_hash": "0c6764f1fc0c05c2cfdcb58888dc2fdf0d13c6d1ce13cd46724caf055bf39656",
+        "memory_probe_hash": "cbff91655cd59c2d0568e00349ebc241b0d752d015b31ec56c9a4d728a557a55",
+        "milestone": "character_growth",
+        "objective_status": "open",
+        "objective_version": 7,
+        "session": 6
+      },
+      {
+        "episode_id": "episode_b26378d3bf6b40cf",
+        "event_window_hash": "ed377f9817ec677591c74815ff3bd68d27b8fc9e1519af256da93109d502c40f",
+        "memory_probe_hash": "a573bee241fdf44dcfb07dfa1b80f77ce3f6b2daf4ddf181256c8f4f6ec20268",
+        "milestone": "character_death",
+        "objective_status": "open",
+        "objective_version": 8,
+        "session": 7
+      },
+      {
+        "episode_id": "episode_10cda2b9751447e1",
+        "event_window_hash": "101106ec83d903b909aa66ce411622c8c5ade23ef442e9f6f7893456dcad229a",
+        "memory_probe_hash": "b3d47f223816a9ea662455b17d0525d21981d44ffbaf95de86e4e0d65eb6bc95",
+        "milestone": "replacement_character",
+        "objective_status": "blocked",
+        "objective_version": 9,
+        "session": 8
+      },
+      {
+        "episode_id": "episode_254d05f8fa514f12",
+        "event_window_hash": "88f2f1789a3cd50ce1c5ed8f7edeff966a3780d7419c2504ca4558721762cbb8",
+        "memory_probe_hash": "71158e34e6791d5281dd4747b169cf76965c0d43398a92f9a4519da2cb139df4",
+        "milestone": "member_departure",
+        "objective_status": "open",
+        "objective_version": 10,
+        "session": 9
+      },
+      {
+        "episode_id": "episode_5a9f158f468745c3",
+        "event_window_hash": "79696d8e5e9b8e24ed597912d9d3dc1845be5b59d1e40e575f1e8c1b170cf779",
+        "memory_probe_hash": "e7462d0657fbefcfe6c3f7c0c5a096a5f2ee037e3fe16b8b136b3c853e0cf523",
+        "milestone": "long_term_recall",
+        "objective_status": "open",
+        "objective_version": 11,
+        "session": 10
+      },
+      {
+        "episode_id": "episode_8a22e27070d94c02",
+        "event_window_hash": "6e6fbcc436ef4dc3e515e521239e4563d380976eb4a92b4fb57fbc4617f81348",
+        "memory_probe_hash": "015fbb28ab3d9bec40b267691f1f8d01890cbb849a495a855cf134c4e2197b52",
+        "milestone": "continued_campaign_11",
+        "objective_status": "open",
+        "objective_version": 12,
+        "session": 11
+      },
+      {
+        "episode_id": "episode_b930a228bb0243ff",
+        "event_window_hash": "6c32e51134e2f5453ea14b8425600f4757f7e69138b9b5e26eb2a4909c085e14",
+        "memory_probe_hash": "75b5b63d5781e6dd8c0d663c85ea7fc701fea2d911846a292860362a9af8ad4b",
+        "milestone": "continued_campaign_12",
+        "objective_status": "blocked",
+        "objective_version": 13,
+        "session": 12
+      },
+      {
+        "episode_id": "episode_d8c154987f5e447c",
+        "event_window_hash": "49415db494ef22d1ee7b7afb3d31a64e1d989b63f9245b02867c386720f936d3",
+        "memory_probe_hash": "ecdfb4e1bd7e5ba9ceec63158ddf6221df5041ba87db6db8d7b25d0b9ddacb9c",
+        "milestone": "continued_campaign_13",
+        "objective_status": "open",
+        "objective_version": 14,
+        "session": 13
+      },
+      {
+        "episode_id": "episode_55a1306826c0482b",
+        "event_window_hash": "ad639654628a2e2f85850e37b862ce02d6dae8241e461c908a877b91b8d4ec6d",
+        "memory_probe_hash": "20c6de653dad3faf31f10dbb257d96dead17d5090dfec2d5e8ff2180a20cc017",
+        "milestone": "continued_campaign_14",
+        "objective_status": "open",
+        "objective_version": 15,
+        "session": 14
+      },
+      {
+        "episode_id": "episode_5257678fe45d4a30",
+        "event_window_hash": "f2d18652667271ce84fe68cbe70512b7584b11c0cf25c10a520014470193fe7c",
+        "memory_probe_hash": "55e4619227a721f5f8aae8f39b1d02a8b552ba3416df77a99eedcbb4d71c0417",
+        "milestone": "continued_campaign_15",
+        "objective_status": "open",
+        "objective_version": 16,
+        "session": 15
+      },
+      {
+        "episode_id": "episode_bf99a7a96798443d",
+        "event_window_hash": "8666ee48994968f2d3ba2afd36e68b928e91d7d3612edfd8cc2e00b2604d1f65",
+        "memory_probe_hash": "1d7c2d048759788ec09e7ddeaa1fb1bfeb49334e332386e477e5a536f3fbeb94",
+        "milestone": "continued_campaign_16",
+        "objective_status": "blocked",
+        "objective_version": 17,
+        "session": 16
+      },
+      {
+        "episode_id": "episode_8cc4bcd25caa49ea",
+        "event_window_hash": "445b6380efcf289c9a97b7e8c15c0e4b20c41d8e613d60add332d1c863720a68",
+        "memory_probe_hash": "6aa72f53d31ecf4f5473b9e68e7aee56876f76adcb97827d7e6c510a3cf2c9cb",
+        "milestone": "continued_campaign_17",
+        "objective_status": "open",
+        "objective_version": 18,
+        "session": 17
+      },
+      {
+        "episode_id": "episode_0269a4ae23d64651",
+        "event_window_hash": "bddb28985af69c0d6c5018f1c7d479bbd6024f2b1afaca03887e1d404f384c5a",
+        "memory_probe_hash": "082690cb8516b02703527123101e46c1dc7e6786c95fa27146f374aa23bd51af",
+        "milestone": "continued_campaign_18",
+        "objective_status": "open",
+        "objective_version": 19,
+        "session": 18
+      },
+      {
+        "episode_id": "episode_3e72847df6344621",
+        "event_window_hash": "02ac86a7934b4970a3be9c54d530d1bafa2b1c2eae50a39a6de454c7f19bdcef",
+        "memory_probe_hash": "bae7c0b8e04bc2c187f3216da576e5cd347d7a0e9e88f6a219b7a942505b737c",
+        "milestone": "continued_campaign_19",
+        "objective_status": "open",
+        "objective_version": 20,
+        "session": 19
+      },
+      {
+        "episode_id": "episode_f508c9e4d1c94e7d",
+        "event_window_hash": "e05f5a320574f07f03af60b180df88a1027f5080b4f1ffd9d446de43207e4cd4",
+        "memory_probe_hash": "1b5e30e8d8c1a66eee51dff3d4a918999123be3ccc2fbaaa63b73aa12cd9bdae",
+        "milestone": "continued_campaign_20",
+        "objective_status": "blocked",
+        "objective_version": 21,
+        "session": 20
+      }
+    ],
+    "equivalent_table_minutes": 3000,
+    "index_rebuild_passed": true,
+    "latency_ms": {
+      "average": 12.683,
+      "max": 17.171
+    },
+    "lifecycle": {
+      "action_counts": {
+        "observe": 2,
+        "replace": 2,
+        "return": 1,
+        "ruleset_state_sync": 2,
+        "temporary_leave": 1
+      },
+      "active_investigator_ids": [
+        "investigator_2c5a4081d65f4319",
+        "investigator_a5a176e30e574333",
+        "investigator_d83d6fc3c9184737",
+        "investigator_e60b621cc9d04ebc",
+        "investigator_f83667d1f01149cf"
+      ],
+      "active_member_ids": [
+        "member_084a386af315498d",
+        "member_bb92c3f7ca634a1d",
+        "member_d49bc2e398064b75",
+        "member_ef19e6f43af84d4a",
+        "member_f3ce6e8a27c84439"
+      ],
+      "dead_investigator_ids": [
+        "investigator_ed881d73ba94478f",
+        "investigator_fc35a2adc4f24b8d"
+      ],
+      "evidence": [
+        {
+          "action": "ruleset_state_sync",
+          "investigator_id": "investigator_ed881d73ba94478f",
+          "session": 7,
+          "to_state": "dead"
+        },
+        {
+          "action": "observe",
+          "session": 8
+        },
+        {
+          "action": "replace",
+          "investigator_id": "investigator_fc35a2adc4f24b8d",
+          "session": 8
+        },
+        {
+          "action": "temporary_leave",
+          "session": 9
+        },
+        {
+          "action": "return",
+          "session": 10
+        },
+        {
+          "action": "member_joined",
+          "investigator_id": "investigator_2c5a4081d65f4319",
+          "member_id": "member_d49bc2e398064b75",
+          "session": 12
+        },
+        {
+          "action": "ruleset_state_sync",
+          "investigator_id": "investigator_fc35a2adc4f24b8d",
+          "session": 14,
+          "to_state": "dead"
+        },
+        {
+          "action": "observe",
+          "session": 15
+        },
+        {
+          "action": "replace",
+          "investigator_id": "investigator_d83d6fc3c9184737",
+          "session": 15
+        }
+      ],
+      "late_join_count": 1,
+      "member_count": 5,
+      "passed": true
+    },
+    "model_switch": {
+      "authority_unchanged": true,
+      "from_model": "durability-model-a",
+      "from_version": 1,
+      "session": 10,
+      "to_model": "durability-model-b",
+      "to_version": 2
+    },
+    "model_switch_passed": true,
+    "process_restarts": 20,
+    "result_fingerprint": "ded07af83b2c42448638666c3fab5783977a91edcafef12f371cfe1f92f3bd2e",
+    "runner_version": "long-campaign-durability.v4",
+    "scripted_sessions": 10,
+    "secret_leak_count": 0,
+    "sessions": 20,
+    "status": "passed"
+  },
+  "durability_sessions": 20,
+  "edge_case_run": {
+    "catalog_ids": [
+      "EDGE-001",
+      "EDGE-002",
+      "EDGE-003",
+      "EDGE-004",
+      "EDGE-005",
+      "EDGE-006",
+      "EDGE-007",
+      "EDGE-008",
+      "EDGE-009",
+      "EDGE-010",
+      "EDGE-011",
+      "EDGE-012",
+      "EDGE-013",
+      "EDGE-014",
+      "EDGE-015",
+      "EDGE-016",
+      "EDGE-017",
+      "EDGE-018",
+      "EDGE-019",
+      "EDGE-020",
+      "EDGE-021",
+      "EDGE-022",
+      "EDGE-023",
+      "EDGE-024",
+      "EDGE-025",
+      "EDGE-026",
+      "EDGE-027",
+      "EDGE-028",
+      "EDGE-029",
+      "EDGE-030",
+      "EDGE-031",
+      "EDGE-032",
+      "EDGE-033",
+      "EDGE-034",
+      "EDGE-035",
+      "EDGE-036",
+      "EDGE-037",
+      "EDGE-038",
+      "EDGE-039",
+      "EDGE-040",
+      "EDGE-041",
+      "EDGE-042",
+      "EDGE-043",
+      "EDGE-044",
+      "EDGE-045",
+      "EDGE-046",
+      "EDGE-047",
+      "EDGE-048",
+      "EDGE-049",
+      "EDGE-050"
+    ],
+    "count": 50,
+    "passed": true,
+    "return_code": 0,
+    "summary": "50 passed in 7.39s",
+    "transcript_sha256": "e3607fc77fcb7e8d697cd21b3336b2c57b761cc603b9b8087455b7f77d6e7561"
+  },
+  "equivalent_table_minutes": 3000,
+  "four_player_full_ai_passed": false,
+  "gate": {
+    "blockers": [
+      "repair/retest rounds: 0/3",
+      "missing persona evidence: ai_assisted_gm, chaos_sandbox_player, new_gm, optimizer, roleplayer, rules_veteran, trpg_newcomer, veteran_gm",
+      "missing Real Player Standard evidence: RPS-01, RPS-02, RPS-03, RPS-04, RPS-05, RPS-06, RPS-07, RPS-08, RPS-09, RPS-10, RPS-11, RPS-12",
+      "missing or failed player UI setup-to-continue journey",
+      "missing or failed four-player Full AI journey"
+    ],
+    "metrics": {
+      "durability_sessions": 20,
+      "equivalent_table_minutes": 3000,
+      "open_p0": 0,
+      "open_p1": 0,
+      "repair_rounds": 0,
+      "scripted_sessions": 10,
+      "unique_edge_cases": 50,
+      "validated_personas": 0,
+      "validated_rps": 0
+    },
+    "ready": false
+  },
+  "generated_at": "2026-08-31T22:44:03.563469+00:00",
+  "index_rebuild_passed": true,
+  "lifecycle_durability_passed": true,
+  "model_off_replay_passed": true,
+  "model_switch_passed": true,
+  "open_defects": {
+    "P0": 0,
+    "P1": 0
+  },
+  "passed_edge_case_ids": [
+    "EDGE-001",
+    "EDGE-002",
+    "EDGE-003",
+    "EDGE-004",
+    "EDGE-005",
+    "EDGE-006",
+    "EDGE-007",
+    "EDGE-008",
+    "EDGE-009",
+    "EDGE-010",
+    "EDGE-011",
+    "EDGE-012",
+    "EDGE-013",
+    "EDGE-014",
+    "EDGE-015",
+    "EDGE-016",
+    "EDGE-017",
+    "EDGE-018",
+    "EDGE-019",
+    "EDGE-020",
+    "EDGE-021",
+    "EDGE-022",
+    "EDGE-023",
+    "EDGE-024",
+    "EDGE-025",
+    "EDGE-026",
+    "EDGE-027",
+    "EDGE-028",
+    "EDGE-029",
+    "EDGE-030",
+    "EDGE-031",
+    "EDGE-032",
+    "EDGE-033",
+    "EDGE-034",
+    "EDGE-035",
+    "EDGE-036",
+    "EDGE-037",
+    "EDGE-038",
+    "EDGE-039",
+    "EDGE-040",
+    "EDGE-041",
+    "EDGE-042",
+    "EDGE-043",
+    "EDGE-044",
+    "EDGE-045",
+    "EDGE-046",
+    "EDGE-047",
+    "EDGE-048",
+    "EDGE-049",
+    "EDGE-050"
+  ],
+  "repair_rounds": [],
+  "restart_recovery_passed": true,
+  "schema_version": 1,
+  "scripted_sessions": 10,
+  "secret_leak_count_is_zero": true,
+  "source_commit": "0914ce6b76d4d69896a04a1853ec37a2892be0f5",
+  "ui_journey_passed": false,
+  "validated_personas": [],
+  "validated_rps": []
+}

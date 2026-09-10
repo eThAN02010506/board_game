@@ -6,12 +6,19 @@ from fastapi.responses import JSONResponse
 from ai_kp.application.errors import (
     AccessDeniedError,
     ConflictError,
+    DirectorHelpAuditUnavailableError,
+    DirectorHelpClientDisconnectedError,
     InvalidInputError,
     ResourceNotFoundError,
+    UpstreamInvalidResponseError,
     UpstreamServiceError,
 )
 from ai_kp.director.errors import CampaignAiCallCancelledError
 from ai_kp.infrastructure.backups import BackupNotFoundError, BackupVerificationError
+from ai_kp.infrastructure.llm.director_help_call_gate import (
+    DirectorHelpCapacityExceededError,
+    DirectorHelpRunInProgressError,
+)
 
 
 def _error(status_code: int, detail: str, code: str) -> JSONResponse:
@@ -41,6 +48,41 @@ async def upstream_handler(_request: Request, exc: Exception) -> JSONResponse:
     return _error(502, str(exc), "upstream_service_error")
 
 
+async def upstream_invalid_response_handler(
+    _request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    return _error(502, str(exc), "upstream_invalid_response")
+
+
+async def director_help_in_progress_handler(
+    _request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    return _error(409, str(exc), "director_help_in_progress")
+
+
+async def director_help_capacity_handler(
+    _request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    return _error(429, str(exc), "director_help_capacity_exceeded")
+
+
+async def client_disconnected_handler(
+    _request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    return _error(499, str(exc), "client_disconnected")
+
+
+async def director_help_audit_unavailable_handler(
+    _request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    return _error(503, str(exc), "director_help_audit_unavailable")
+
+
 async def integrity_conflict_handler(_request: Request, _exc: Exception) -> JSONResponse:
     return _error(409, "Conflicting resource state", "integrity_conflict")
 
@@ -52,6 +94,26 @@ def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AccessDeniedError, forbidden_handler)
     app.add_exception_handler(InvalidInputError, invalid_input_handler)
     app.add_exception_handler(UpstreamServiceError, upstream_handler)
+    app.add_exception_handler(
+        UpstreamInvalidResponseError,
+        upstream_invalid_response_handler,
+    )
+    app.add_exception_handler(
+        DirectorHelpRunInProgressError,
+        director_help_in_progress_handler,
+    )
+    app.add_exception_handler(
+        DirectorHelpCapacityExceededError,
+        director_help_capacity_handler,
+    )
+    app.add_exception_handler(
+        DirectorHelpClientDisconnectedError,
+        client_disconnected_handler,
+    )
+    app.add_exception_handler(
+        DirectorHelpAuditUnavailableError,
+        director_help_audit_unavailable_handler,
+    )
     app.add_exception_handler(BackupVerificationError, invalid_input_handler)
     app.add_exception_handler(BackupNotFoundError, not_found_handler)
     # Compatibility handlers remain until older repositories use typed errors.

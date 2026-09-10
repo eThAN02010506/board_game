@@ -199,12 +199,17 @@ class SessionSeatRepository(SQLiteRepository):
 
         member_id = new_id("member")
         access_token = generate_access_token()
+        private_history_from_sequence = int(
+            self.connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM table_messages"
+            ).fetchone()[0]
+        )
         self.connection.execute(
             """
             INSERT INTO session_members
               (id, session_id, campaign_id, role, display_name, pc_id, token_hash,
-               player_profile_id)
-            VALUES (?, ?, ?, 'player', ?, ?, ?, ?)
+               player_profile_id, private_history_from_sequence)
+            VALUES (?, ?, ?, 'player', ?, ?, ?, ?, ?)
             """,
             (
                 member_id,
@@ -214,6 +219,7 @@ class SessionSeatRepository(SQLiteRepository):
                 pc_id,
                 hash_access_token(access_token),
                 player_profile_id,
+                private_history_from_sequence,
             ),
         )
         claimed = self.connection.execute(

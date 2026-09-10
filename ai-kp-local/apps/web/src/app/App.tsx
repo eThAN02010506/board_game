@@ -7,12 +7,14 @@ import {
   isApiError,
   listNpcReappearanceCandidates,
   materializeWorldExpansionEncounter,
+  prepareManualKernelSelection,
   requestJson,
   requestJsonWithAccessToken
 } from "../api/client";
 import type {
   AuthIdentity,
   ActionAdjudication,
+  ActionAdjudicationView,
   AutoTurnResult,
   Campaign,
   CampaignInvestigator,
@@ -21,9 +23,11 @@ import type {
   ContextAssembly,
   MapGenerationInput,
   MapToken,
+  ModulePlayState,
   OpposedCheck,
   NpcReappearanceCandidate,
   PlayerActionRecord,
+  PublicTurn,
   PlayerCharacter,
   SavedMap,
   SessionBundle,
@@ -32,13 +36,11 @@ import type {
   SessionSeat,
   SkillCheck,
   TurnProposal,
+  VisibleSkillCheck,
   WorldExpansionEncounterInput
 } from "../api/types";
 import { useCredentials } from "../auth/credentials";
-import { ActionPanel } from "../features/actions/ActionPanel";
 import { CampaignPanel } from "../features/campaigns/CampaignPanel";
-import { CheckPanel } from "../features/checks/CheckPanel";
-import { GameplayWorkbench } from "../features/gameplay/GameplayWorkbench";
 import { MapGeneratorPanel } from "../features/maps/MapGeneratorPanel";
 import { MapStage } from "../features/maps/MapStage";
 import { RoutePlanPanel } from "../features/maps/RoutePlanPanel";
@@ -46,14 +48,13 @@ import { MapStructureEditor } from "../features/maps/MapStructureEditor";
 import { TokenPanel } from "../features/maps/TokenPanel";
 import { PlanningPanel } from "../features/planning/PlanningPanel";
 import { useCapabilities } from "../features/planning/useCapabilities";
-import { ProposalPanel } from "../features/proposals/ProposalPanel";
 import { SessionPanel } from "../features/sessions/SessionPanel";
 import { useWorkspaceRealtime } from "../realtime/provider";
 import { AppLayout } from "./layout/AppLayout";
 import { useAsyncTaskLog } from "./hooks/useAsyncTaskLog";
 import { useAutoKpJobs } from "./hooks/useAutoKpJobs";
-import { KpWorkspace, PlayerWorkspace } from "./workspaces/PlayWorkspaces";
-import { resolveWorkspaceRoute, useWorkspaceRoute, type PageId } from "./router";
+import { KpWorkspace, ObserverWorkspace, PlayerWorkspace } from "./workspaces/PlayWorkspaces";
+import { resolveWorkspaceRoute, useWorkspaceRoute } from "./router";
 import {
   listStoredCampaignTokens,
   readActiveMapId,
@@ -134,14 +135,6 @@ function stringifyForLog(value: unknown) {
   );
 }
 
-function publicPcSummary(pc: PlayerCharacter): NonNullable<PlayerCharacter["public_summary"]> {
-  if (pc.public_summary) return pc.public_summary;
-  const declared = pc.sheet?.public_summary;
-  return declared && typeof declared === "object"
-    ? (declared as NonNullable<PlayerCharacter["public_summary"]>)
-    : {};
-}
-
 function mapImageSize(width: number, height: number): {
   width: number;
   height: number;
@@ -182,7 +175,7 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<SessionInfo | null>(null);
   const [sessionMembers, setSessionMembers] = useState<SessionMember[]>([]);
   const [sessionSeats, setSessionSeats] = useState<SessionSeat[]>([]);
-  const [skillChecks, setSkillChecks] = useState<SkillCheck[]>([]);
+  const [skillChecks, setSkillChecks] = useState<VisibleSkillCheck[]>([]);
   const [opposedChecks, setOpposedChecks] = useState<OpposedCheck[]>([]);
   const [recoverableSeats, setRecoverableSeats] = useState<SessionSeat[]>([]);
   const [visibleSeatInvites, setVisibleSeatInvites] = useState<Record<string, string>>({});
@@ -194,7 +187,9 @@ export default function App() {
     NpcReappearanceCandidate[]
   >([]);
   const [playerActions, setPlayerActions] = useState<PlayerActionRecord[]>([]);
-  const [actionAdjudication, setActionAdjudication] = useState<ActionAdjudication | null>(null);
+  const [publicTurns, setPublicTurns] = useState<PublicTurn[]>([]);
+  const [modulePlayState, setModulePlayState] = useState<ModulePlayState | null>(null);
+  const [actionAdjudication, setActionAdjudication] = useState<ActionAdjudicationView | null>(null);
   const [selectedPlayerActionId, setSelectedPlayerActionId] = useState("");
   const [visibleJoinCode, setVisibleJoinCode] = useState("");
   const [selectedTokenId, setSelectedTokenId] = useState("");
@@ -204,30 +199,24 @@ export default function App() {
   >("player-view");
   const [playerActionTab, setPlayerActionTab] = useState<"actions" | "checks">("actions");
   const [autoKpEnabled, setAutoKpEnabled] = useState(true);
-  const [autoConfirmAdjudication, setAutoConfirmAdjudication] = useState(
-    () => localStorage.getItem("auto-confirm-adjudication") === "on"
-  );
   const {
     jobs: autoKpJobs,
     refresh: refreshAutoKpJobs,
     retry: retryAutoKpJob
-  } = useAutoKpJobs(activeCampaign?.id ?? "", Boolean(authIdentity));
+  } = useAutoKpJobs(activeCampaign?.id ?? "", authIdentity);
+  const publicTurnRefreshKey = useMemo(
+    () => autoKpJobs
+      .filter((job) => job.status === "succeeded")
+      .map((job) => `${job.id}:${job.updated_at}`)
+      .join("|"),
+    [autoKpJobs]
+  );
   const handledAdjudicationIds = useRef(new Set<string>());
   useEffect(() => {
     const latestResult = autoKpJobs.find(
       (job) => job.status === "succeeded" && job.result?.adjudication?.status === "pending"
     )?.result;
-    const direct = latestResult?.adjudication;
-    const parallelResult = autoKpJobs.find(
-      (job) => job.status === "succeeded" && job.result?.adjudications?.length
-    )?.result;
-    const ownedParallelAction = parallelResult?.actions?.find(
-      (action) => action.member_id === authIdentity?.member_id
-    );
-    const parallel = parallelResult?.adjudications?.find(
-      (item) => item.action_id === ownedParallelAction?.id && item.status === "pending"
-    );
-    const latest = direct ?? parallel;
+    const latest = latestResult?.adjudication;
     if (latest && !handledAdjudicationIds.current.has(latest.id)) {
       setActionAdjudication(latest);
     }
@@ -248,6 +237,12 @@ export default function App() {
       active = false;
     };
   }, [activeCampaign?.id, authIdentity?.member_id, authIdentity?.role, autoKpJobs]);
+  useEffect(() => {
+    if (authIdentity?.role === "player" && activeCampaign && publicTurnRefreshKey) {
+      void loadPublicTurns(activeCampaign, true);
+      void loadModulePlayState(activeCampaign, true);
+    }
+  }, [activeCampaign?.id, authIdentity?.member_id, authIdentity?.role, publicTurnRefreshKey]);
   const activeCampaignIdRef = useRef("");
   const activeSessionIdRef = useRef("");
   const activeMapIdRef = useRef("");
@@ -270,6 +265,7 @@ export default function App() {
   const [seatInvitationInput, setSeatInvitationInput] = useState("");
   const [seatLabel, setSeatLabel] = useState("玩家席位 1");
   const [playerDisplayName, setPlayerDisplayName] = useState("玩家");
+  const [joinRole, setJoinRole] = useState<"player" | "observer">("player");
 
   const selectedToken = useMemo(
     () => activeMap?.tokens?.find((token) => token.id === selectedTokenId) ?? null,
@@ -278,7 +274,8 @@ export default function App() {
 
   const movableTokens = useMemo(() => {
     const tokens = activeMap?.tokens ?? [];
-    if (authIdentity?.role !== "player") return tokens;
+    if (authIdentity?.role === "kp") return tokens;
+    if (authIdentity?.role !== "player") return [];
     return tokens.filter(
       (token) => token.actor_type === "pc" && token.actor_id === authIdentity.pc_id
     );
@@ -401,6 +398,8 @@ export default function App() {
     setNpcReappearanceCandidates([]);
     setTokenActorId("");
     setPlayerActions([]);
+    setPublicTurns([]);
+    setModulePlayState(null);
     setActionAdjudication(null);
     handledAdjudicationIds.current.clear();
     setSelectedPlayerActionId("");
@@ -442,15 +441,20 @@ export default function App() {
     setActiveSession(bundle.session);
     setVisibleJoinCode(bundle.join_code ?? "");
     setCampaigns((items) => [bundle.campaign, ...items.filter((item) => item.id !== bundle.campaign.id)]);
-    void loadMaps(bundle.campaign);
-    void loadPcs(bundle.campaign);
-    void loadSkillChecks(bundle.campaign);
+    if (bundle.member.role !== "observer") {
+      void loadMaps(bundle.campaign);
+      void loadPcs(bundle.campaign);
+      void loadSkillChecks(bundle.campaign);
+    }
+    void loadModulePlayState(bundle.campaign, true);
     if (bundle.member.role === "kp") {
       void loadProposals(bundle.campaign);
       void loadNpcContactOptions(bundle.campaign, true);
       void loadSessionMembers(bundle.session.id);
       void loadSessionSeats(bundle.session.id);
       void loadPlayerActions(bundle.campaign);
+    } else {
+      void loadPublicTurns(bundle.campaign, true);
     }
   }
 
@@ -515,15 +519,20 @@ export default function App() {
     setAuthIdentity(identity);
     activeSessionIdRef.current = session.id;
     setActiveSession(session);
-    void loadMaps(campaign);
-    void loadPcs(campaign);
-    void loadSkillChecks(campaign);
+    if (identity.role !== "observer") {
+      void loadMaps(campaign);
+      void loadPcs(campaign);
+      void loadSkillChecks(campaign);
+    }
+    void loadModulePlayState(campaign, true);
     if (identity.role === "kp") {
       void loadProposals(campaign);
       void loadNpcContactOptions(campaign, true);
       void loadSessionMembers(session.id);
       void loadSessionSeats(session.id);
       void loadPlayerActions(campaign);
+    } else {
+      void loadPublicTurns(campaign, true);
     }
   }
 
@@ -547,8 +556,10 @@ export default function App() {
     credentialBridge.session(accessToken, identity.role, identity.pc_id);
     setAuthIdentity(identity);
     if (refreshResources) {
-      void loadMaps(campaign, silent);
-      void loadPcs(campaign, silent);
+      if (identity.role !== "observer") {
+        void loadMaps(campaign, silent);
+        void loadPcs(campaign, silent);
+      }
     }
   }
 
@@ -595,12 +606,13 @@ export default function App() {
   async function joinSession(event: FormEvent) {
     event.preventDefault();
     credentialBridge.session("");
-    const bundle = await run("玩家加入团会话", () =>
+    const bundle = await run(joinRole === "observer" ? "加入观战席" : "玩家加入团会话", () =>
       requestJson<SessionBundle>("/sessions/join", {
         method: "POST",
         body: JSON.stringify({
           join_code: joinCodeInput,
-          display_name: playerDisplayName
+          display_name: playerDisplayName,
+          role: joinRole
         })
       })
     );
@@ -610,15 +622,35 @@ export default function App() {
   async function claimSessionSeat(event: FormEvent) {
     event.preventDefault();
     credentialBridge.session("");
-    const bundle = await run("认领玩家席位", () =>
+    const hadStoredPlayer = Boolean(credentialBridge.snapshot().playerToken);
+    let claimError: unknown;
+    let bundle = await run("认领玩家席位", () =>
       requestJson<SessionBundle>("/session-seats/claim", {
         method: "POST",
         body: JSON.stringify({
           invitation_code: seatInvitationInput,
           display_name: playerDisplayName
         })
-      })
+      }),
+      (error) => {
+        claimError = error;
+      }
     );
+    if (!bundle && hadStoredPlayer && isApiError(claimError, 401)) {
+      // A restored or freshly initialized backend cannot recognize the
+      // browser's old durable player identity. Claiming without that stale
+      // credential lets the server create a replacement profile atomically.
+      rememberPlayerToken("");
+      bundle = await run("更新失效身份并认领玩家席位", () =>
+        requestJson<SessionBundle>("/session-seats/claim", {
+          method: "POST",
+          body: JSON.stringify({
+            invitation_code: seatInvitationInput,
+            display_name: playerDisplayName
+          })
+        })
+      );
+    }
     if (bundle) {
       setSeatInvitationInput("");
       rememberSession(bundle);
@@ -792,9 +824,37 @@ export default function App() {
     }
   }
 
+  async function loadPublicTurns(campaign = activeCampaign, silent = false) {
+    if (!campaign || !credentialBridge.snapshot().role) return;
+    const turns = await perform(
+      "读取公开回合记录",
+      () => requestJson<PublicTurn[]>(`/campaigns/${campaign.id}/public-turns`),
+      silent
+    );
+    if (turns && activeCampaignIdRef.current === campaign.id) setPublicTurns(turns);
+  }
+
+  async function loadModulePlayState(campaign = activeCampaign, silent = false) {
+    if (!campaign || !credentialBridge.snapshot().role) return;
+    const state = await perform(
+      "读取模组游玩状态",
+      () => requestJson<ModulePlayState>(`/campaigns/${campaign.id}/module-runs/play-state`),
+      silent
+    );
+    if (state && activeCampaignIdRef.current === campaign.id) setModulePlayState(state);
+  }
+
   async function submitPlayerAction() {
     if (!activeCampaign || credentialBridge.snapshot().role !== "player") {
       showLog("只有已加入团会话的玩家可以提交行动。");
+      return;
+    }
+    if (actionAdjudication?.status === "pending") {
+      showLog("请先确认当前裁定，或在文本框中改写行动后点击“修改行动并重新裁定”。");
+      return;
+    }
+    if (modulePlayState && !modulePlayState.accepts_actions) {
+      showLog(modulePlayState.status === "completed" ? "本次模组已经结束，不能继续提交行动。" : "当前模组已暂停，恢复后才能继续行动。");
       return;
     }
     const campaignId = activeCampaign.id;
@@ -820,17 +880,23 @@ export default function App() {
     void loadSkillChecks(activeCampaign, true);
   }
 
-  async function confirmActionAdjudication(selectedSkill: string | null) {
-    if (!actionAdjudication) return;
+  async function confirmActionAdjudication(
+    selectedSkill: string | null,
+    expectedBatchVersion?: number,
+    renderedAdjudication?: ActionAdjudicationView
+  ) {
+    const adjudication = renderedAdjudication ?? actionAdjudication;
+    if (!adjudication) return;
     const campaignId = activeCampaign?.id ?? "";
-    const handledId = actionAdjudication.id;
+    const handledId = adjudication.id;
     const result = await run("确认 AI 裁定", () =>
       requestJson<AutoTurnResult>(
-        `/player-actions/${actionAdjudication.action_id}/adjudication/confirm`,
+        `/player-actions/${adjudication.action_id}/adjudication/confirm`,
         {
           method: "POST",
           body: JSON.stringify({
-            expected_version: actionAdjudication.version,
+            expected_version: adjudication.version,
+            expected_batch_version: expectedBatchVersion,
             selected_skill: selectedSkill
           })
         }
@@ -838,21 +904,28 @@ export default function App() {
     );
     if (!result) return;
     handledAdjudicationIds.current.add(handledId);
-    mergeAutoTurnResult(result, campaignId);
     setActionAdjudication(null);
+    mergeAutoTurnResult(result, campaignId);
+    void loadPublicTurns(activeCampaign, true);
+    void loadModulePlayState(activeCampaign, true);
   }
 
-  async function reviseActionAdjudication() {
-    if (!actionAdjudication) return;
+  async function reviseActionAdjudication(
+    expectedBatchVersion?: number,
+    renderedAdjudication?: ActionAdjudicationView
+  ) {
+    const adjudication = renderedAdjudication ?? actionAdjudication;
+    if (!adjudication) return;
     const campaignId = activeCampaign?.id ?? "";
-    const handledId = actionAdjudication.id;
+    const handledId = adjudication.id;
     const result = await run("修改行动并重新裁定", () =>
       requestJson<AutoTurnResult>(
-        `/player-actions/${actionAdjudication.action_id}/adjudication/revise`,
+        `/player-actions/${adjudication.action_id}/adjudication/revise`,
         {
           method: "POST",
           body: JSON.stringify({
-            expected_version: actionAdjudication.version,
+            expected_version: adjudication.version,
+            expected_batch_version: expectedBatchVersion,
             action_text: playerAction,
             background: true
           })
@@ -864,19 +937,6 @@ export default function App() {
     setActionAdjudication(null);
     mergeAutoTurnResult(result, campaignId);
   }
-
-  const autoConfirmInFlight = useRef<string | null>(null);
-  useEffect(() => {
-    if (!autoConfirmAdjudication || !actionAdjudication) return;
-    const adjudication = actionAdjudication;
-    if (adjudication.mode === "roleplay_or_clarification") return;
-    if (adjudication.ruling?.feasibility === "impossible") return;
-    if (autoConfirmInFlight.current === adjudication.id) return;
-    autoConfirmInFlight.current = adjudication.id;
-    const defaultSkill =
-      adjudication.selected_skill ?? adjudication.skill_options[0]?.skill_name ?? null;
-    void confirmActionAdjudication(defaultSkill);
-  }, [autoConfirmAdjudication, actionAdjudication]);
 
   async function retryFailedAutoKpJob(jobId: string) {
     const result = await run("重新排入 Auto KP 任务", () => retryAutoKpJob(jobId));
@@ -994,16 +1054,31 @@ export default function App() {
 
   async function decideSkillCheck(
     checkId: string,
-    action: "cancel" | "push",
+    action: "cancel" | "push" | "decline-push",
     reason: string
   ) {
-    const result = await run(action === "cancel" ? "取消检定" : "创建孤注一掷", () =>
-      requestJson<SkillCheck>(`/checks/${checkId}/${action}`, {
+    const label = action === "cancel"
+      ? "取消检定"
+      : action === "push"
+        ? "创建孤注一掷"
+        : "接受普通失败";
+    const result = await run(label, () =>
+      requestJson<SkillCheck | AutoTurnResult>(`/checks/${checkId}/${action}`, {
         method: "POST",
-        body: JSON.stringify({ reason })
+        body: JSON.stringify({
+          reason,
+          auto_advance: action === "decline-push" && autoKpEnabled,
+          background: true
+        })
       })
     );
-    if (result) void loadSkillChecks(activeCampaign);
+    if (result) {
+      if (isAutoTurnResult(result)) {
+        mergeAutoTurnResult(result, activeCampaign?.id ?? "");
+      } else {
+        void loadSkillChecks(activeCampaign);
+      }
+    }
   }
 
   async function generateCheckConsequence(checkId: string) {
@@ -1104,7 +1179,7 @@ export default function App() {
 
   async function createCampaign(event: FormEvent) {
     event.preventDefault();
-    const result = await run("创建测试团", () =>
+    const result = await run("创建 Campaign", () =>
       requestJson<Campaign>("/campaigns", {
         method: "POST",
         body: JSON.stringify({
@@ -1124,6 +1199,7 @@ export default function App() {
   async function loadMaps(campaign = activeCampaign, silent = false) {
     const role = credentialBridge.snapshot().role;
     if (!campaign || !role) return;
+    if (role === "observer") return;
     const version = campaignSelectionVersion.current;
     const view = role === "player" ? "player" : "kp";
     const result = await perform(
@@ -1395,6 +1471,31 @@ export default function App() {
     }
   }
 
+  async function prepareManualKernel(operatorId: string, skillKey: string | null) {
+    if (!activeCampaign || credentialBridge.snapshot().role !== "kp" || !selectedPlayerActionId) {
+      showLog("请先选择一条待处理的玩家行动。");
+      return;
+    }
+    const campaignId = activeCampaign.id;
+    const result = await run("生成规则内核手工裁定", () =>
+      prepareManualKernelSelection(selectedPlayerActionId, {
+        operator_id: operatorId,
+        requested_skill_key: skillKey
+      })
+    );
+    if (result && activeCampaignIdRef.current === campaignId) {
+      setProposals((items) => [
+        result.proposal,
+        ...items.filter((item) => item.id !== result.proposal.id)
+      ]);
+      setActiveProposalId(result.proposal.id);
+      setSelectedPlayerActionId("");
+      setProposalContext(null);
+      void loadPlayerActions(activeCampaign, true);
+      showLog(result.message);
+    }
+  }
+
   async function generateAiProposal() {
     if (!activeCampaign || credentialBridge.snapshot().role !== "kp") {
       showLog("只有 KP 可以调用 AI KP。");
@@ -1552,7 +1653,14 @@ export default function App() {
       refreshSeats: () => void loadSessionSeats(activeSession?.id, true),
       refreshChecks: () => void loadSkillChecks(activeCampaign, true),
       refreshPcs: () => void loadPcs(activeCampaign, true),
-      refreshActions: () => void loadPlayerActions(activeCampaign, true),
+      refreshActions: () => {
+        if (credentialBridge.snapshot().role === "kp") {
+          void loadPlayerActions(activeCampaign, true);
+          return;
+        }
+        void loadPublicTurns(activeCampaign, true);
+        void loadModulePlayState(activeCampaign, true);
+      },
       refreshProposals: () => void loadProposals(activeCampaign, true),
       refreshMaps: () => void refreshRealtimeMaps(),
       expireSession: expireCurrentSession
@@ -1652,12 +1760,15 @@ export default function App() {
             onClaimSeat={claimSessionSeat}
             onJoinCodeInputChange={setJoinCodeInput}
             onJoinSession={joinSession}
+            joinRole={joinRole}
+            onJoinRoleChange={setJoinRole}
             onKpDisplayNameChange={setKpDisplayName}
             onPlayerDisplayNameChange={setPlayerDisplayName}
             onSeatInvitationInputChange={setSeatInvitationInput}
             onSeatLabelChange={setSeatLabel}
             onOpenInvestigators={() => navigateWorkspace("investigators")}
             onRefreshIdentity={() => void refreshIdentity()}
+            onSwitchIdentity={expireCurrentSession}
             onRefreshMembers={() => void loadSessionMembers()}
             onRefreshSeats={() => void loadSessionSeats()}
             onRefreshRecoverableSeats={() => void loadRecoverableSeats()}
@@ -1750,7 +1861,6 @@ export default function App() {
             activePc={activePc}
             activeProposal={activeProposal}
             authIdentity={authIdentity}
-            autoConfirmAdjudication={autoConfirmAdjudication}
             autoKpEnabled={autoKpEnabled}
             autoKpJobs={autoKpJobs}
             campaignTime={campaignTime}
@@ -1766,17 +1876,14 @@ export default function App() {
             moveTarget={moveTarget}
             npcReappearanceCandidates={npcReappearanceCandidates}
             onApprove={() => void approveProposal()}
-            onAutoConfirmAdjudicationChange={(value) => {
-              setAutoConfirmAdjudication(value);
-              localStorage.setItem("auto-confirm-adjudication", value ? "on" : "off");
-            }}
             onAutoKpEnabledChange={setAutoKpEnabled}
             onCancel={(checkId, reason) => void decideSkillCheck(checkId, "cancel", reason)}
             onConfirmWorldExpansion={(input) => void confirmWorldExpansionContact(input)}
             onCreate={(input) => void createSkillCheck(input)}
             onCreateOpposed={(input) => void createOpposedCheck(input)}
             onCreateProposal={() => void createProposal()}
-            onConfirmAdjudication={(skill) => void confirmActionAdjudication(skill)}
+            onPrepareManualKernel={(operatorId, skillKey) => void prepareManualKernel(operatorId, skillKey)}
+            onConfirmAdjudication={(skill, batchVersion, adjudication) => confirmActionAdjudication(skill, batchVersion, adjudication)}
             onGenerateAiProposal={() => void generateAiProposal()}
             onGenerateConsequence={(checkId) => void generateCheckConsequence(checkId)}
             onInspectContext={() => void inspectProposalContext()}
@@ -1790,11 +1897,13 @@ export default function App() {
             onPlayerActionChange={setPlayerAction}
             onProposalTextChange={setProposalText}
             onPush={(checkId, reason) => void decideSkillCheck(checkId, "push", reason)}
+            onDeclinePush={(checkId, reason) => void decideSkillCheck(checkId, "decline-push", reason)}
             onRefresh={() => void loadProposals()}
             onRefreshMaps={() => void refreshRealtimeMaps()}
+            onRefreshIdentity={() => refreshIdentity(true, true)}
             onRefreshPlayerActions={() => void loadPlayerActions()}
             onRetryAutoKpJob={(jobId) => void retryFailedAutoKpJob(jobId)}
-            onReviseAdjudication={() => void reviseActionAdjudication()}
+            onReviseAdjudication={(batchVersion, adjudication) => reviseActionAdjudication(batchVersion, adjudication)}
             onReject={() => void rejectProposal()}
             onReplay={(checkId) => void replaySkillCheck(checkId)}
             onRerollOpposed={(opposedCheckId) => void rerollOpposedCheck(opposedCheckId)}
@@ -1824,6 +1933,7 @@ export default function App() {
             pcs={pcs}
             playerAction={playerAction}
             playerActions={playerActions}
+            publicTurns={publicTurns}
             proposalContext={proposalContext}
             proposals={proposals}
             proposalText={proposalText}
@@ -1843,7 +1953,6 @@ export default function App() {
             activeMap={activeMap}
             activePc={activePc}
             authIdentity={authIdentity}
-            autoConfirmAdjudication={autoConfirmAdjudication}
             autoKpEnabled={autoKpEnabled}
             autoKpJobs={autoKpJobs}
             characterExpanded={characterExpanded}
@@ -1853,16 +1962,13 @@ export default function App() {
             members={sessionMembers}
             movableTokens={movableTokens}
             moveTarget={moveTarget}
-            onAutoConfirmAdjudicationChange={(value) => {
-              setAutoConfirmAdjudication(value);
-              localStorage.setItem("auto-confirm-adjudication", value ? "on" : "off");
-            }}
             onAutoKpEnabledChange={setAutoKpEnabled}
             onCancel={(checkId, reason) => void decideSkillCheck(checkId, "cancel", reason)}
             onCreate={(input) => void createSkillCheck(input)}
             onCreateOpposed={(input) => void createOpposedCheck(input)}
             onCreateProposal={() => void createProposal()}
-            onConfirmAdjudication={(skill) => void confirmActionAdjudication(skill)}
+            onPrepareManualKernel={(operatorId, skillKey) => void prepareManualKernel(operatorId, skillKey)}
+            onConfirmAdjudication={(skill, batchVersion, adjudication) => confirmActionAdjudication(skill, batchVersion, adjudication)}
             onGenerateAiProposal={() => void generateAiProposal()}
             onGenerateConsequence={(checkId) => void generateCheckConsequence(checkId)}
             onMoveTargetChange={setMoveTarget}
@@ -1874,11 +1980,13 @@ export default function App() {
             onPlayerActionTabChange={setPlayerActionTab}
             onProposalTextChange={setProposalText}
             onPush={(checkId, reason) => void decideSkillCheck(checkId, "push", reason)}
+            onDeclinePush={(checkId, reason) => void decideSkillCheck(checkId, "decline-push", reason)}
             onRefresh={() => void loadSkillChecks()}
             onRefreshMaps={() => void refreshRealtimeMaps()}
+            onRefreshIdentity={() => refreshIdentity(true, true)}
             onRefreshPlayerActions={() => void loadPlayerActions()}
             onRetryAutoKpJob={(jobId) => void retryFailedAutoKpJob(jobId)}
-            onReviseAdjudication={() => void reviseActionAdjudication()}
+            onReviseAdjudication={(batchVersion, adjudication) => reviseActionAdjudication(batchVersion, adjudication)}
             onReplay={(checkId) => void replaySkillCheck(checkId)}
             onRerollOpposed={(opposedCheckId) => void rerollOpposedCheck(opposedCheckId)}
             onResolveDigital={(checkId) => void resolveSkillCheck(checkId, "digital")}
@@ -1900,7 +2008,16 @@ export default function App() {
             otherPcs={otherPcs}
             pcs={pcs}
             playerAction={playerAction}
+            modulePlayState={modulePlayState}
+            playBlockedReason={
+              modulePlayState && !modulePlayState.accepts_actions
+                ? modulePlayState.status === "completed"
+                  ? `《${modulePlayState.module_title ?? "当前模组"}》已经结束。等待 KP 开启新的模组后再继续行动。`
+                  : `《${modulePlayState.module_title ?? "当前模组"}》当前已暂停。等待 KP 恢复后再继续行动。`
+                : undefined
+            }
             playerActions={playerActions}
+            publicTurns={publicTurns}
             playerActionTab={playerActionTab}
             proposalText={proposalText}
             selectedPlayerActionId={selectedPlayerActionId}
@@ -1909,6 +2026,16 @@ export default function App() {
             tokenActorId={tokenActorId}
             tokenLabel={tokenLabel}
             tokenLocation={tokenLocation}
+          />
+        )}
+
+        {renderedNav === "play" && authIdentity?.role === "observer" && (
+          <ObserverWorkspace
+            activeCampaign={activeCampaign}
+            authIdentity={authIdentity}
+            modulePlayState={modulePlayState}
+            onRefreshIdentity={() => refreshIdentity(true, true)}
+            publicTurns={publicTurns}
           />
         )}
 

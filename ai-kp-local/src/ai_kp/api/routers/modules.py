@@ -22,11 +22,23 @@ from ai_kp.api.schemas import (
     ModuleAssetAnalyzeRequest,
     ModuleKnowledgeReview,
     ModuleSectionScopeUpdate,
+    ScenarioContractBindRequest,
+    ScenarioContractCompileRequest,
+    ScenarioContractGenerateRequest,
+    ScenarioContractPublishRequest,
 )
 from ai_kp.api.uploads import read_limited_body, safe_upload_filename
+from ai_kp.application.module_entity_materialization_service import (
+    ModuleEntityMaterializationService,
+)
 from ai_kp.application.module_knowledge_service import ModuleKnowledgeService
+from ai_kp.application.scenario_contract_service import ScenarioContractService
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.infrastructure.llm.model_execution import (
+    ModelExecutionSnapshot,
+    ModelExecutionSuperseded,
+)
 from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.infrastructure.modules import ModuleDocumentStorage
 from ai_kp.infrastructure.modules.analysis import (
@@ -41,6 +53,9 @@ from ai_kp.infrastructure.modules.import_worker import (
 )
 from ai_kp.platform.modules.documents import MAX_MODULE_BYTES
 from ai_kp.platform.modules.knowledge import ModuleKnowledgeCandidate
+from ai_kp.platform.resolution.scenario_authoring import (
+    ConstrainedScenarioContractAuthoringAdapter,
+)
 from ai_kp.platform.sessions.models import AuthenticatedMember
 
 router = APIRouter(tags=["module documents"])
@@ -54,6 +69,174 @@ def _require_module_kp(
     module = repo.get_module(module_id)
     require_campaign_role(identity, module["campaign_id"], ("kp",))
     return module
+
+
+@router.get("/modules/{module_id}/scenario-contracts")
+def list_scenario_contracts(
+    module_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    _require_module_kp(repo, identity, module_id)
+    return repo.list_module_scenario_contract_versions(module_id)
+
+
+@router.get("/modules/{module_id}/scenario-source-scopes")
+def list_scenario_source_scopes(
+    module_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    _require_module_kp(repo, identity, module_id)
+    return [
+        scope.as_dict()
+        for scope in ScenarioContractService(repo).source_scopes(module_id)
+    ]
+
+
+@router.post(
+    "/modules/{module_id}/scenario-contracts/generate",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def generate_scenario_contract(
+    module_id: str,
+    payload: ScenarioContractGenerateRequest,
+    request: Request,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    module = _require_module_kp(repo, identity, module_id)
+    service = ScenarioContractService(repo)
+    prepared = service.prepare_generation(
+        module_id,
+        source_scope_key=payload.source_scope_key,
+        ruleset_id=payload.ruleset_id,
+    )
+    run = prepared.run
+    automation_level = (
+        str(run.get("automation_level") or "conservative")
+        if run is not None and str(run.get("module_id")) == module_id
+        else "conservative"
+    )
+    partitions = ConstrainedScenarioContractAuthoringAdapter.partitions(
+        prepared.evidence
+    )
+    job = repo.resume_rejected_scenario_contract_review(
+        module_id, prepared.source_fingerprint
+    ) or repo.create_scenario_contract_job(
+        campaign_id=str(module["campaign_id"]),
+        module_id=module_id,
+        run_id=(str(run["id"]) if run is not None and str(run["module_id"]) == module_id else None),
+        ruleset_id=payload.ruleset_id,
+        automation_level=automation_level,
+        created_by_member_id=identity.member_id,
+        source_fingerprint=prepared.source_fingerprint,
+        contract_key=f"module-{prepared.source_fingerprint[:24]}",
+        title=prepared.source_scope.title,
+        evidence_partitions=partitions,
+        corpus_total_block_count=prepared.corpus_total_block_count,
+        corpus_truncated=prepared.corpus_truncated,
+    )
+    request.app.state.scenario_contract_worker.wake()
+    return job
+
+
+@router.get("/modules/{module_id}/scenario-contract-jobs")
+def list_scenario_contract_jobs(
+    module_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> list[dict]:
+    _require_module_kp(repo, identity, module_id)
+    return repo.list_scenario_contract_jobs(module_id)
+
+
+@router.get("/scenario-contract-jobs/{job_id}")
+def get_scenario_contract_job(
+    job_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    job = repo.get_scenario_contract_job(job_id)
+    _require_module_kp(repo, identity, str(job["module_id"]))
+    return job
+
+
+@router.post("/scenario-contract-jobs/{job_id}/retry")
+def retry_scenario_contract_job(
+    job_id: str,
+    request: Request,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    job = repo.get_scenario_contract_job(job_id)
+    _require_module_kp(repo, identity, str(job["module_id"]))
+    retried = repo.retry_scenario_contract_job(job_id)
+    request.app.state.scenario_contract_worker.wake()
+    return retried
+
+
+@router.post("/modules/{module_id}/scenario-contracts/compile")
+def compile_scenario_contract(
+    module_id: str,
+    payload: ScenarioContractCompileRequest,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    _require_module_kp(repo, identity, module_id)
+    result, saved = ScenarioContractService(repo).compile_draft(
+        module_id,
+        payload.contract,
+        created_by_member_id=identity.member_id,
+    )
+    return {
+        "compilation": result.model_dump(mode="json"),
+        "version": saved,
+    }
+
+
+@router.post("/scenario-contracts/{version_id}/publish")
+def publish_scenario_contract(
+    version_id: str,
+    payload: ScenarioContractPublishRequest,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    version = repo.get_scenario_contract_version(version_id)
+    _require_module_kp(repo, identity, str(version["module_id"]))
+    return ScenarioContractService(repo).publish(
+        version_id,
+        expected_row_version=payload.expected_row_version,
+        published_by_member_id=identity.member_id,
+    )
+
+
+@router.post("/module-runs/{run_id}/scenario-contract-binding")
+def bind_scenario_contract(
+    run_id: str,
+    payload: ScenarioContractBindRequest,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    run = repo.get_campaign_module_run(run_id)
+    require_campaign_role(identity, str(run["campaign_id"]), ("kp",))
+    return ScenarioContractService(repo).bind_run(
+        run_id, payload.contract_version_id
+    )
+
+
+@router.get("/module-runs/{run_id}/scenario-contract-binding")
+def get_scenario_contract_binding(
+    run_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict | None:
+    run = repo.get_campaign_module_run(run_id)
+    require_campaign_role(identity, str(run["campaign_id"]), ("kp",))
+    try:
+        return repo.get_module_run_contract_binding(run_id)
+    except KeyError:
+        return None
 
 
 @router.post(
@@ -312,19 +495,39 @@ async def extract_module_knowledge(
     settings: Settings = Depends(get_app_settings),
 ) -> dict:
     _require_module_kp(repo, identity, module_id)
+    model_execution = ModelExecutionSnapshot.capture(repo, settings)
+    execution_settings = model_execution.settings
     llm = OpenAICompatibleClient(
-        settings.llm_base_url,
-        settings.llm_api_key,
-        settings.llm_model,
+        execution_settings.llm_base_url,
+        execution_settings.llm_api_key,
+        execution_settings.llm_model,
         client=getattr(request.app.state, "http_client", None),
     )
-    return await ModuleKnowledgeService(repo).extract(
+    result = await ModuleKnowledgeService(repo).extract(
         module_id,
         llm,
-        model_name=settings.llm_model,
+        model_name=execution_settings.llm_model,
         limit=limit,
         retry_failed=retry_failed,
     )
+    module = repo.get_module(module_id)
+    run = repo.get_active_campaign_module_run(str(module["campaign_id"]))
+    if (
+        run is not None
+        and str(run.get("module_id")) == module_id
+        and str(run.get("automation_level") or "conservative") == "ai_kp"
+    ):
+        ModuleEntityMaterializationService(repo).review_and_materialize(
+            module_id,
+            tuple(str(item) for item in result.get("accepted_candidate_ids") or ()),
+            member_id=identity.member_id,
+            note="auto-reviewed after extraction in ai_kp mode",
+        )
+    try:
+        model_execution.revalidate(repo)
+    except ModelExecutionSuperseded as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return result
 
 
 @router.get("/modules/{module_id}/knowledge/candidates")

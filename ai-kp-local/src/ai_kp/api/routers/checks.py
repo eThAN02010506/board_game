@@ -20,6 +20,12 @@ from ai_kp.application.check_service import (
     OpposedSideCommand,
     ResolveCheckCommand,
 )
+from ai_kp.application.parallel_action_player_projection import (
+    ParallelActionPlayerProjectionService,
+)
+from ai_kp.application.parallel_action_workflow_service import (
+    ParallelActionWorkflowService,
+)
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember
@@ -130,10 +136,21 @@ def list_opposed_checks(
 @router.post("/opposed-checks/{opposed_check_id}/resolve")
 def resolve_opposed_check(
     opposed_check_id: str,
+    request: Request,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
-    return CheckService(repo).resolve_opposed(opposed_check_id, identity)
+    resolved = CheckService(repo).resolve_opposed(opposed_check_id, identity)
+    observed = _observe_parallel_check(
+        repo,
+        str(resolved["left_check_id"]),
+        identity,
+        request=request,
+        auto_commit=True,
+    )
+    if observed is not None:
+        resolved["parallel_workflow"] = observed
+    return resolved
 
 
 @router.post("/opposed-checks/{opposed_check_id}/reroll")
@@ -142,7 +159,17 @@ def reroll_opposed_check(
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
-    return CheckService(repo).reroll_opposed(opposed_check_id, identity)
+    rerolled = CheckService(repo).reroll_opposed(opposed_check_id, identity)
+    observed = _observe_parallel_check(
+        repo,
+        str(rerolled["left_check_id"]),
+        identity,
+        request=None,
+        auto_commit=False,
+    )
+    if observed is not None:
+        rerolled["parallel_workflow"] = observed
+    return rerolled
 
 
 @router.get("/checks/{check_id}")
@@ -172,6 +199,18 @@ async def resolve_skill_check(
             tens_digits=tuple(payload.tens_digits),
         ),
     )
+    parallel = _observe_parallel_check(
+        repo,
+        check_id,
+        identity,
+        request=request,
+        # The queue service itself gates this on Full AI KP mode.  A player's
+        # legacy per-action auto-advance toggle must not strand an otherwise
+        # ready Full AI multiplayer batch.
+        auto_commit=True,
+    )
+    if parallel is not None:
+        return parallel
     if not payload.auto_advance:
         return resolved
     if payload.background:
@@ -213,16 +252,25 @@ def replay_skill_check(
 def override_skill_check(
     check_id: str,
     payload: SkillCheckOverride,
+    request: Request,
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
-    return CheckService(repo).override(
+    overridden = CheckService(repo).override(
         check_id,
         identity,
         success_level=payload.success_level,
         passed=payload.passed,
         reason=payload.reason,
     )
+    parallel = _observe_parallel_check(
+        repo,
+        check_id,
+        identity,
+        request=request,
+        auto_commit=True,
+    )
+    return parallel if parallel is not None else overridden
 
 
 @router.post("/checks/{check_id}/cancel")
@@ -232,7 +280,15 @@ def cancel_skill_check(
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
-    return CheckService(repo).cancel(check_id, identity, reason=payload.reason)
+    cancelled = CheckService(repo).cancel(check_id, identity, reason=payload.reason)
+    parallel = _observe_parallel_check(
+        repo,
+        check_id,
+        identity,
+        request=None,
+        auto_commit=False,
+    )
+    return parallel if parallel is not None else cancelled
 
 
 @router.post("/checks/{check_id}/push")
@@ -242,4 +298,105 @@ def push_skill_check(
     identity: AuthenticatedMember = Depends(get_identity),
     repo: Repository = Depends(get_repo),
 ) -> dict:
-    return CheckService(repo).push(check_id, identity, reason=payload.reason)
+    pushed = CheckService(repo).push(check_id, identity, reason=payload.reason)
+    parallel = _observe_parallel_check(
+        repo,
+        str(pushed["id"]),
+        identity,
+        request=None,
+        auto_commit=False,
+    )
+    return parallel if parallel is not None else pushed
+
+
+@router.post("/checks/{check_id}/decline-push")
+async def decline_skill_check_push(
+    check_id: str,
+    payload: SkillCheckDecision,
+    request: Request,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+    settings: Settings = Depends(get_app_settings),
+) -> dict:
+    declined = CheckService(repo).decline_push(
+        check_id, identity, reason=payload.reason
+    )
+    parallel = _observe_parallel_check(
+        repo,
+        check_id,
+        identity,
+        request=request,
+        auto_commit=True,
+    )
+    if parallel is not None:
+        return parallel
+    if not payload.auto_advance:
+        return declined
+    if payload.background:
+        job = AutoKpQueueService(repo).enqueue_check_consequence(check_id)
+        if job is None:
+            return declined
+        worker = getattr(request.app.state, "auto_kp_worker", None)
+        if worker is not None:
+            worker.wake()
+        action_id = str(declined["player_action_id"])
+        return {
+            "status": "queued",
+            "player_action": repo.get_player_action(action_id),
+            "proposal": None,
+            "checks": repo.list_skill_checks_for_action(action_id),
+            "job": player_auto_kp_job(job),
+            "message": "玩家已接受普通失败，后果正在后台自动结算。",
+        }
+    result = await AutoTurnService(repo).advance_after_check(
+        check_id,
+        director=create_kp_orchestrator(repo, settings, request),
+        source_model=settings.llm_model,
+    )
+    return declined if result is None else result.as_dict()
+
+
+def _observe_parallel_check(
+    repo: Repository,
+    check_id: str,
+    identity: AuthenticatedMember,
+    *,
+    request: Request | None,
+    auto_commit: bool,
+) -> dict | None:
+    """Rendezvous a linked check without entering legacy single-action effects."""
+
+    check = repo.get_skill_check(check_id)
+    action_id = check.get("player_action_id")
+    if not action_id:
+        return None
+    batch = repo.get_parallel_action_batch_for_action(str(action_id))
+    if batch is None:
+        return None
+    result = ParallelActionWorkflowService(repo).observe_terminal_check(check_id)
+    if result is None:
+        raise ValueError("Parallel check lost its durable batch binding")
+    job = None
+    if auto_commit:
+        job = AutoKpQueueService(repo).enqueue_parallel_followup(str(batch["id"]))
+        if job is not None and request is not None:
+            worker = getattr(request.app.state, "auto_kp_worker", None)
+            if worker is not None:
+                worker.wake()
+    if identity.role == "player":
+        projection = ParallelActionPlayerProjectionService(repo).get(
+            str(batch["id"]), identity
+        ).as_dict()
+        return {
+            "status": result.status,
+            "player_action": repo.get_player_action(str(action_id)),
+            "proposal": None,
+            "checks": projection["own_item"]["checks"],
+            "adjudication": projection["own_item"]["adjudication"],
+            "parallel_batch": projection,
+            "job": player_auto_kp_job(job) if job is not None else None,
+            "message": projection["public_message"],
+        }
+    response = result.as_dict()
+    response["job"] = job
+    return response

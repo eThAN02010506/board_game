@@ -1,13 +1,13 @@
 import { ChevronDown, Eye, EyeOff } from "lucide-react";
 
-import type { SkillCheck } from "../../api/types";
+import type { VisibleSkillCheck } from "../../api/types";
 
 type Props = {
-  check: SkillCheck;
+  check: VisibleSkillCheck;
   compact?: boolean;
 };
 
-const levelLabels: Record<NonNullable<SkillCheck["success_level"]>, string> = {
+const levelLabels: Record<NonNullable<VisibleSkillCheck["success_level"]>, string> = {
   fumble: "大失败",
   failure: "失败",
   regular: "常规成功",
@@ -20,13 +20,13 @@ function percentileLabel(value: number) {
   return String(value * 10).padStart(2, "0");
 }
 
-function rollFormula(check: SkillCheck) {
+function rollFormula(check: VisibleSkillCheck) {
   if (check.bonus_dice > 0) return `D100（${check.bonus_dice} 奖励骰）`;
   if (check.bonus_dice < 0) return `D100（${Math.abs(check.bonus_dice)} 惩罚骰）`;
   return "D100";
 }
 
-const visibilityLabels: Record<SkillCheck["visibility"], string> = {
+const visibilityLabels: Record<VisibleSkillCheck["visibility"], string> = {
   public: "全桌公开",
   private: "掷骰者与 KP",
   blind: "仅 KP 可见"

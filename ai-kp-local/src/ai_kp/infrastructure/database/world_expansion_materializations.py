@@ -1,6 +1,7 @@
 """SQLite ledger for one-time world-expansion encounter materialization."""
 
 import json
+from typing import Any
 
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
@@ -96,6 +97,27 @@ class WorldExpansionMaterializationRepository(SQLiteRepository):
             raise RuntimeError("World expansion materialization was not persisted")
         return saved
 
+    def attach_world_expansion_materialization_entities(
+        self,
+        materialization_id: str,
+        entities: list[dict[str, Any]],
+    ) -> None:
+        for order_index, item in enumerate(entities):
+            self.connection.execute(
+                """
+                INSERT INTO world_expansion_materialization_entities
+                  (materialization_id, world_entity_id, role, local_ref, order_index)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    materialization_id,
+                    item["world_entity_id"],
+                    item["role"],
+                    item.get("local_ref"),
+                    order_index,
+                ),
+            )
+
     def _decode_materialization(self, row) -> dict:
         result = row_to_dict(row)
         result["payload"] = decode_json_field(result.pop("payload_json"), {})
@@ -109,6 +131,19 @@ class WorldExpansionMaterializationRepository(SQLiteRepository):
             (result["id"],),
         ).fetchall()
         result["fact_event_ids"] = [str(item["fact_event_id"]) for item in fact_rows]
+        entity_rows = self.connection.execute(
+            """
+            SELECT world_entity_id, role, local_ref
+            FROM world_expansion_materialization_entities
+            WHERE materialization_id = ?
+            ORDER BY order_index
+            """,
+            (result["id"],),
+        ).fetchall()
+        result["world_entities"] = [row_to_dict(item) for item in entity_rows]
+        result["world_entity_ids"] = [
+            str(item["world_entity_id"]) for item in entity_rows
+        ]
         return result
 
 

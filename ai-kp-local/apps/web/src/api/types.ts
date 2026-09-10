@@ -1,4 +1,62 @@
-export type Role = "kp" | "player";
+export type Role = "kp" | "player" | "observer";
+
+export type CharacterLifecycleState =
+  | "active"
+  | "incapacitated"
+  | "dead"
+  | "retired"
+  | "departed"
+  | "npc_controlled";
+
+export type CharacterLifecycleRequest = {
+  id: string;
+  campaign_id: string;
+  session_id: string;
+  member_id: string;
+  investigator_id: string | null;
+  replacement_investigator_id: string | null;
+  action: "observe" | "replace" | "retire" | "temporary_leave" | "npc_control" | "return" | "resurrect";
+  status: "awaiting_player" | "applied" | "rejected" | "cancelled";
+  reason: string;
+  version: number;
+  created_at: string;
+};
+
+export type CharacterLifecycleView = {
+  characters: Array<{
+    campaign_id: string;
+    investigator_id: string;
+    investigator_name: string | null;
+    state: CharacterLifecycleState;
+    version: number;
+    updated_at: string;
+  }>;
+  presence: Array<{
+    member_id: string;
+    display_name: string;
+    state: "active" | "observing" | "temporarily_absent" | "departed" | "npc_controlled";
+    investigator_id: string | null;
+    version: number;
+  }>;
+  requests: CharacterLifecycleRequest[];
+  events: Array<{
+    id: string;
+    investigator_id: string | null;
+    member_id: string | null;
+    action: string;
+    from_state: string | null;
+    to_state: string;
+    public_summary: string;
+    created_at: string;
+    sequence: number;
+  }>;
+  capabilities: {
+    resurrection: boolean;
+    resurrection_reason: string;
+    replacement_character: boolean;
+    observer_after_death: boolean;
+  };
+};
 
 export type WorldFactType =
   | "canonical_fact"
@@ -112,6 +170,56 @@ export type Campaign = {
   character_schema_version?: string;
   event_schema_version?: string;
   current_time: string | null;
+  session_zero_required?: boolean;
+};
+
+export type InventoryItem = {
+  id: string;
+  campaign_id: string;
+  item_type: string;
+  public_name: string;
+  public_description: string;
+  publicly_listed: boolean;
+  quantity: number;
+  is_unique: boolean;
+  holder_kind: "investigator" | "party" | "npc" | "location" | "loot" | "none";
+  holder_id: string;
+  state: "available" | "consumed" | "broken" | "lost";
+  equipped_slot: string | null;
+  weight_units?: number;
+  unit_value_minor?: number;
+  currency_code?: string;
+  version: number;
+  revealed_properties?: Record<string, unknown>;
+  hidden_properties?: Record<string, unknown>;
+};
+
+export type CurrencyAccount = {
+  campaign_id: string;
+  account_kind: "investigator" | "party" | "npc" | "vendor";
+  account_id: string;
+  currency_code: string;
+  balance_minor: number;
+  version: number;
+};
+
+export type InventoryTransferOffer = {
+  id: string;
+  item_id: string;
+  quantity: number;
+  from_investigator_id: string;
+  to_investigator_id: string;
+  status: "pending" | "accepted" | "declined" | "cancelled" | "stale";
+  version: number;
+};
+
+export type InventoryState = {
+  items: InventoryItem[];
+  balances: CurrencyAccount[];
+  transfer_offers: InventoryTransferOffer[];
+  transfer_targets: { investigator_id: string; name: string }[];
+  self_investigator_id: string | null;
+  recipes: Record<string, unknown>[];
 };
 
 export type ModuleImportJob = {
@@ -126,6 +234,8 @@ export type ModuleImportJob = {
   progress_current: number;
   progress_total: number;
   attempt_count: number;
+  audit_count: number;
+  audit_reason: string;
   error_text: string | null;
   module_id: string | null;
   created_at: string;
@@ -144,6 +254,15 @@ export type ModuleRecord = {
 };
 
 export type ModuleRunStatus = "active" | "paused" | "completed";
+export type ModulePlayState = {
+  accepts_actions: boolean;
+  status: ModuleRunStatus | "none";
+  module_title: string | null;
+  completed_at: string | null;
+  ending_id: string | null;
+  ending_title: string | null;
+  opening_narration: string | null;
+};
 export type ModulePlayPace = "freeform" | "structured" | "downtime";
 export type ModuleRuntimeEntityStatus = "hidden" | "available" | "discovered" | "resolved";
 export type ModuleAutomationLevel = "conservative" | "balanced" | "ai_kp";
@@ -153,7 +272,10 @@ export type AutoKpJob = {
   campaign_id: string;
   run_id?: string | null;
   job_type: "player_action" | "parallel_actions" | "world_expansion" | "check_consequence";
-  resource_id: string;
+  // Player projections intentionally omit authority identifiers for a
+  // multiplayer job; KP responses retain them.
+  resource_id?: string;
+  phase?: "prepare" | "settlement" | "progress";
   status: "queued" | "running" | "retry_wait" | "succeeded" | "failed" | "needs_attention" | "cancelled";
   stage: string;
   attempt_count: number;
@@ -163,8 +285,6 @@ export type AutoKpJob = {
   updated_at: string;
   result?: Partial<AutoTurnResult> & {
     stage?: string;
-    actions?: PlayerActionRecord[];
-    adjudications?: ActionAdjudication[];
   };
 };
 
@@ -191,6 +311,174 @@ export type ModuleRun = {
   started_at: string;
   updated_at: string;
   completed_at: string | null;
+};
+
+export type ScenarioContractIssue = {
+  severity: "error" | "warning";
+  code: string;
+  path: string;
+  message: string;
+};
+
+export type ScenarioPlayabilityProof = {
+  invariant:
+    | "scene_reachability"
+    | "branch_consequences"
+    | "source_content_delivery"
+    | "failure_recovery"
+    | "core_clue_discoverability"
+    | "ending_reachability";
+  status: "passed" | "failed" | "indeterminate";
+  witness: string[];
+  counterexamples: string[];
+};
+
+export type ScenarioContractValidationReport = {
+  valid: boolean;
+  release_ready: boolean;
+  provenance_ready: boolean;
+  issues: ScenarioContractIssue[];
+  contract_hash: string | null;
+  playability: {
+    ready: boolean;
+    explored_state_count: number;
+    proofs: ScenarioPlayabilityProof[];
+  };
+};
+
+export type ScenarioContractVersion = {
+  id: string;
+  module_id: string;
+  version: number;
+  row_version: number;
+  status: "draft" | "published" | "superseded";
+  contract_hash: string;
+  created_at: string;
+  published_at: string | null;
+  contract: {
+    contract_id: string;
+    title: string;
+    source_version: number;
+    ruleset_id: string;
+    locations: Array<{ location_id: string; title: string }>;
+    entities: Array<{ entity_id: string; title: string; entity_type: string; module_entity_id?: string | null }>;
+    clues: Array<{ clue_id: string; title: string }>;
+    operators: Array<{ operator_id: string; title: string; policy: string }>;
+    task_methods: Array<{ method_id: string; title: string }>;
+    endings: Array<{ ending_id: string; title: string }>;
+  };
+  validation: ScenarioContractValidationReport;
+};
+
+export type ScenarioContractBinding = {
+  run_id: string;
+  contract_version_id: string;
+  contract_hash: string;
+  version: number;
+  source_version: number;
+  active_overlay_id: string | null;
+};
+
+export type ScenarioContractGeneration = {
+  authoring: {
+    candidate: unknown | null;
+    attempt_count: number;
+    partition_count: number;
+    completed_partition_count: number;
+    validation_errors: string[];
+    check_mappings?: Array<{
+      action_id: string;
+      source_term: string;
+      resolved_skill_keys: string[];
+      status: "resolved" | "unresolved";
+    }>;
+    normalizations?: Array<{
+      code:
+        | "kp_signal_public_projection_removed"
+        | "table_signal_downgraded"
+        | "exact_signal_precision_downgraded"
+        | "duplicate_signal_bands_removed";
+      record_kind: "consequence_signals";
+      record_id: string;
+    }>;
+    repair_diagnostics?: Array<{
+      partition_index: number;
+      model_attempt: number;
+      group: string;
+      record_index: number;
+      status: "applied" | "failed" | "discarded";
+      validation_errors: string[];
+    }>;
+    coverage_supplement?: {
+      target_count: number;
+      partition_count: number;
+      completed_partition_count: number;
+      failed_partition_count: number;
+    };
+    post_review_coverage?: Array<{
+      cycle: number;
+      target_count: number;
+      partition_count: number;
+      completed_partition_count: number;
+      failed_partition_count: number;
+    }>;
+    review?: {
+      decision: "approve" | "reject" | "not_requested";
+      findings: string[];
+      assumptions_resolved: boolean;
+    };
+  };
+  compilation: {
+    decision: "auto_publishable" | "review_required" | "rejected";
+    report: ScenarioContractValidationReport;
+    coverage?: {
+      required_item_count: number;
+      covered_item_count: number;
+      coverage_ratio: number;
+      blocking_item_count?: number;
+      covered_blocking_item_count?: number;
+    };
+  } | null;
+  version: ScenarioContractVersion | null;
+  auto_published: boolean;
+  corpus_block_count: number;
+  corpus_total_block_count: number;
+  corpus_truncated: boolean;
+  model: string;
+  binding: ScenarioContractBinding | null;
+};
+
+export type ScenarioContractJob = {
+  id: string;
+  campaign_id: string;
+  module_id: string;
+  run_id: string | null;
+  ruleset_id: string;
+  automation_level: ModuleAutomationLevel;
+  status: "queued" | "running" | "retry_wait" | "succeeded" | "failed";
+  stage: string;
+  progress_current: number;
+  progress_total: number;
+  attempt_count: number;
+  max_attempts: number;
+  last_error: string | null;
+  retryable: boolean;
+  result: ScenarioContractGeneration | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScenarioSourceScope = {
+  key: string;
+  title: string;
+  start_order_index: number;
+  end_order_index: number;
+  block_count: number;
+  character_count: number;
+  first_page: number | null;
+  last_page: number | null;
+  semantic_counts: Record<string, number>;
+  whole_document: boolean;
 };
 
 export type ModuleRunEntityState = {
@@ -257,6 +545,180 @@ export type ModuleRunDirectorState = {
   }>;
 };
 
+export type SettlementKind = "city" | "town" | "village" | "rural";
+export type RegionNodeRole = "hub" | "nearby" | "distant" | "rural";
+
+export type SettingCatalog = {
+  setting_pack_id: string;
+  schema_version: "1";
+  pack_version: string;
+  title: string;
+  locale: string;
+  content_scope: string;
+  provenance: string[];
+  settlement_kinds: SettlementKind[];
+  region_patterns: Array<{
+    pattern_id: string;
+    title: string;
+    applicability_tags: string[];
+    nodes: Array<{
+      node_role: RegionNodeRole;
+      settlement_kind: SettlementKind;
+      minimum_count: number;
+      maximum_count: number;
+    }>;
+    routes: Array<{
+      from_role: RegionNodeRole;
+      to_role: RegionNodeRole;
+      travel_modes: string[];
+      distance_band: "local" | "near" | "regional" | "remote";
+      bidirectional: boolean;
+    }>;
+  }>;
+};
+
+export type ConfiguredRegion = {
+  region_id: string;
+  title: string;
+  pattern_id: string;
+  role_counts: Partial<Record<RegionNodeRole, number>>;
+};
+
+export type ConfiguredLocationBinding = {
+  module_entity_id: string;
+  slot_id: string | null;
+};
+
+export type ConfiguredEntityBinding = {
+  module_entity_id: string;
+  archetype_id: string;
+  settlement_id: string | null;
+  slot_id: string | null;
+};
+
+export type ConfiguredSettlement = {
+  settlement_id: string;
+  title: string;
+  region_id: string;
+  node_id: string;
+  settlement_kind: SettlementKind;
+  include_typical: boolean;
+  condition_tags: string[];
+  location_bindings: ConfiguredLocationBinding[];
+};
+
+export type SettingProfileDocument = {
+  schema_version: "1";
+  regions: ConfiguredRegion[];
+  settlements: ConfiguredSettlement[];
+  entity_bindings?: ConfiguredEntityBinding[];
+};
+
+export type ModuleSettingProfile = {
+  id: string;
+  module_id: string;
+  title: string;
+  setting_pack_id: string;
+  status: "active" | "archived";
+  current_version: number;
+  version: number;
+  setting_pack_version: string;
+  document: SettingProfileDocument;
+  content_hash: string;
+  created_at: string;
+  updated_at: string;
+  version_created_at: string;
+};
+
+export type RunSettingSelection = {
+  run_id: string;
+  profile_id: string;
+  profile_version: number;
+  settlement_id: string;
+  version: number;
+  profile: ModuleSettingProfile;
+};
+
+export type EntityArchetypeKind =
+  | "npc"
+  | "organization"
+  | "item"
+  | "document"
+  | "vehicle"
+  | "event"
+  | "clue_carrier";
+
+export type EntityArchetype = {
+  archetype_id: string;
+  entity_kind: EntityArchetypeKind;
+  label_variants: string[];
+  applicable_scene_slots: string[];
+  capability_tags: string[];
+  profession_ids: string[];
+  state_dimensions: string[];
+  relation_slots: Array<{
+    relation_slot_id: string;
+    predicate: string;
+    target_kinds: EntityArchetypeKind[];
+    target_archetype_ids: string[];
+    minimum_count: number;
+    maximum_count: number;
+  }>;
+};
+
+export type ModuleSettingAnalysis = {
+  module_id: string;
+  profile_id: string;
+  profile_version: number;
+  profile_content_hash: string;
+  setting_pack: {
+    setting_pack_id: string;
+    schema_version: "1";
+    pack_version: string;
+    title: string;
+    content_scope: string;
+    provenance: string[];
+  };
+  configured_settlement: ConfiguredSettlement;
+  settlement_template: {
+    setting_pack_id: string;
+    settlement_id: string;
+    settlement_kind: SettlementKind;
+    scene_slots: Array<{
+      slot_id: string;
+      function: string;
+      frequency: "core" | "typical" | "conditional";
+      building_candidates: string[];
+      entity_archetype_candidates: EntityArchetype[];
+      selected: boolean;
+    }>;
+  };
+  source_coverage: {
+    bindings: Array<{
+      mention_id: string;
+      mention_title: string;
+      status: "matched" | "ambiguous" | "unmatched";
+      matched_slot_id: string | null;
+      source_block_ids: string[];
+    }>;
+    covered_slot_ids: string[];
+    missing_core_slot_ids: string[];
+    suggested_typical_slot_ids: string[];
+  };
+  unassigned_location_entity_ids: string[];
+  source_entity_bindings: Array<ConfiguredEntityBinding & {
+    entity: {
+      entity_id: string;
+      entity_type: ModuleEntity["entity_type"];
+      name: string;
+      description: string;
+    };
+    archetype: EntityArchetype;
+  }>;
+  unassigned_entity_ids: string[];
+  write_policy: "read_only_kp_review_required";
+};
+
 export type SceneTransitionInput = {
   expected_version: number;
   scene_key: string;
@@ -297,6 +759,115 @@ export type DirectorAnalysis = {
   reachability: ModuleReachabilityReport & { evaluated: boolean };
   unreachable_anchor_count: number;
   writes_performed: false;
+};
+
+export type DirectorHelpSkillChoice = {
+  skill_key: string;
+  difficulty: "regular" | "hard" | "extreme";
+  reason: string;
+  hidden: boolean;
+  bonus_dice: number;
+  allow_push: boolean;
+  scope: string;
+  automatic_information: string[];
+  failure_stakes: string;
+  pushed_failure_stakes: string;
+};
+
+export type DirectorHelpAdvice = {
+  run_id: string;
+  run_version: number;
+  contract_id: string;
+  contract_hash: string;
+  scenario_version: number;
+  state_version: number;
+  basis_hash: string;
+  question: string;
+  status: "answered" | "partial" | "clarify" | "no_evidence" | "refused";
+  answer: string;
+  follow_up_question: string | null;
+  suggested_response: string;
+  suggested_response_audience: "kp_review_only";
+  next_steps: string[];
+  confidence: "low" | "medium" | "high";
+  uncertainty_reasons: string[];
+  assumptions: string[];
+  citations: Array<{
+    evidence_id: string;
+    source_type: string;
+    authority: "executable_contract" | "source_context_only";
+    visibility: "player" | "table" | "kp" | "secret";
+    title: string;
+    text: string;
+    source_locator: string | null;
+    source_refs: Array<{
+      source_block_id: string;
+      document_id: string;
+      page: number | null;
+      paragraph: number | null;
+    }>;
+    source_refs_total_count: number;
+    source_refs_truncated: boolean;
+  }>;
+  action: {
+    candidate_id: string;
+    kind: "operator" | "task_method";
+    title: string;
+    available: boolean;
+    reason: string;
+    policy:
+      | "automatic"
+      | "choice"
+      | "required_check"
+      | "optional_check"
+      | "conditional_check"
+      | "opposed_check"
+      | "impossible"
+      | "clarification"
+      | null;
+    selected_skill_key: string | null;
+    step_operator_ids: string[];
+    skill_choices: DirectorHelpSkillChoice[];
+    skill_choices_total_count: number;
+    skill_choices_truncated: boolean;
+    automatic_information: string[];
+    maximum_effect: string;
+    success_effects: string[];
+    success_effects_total_count: number;
+    success_effects_truncated: boolean;
+    failure_effects: string[];
+    failure_effects_total_count: number;
+    failure_effects_truncated: boolean;
+  } | null;
+  writes_performed: false;
+  can_execute: false;
+};
+
+export type DirectorHelpAuditOutcome =
+  | "requested"
+  | "completed"
+  | "failed"
+  | "cancelled_client"
+  | "cancelled_control"
+  | "rejected_busy";
+
+export type DirectorHelpAuditItem = {
+  id: string;
+  run_id: string;
+  requested_by_member_id: string | null;
+  question: string;
+  outcome: DirectorHelpAuditOutcome;
+  error_code: string | null;
+  duration_ms: number | null;
+  created_at: string;
+  completed_at: string | null;
+  response_hash: string | null;
+  advice: DirectorHelpAdvice | null;
+};
+
+export type DirectorHelpAuditPage = {
+  items: DirectorHelpAuditItem[];
+  next_before_id: string | null;
 };
 
 export type ModuleRunStart = {
@@ -450,6 +1021,112 @@ export type SessionMember = {
   revoked_at: string | null;
 };
 
+export type SafeTableMember = Pick<
+  SessionMember,
+  "id" | "display_name" | "role"
+> & { joined_at: string };
+
+export type TableMessageAudience = "table" | "party" | "announcement" | "direct";
+
+export type TableMessage = {
+  id: string;
+  session_id: string;
+  campaign_id: string;
+  audience: TableMessageAudience;
+  content: string;
+  sender: {
+    member_id: string;
+    display_name: string;
+    role: Role;
+  };
+  recipient: null | {
+    member_id: string;
+    display_name: string;
+    role: Role;
+  };
+  created_at: string;
+};
+
+export type CampaignEpisode = {
+  id: string;
+  campaign_id: string;
+  session_id: string;
+  sequence_no: number;
+  status: "prepared" | "in_progress" | "paused" | "ended";
+  started_at: string;
+  ended_at: string | null;
+  version: number;
+};
+
+export type ContinuityProjection = {
+  episode_sequence: number;
+  ended_at: string;
+  campaign_time: string | null;
+  summary_text: string;
+  recent_events: Array<{
+    id: string;
+    event_type: string;
+    summary: string;
+    happened_at: string | null;
+    created_at: string | null;
+  }>;
+  module: null | Record<string, string | null>;
+  party?: Array<Record<string, unknown>>;
+  private_events?: Array<Record<string, unknown>>;
+  private_event_count?: number;
+  current_objectives?: CampaignObjective[];
+  unresolved_questions?: CampaignObjective[];
+  known_npcs?: Array<{
+    id: string;
+    name: string;
+    profession?: string | null;
+    public_notes?: string;
+    role?: string;
+  }>;
+  visible_inventory?: InventoryItem[];
+};
+
+export type CampaignObjective = {
+  id: string;
+  campaign_id?: string;
+  title: string;
+  public_description: string;
+  status: "open" | "blocked" | "completed" | "failed" | "abandoned";
+  visibility?: "table" | "kp";
+  version: number;
+  created_at?: string;
+  updated_at?: string;
+  kp_notes?: string;
+  events?: Array<{
+    id: string;
+    from_status?: string | null;
+    to_status: string;
+    public_progress: string;
+    created_at: string;
+  }>;
+  progress?: Array<{
+    id: string;
+    to_status: string;
+    public_progress: string;
+    created_at: string;
+  }>;
+};
+
+export type SessionContinuityView = {
+  current_episode: CampaignEpisode | null;
+  latest_snapshot: null | {
+    id: string;
+    episode_id: string;
+    campaign_id: string;
+    session_id: string;
+    event_window_hash?: string;
+    generation_cutoff: string;
+    created_at: string;
+    projection: ContinuityProjection;
+  };
+  accepts_actions: boolean;
+};
+
 export type SessionSeat = {
   id: string;
   session_id: string;
@@ -509,6 +1186,13 @@ export type SkillCheck = {
   hidden: boolean;
   visibility: "public" | "private" | "blind";
   allow_push: boolean;
+  push_decision?: {
+    id: string;
+    actor_member_id: string;
+    decision: "accept_failure";
+    reason: string;
+    created_at: string;
+  } | null;
   pushed_from_check_id: string | null;
   status: "requested" | "resolved" | "overridden" | "cancelled";
   input_method: "digital" | "physical" | null;
@@ -540,6 +1224,13 @@ export type SkillCheck = {
     page_start: number;
     page_end: number;
     sections: string[];
+  };
+  check_plan?: {
+    scope?: string;
+    supporting_factors?: string[];
+    automatic_information?: string[];
+    failure_stakes?: string;
+    pushed_failure_stakes?: string;
   };
   investigator_state_version: number | null;
   override_reason: string | null;
@@ -917,6 +1608,8 @@ export type Coc7EncounterParticipant = {
   participant_id: string;
   name: string;
   investigator_id?: string | null;
+  npc_id?: string | null;
+  side?: string | null;
   dex: number;
   move?: number;
   adjusted_move?: number;
@@ -929,6 +1622,13 @@ export type Coc7EncounterParticipant = {
   con_success_level?: SkillCheck["success_level"];
   location_index?: number;
   action_points?: number;
+  action_profiles?: Array<{
+    action_key: string;
+    label: string;
+    kind: "melee" | "firearm";
+    skill_target: number;
+    damage_expression: string;
+  }>;
 };
 
 export type Coc7Encounter = {
@@ -955,6 +1655,60 @@ export type Coc7Encounter = {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+};
+
+export type EncounterActionOption = {
+  action_key: string;
+  label: string;
+  kind: string;
+  target_required: boolean;
+  description: string;
+};
+
+export type EncounterActionRequest = {
+  id: string;
+  encounter_id: string;
+  participant_id: string;
+  client_action_id: string;
+  encounter_version: number;
+  action_text: string;
+  action_key: string;
+  target_id: string | null;
+  status: "awaiting_confirmation" | "needs_attention" | "confirmed" | "committed" | "cancelled" | "failed";
+  preview: {
+    action_key: string;
+    action_label: string;
+    action_kind: string;
+    action_text: string;
+    actor_name: string;
+    target_name: string | null;
+    target_required: boolean;
+    description: string;
+    confirmation_required: boolean;
+    public_message: string;
+    maneuver_effect?: string | null;
+    agent?: {
+      prompt_version: string;
+      source_model: string;
+      resolution: string;
+      fallback?: boolean;
+    };
+  };
+  result: Record<string, unknown> | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  committed_at: string | null;
+};
+
+export type EncounterActionOptions = {
+  encounter_id: string;
+  encounter_version: number;
+  participant_id: string;
+  participant_name: string;
+  options: EncounterActionOption[];
+  targets: Array<{ participant_id: string; name: string }>;
+  active_request: EncounterActionRequest | null;
 };
 
 export type Coc7CharacterGameplayState = {
@@ -1113,6 +1867,45 @@ export type RuleReviewCandidate = {
   validation: Record<string, unknown>;
 };
 
+/**
+ * Fields needed to render and operate a check in the shared check desk.
+ *
+ * Player projections intentionally omit authority-only ownership and source
+ * metadata. Keeping the view contract smaller than `SkillCheck` lets the same
+ * component render a player's safe projection without manufacturing or
+ * leaking those fields. A full KP-facing `SkillCheck` remains assignable.
+ */
+export type VisibleSkillCheck = {
+  id: string;
+  skill_key: string;
+  skill_name: string;
+  target: number;
+  difficulty: SkillCheck["difficulty"];
+  bonus_dice: number;
+  visibility: SkillCheck["visibility"];
+  allow_push: boolean;
+  pushed_from_check_id: string | null;
+  status: SkillCheck["status"];
+  input_method: SkillCheck["input_method"];
+  raw_dice: SkillCheck["raw_dice"];
+  selected_roll: number | null;
+  threshold: number | null;
+  success_level: SkillCheck["success_level"];
+  passed: boolean | null;
+  check_plan?: SkillCheck["check_plan"];
+  push_decision?: {
+    decision: "accept_failure";
+    reason: string;
+    created_at: string;
+  } | null;
+  resolved_at: string | null;
+  roller_member_id?: string | null;
+  player_action_id?: string | null;
+  ruleset_version?: string;
+  source_reference?: SkillCheck["source_reference"];
+  override_reason?: string | null;
+};
+
 export type RuleReviewSubmission = {
   decision: "approved" | "rejected";
   note?: string | null;
@@ -1136,6 +1929,46 @@ export type PlayerActionRecord = {
   display_name?: string;
 };
 
+export type ManualKernelCandidate = {
+  candidate_id: string;
+  title: string;
+  available: boolean;
+  score: number;
+  skill_choices: Array<{
+    skill_key: string;
+    difficulty: "regular" | "hard" | "extreme";
+    reason: string;
+    hidden: boolean;
+  }>;
+};
+
+export type PublicTurn = {
+  id: string;
+  player_action_id: string | null;
+  player_action: string;
+  public_narration: string;
+  created_at: string | null;
+  decided_at: string | null;
+  actor_traces?: ActorExecutionTrace[];
+};
+
+export type ActorExecutionErrorCode =
+  | "actor_provider_unavailable"
+  | "actor_output_rejected"
+  | "actor_required_content_missing"
+  | "actor_verifier_rejected"
+  | "actor_turn_deadline_exhausted"
+  | "actor_model_budget_exhausted";
+
+export type ActorExecutionTrace = {
+  schema_version: "entity-actor-trace.v1";
+  entity_id: string;
+  entity_title: string;
+  execution: "model" | "deterministic_fallback";
+  generation_attempt_count: number;
+  error_codes: ActorExecutionErrorCode[];
+};
+
 export type ActionSkillOption = {
   skill_name: string;
   skill_key: string;
@@ -1143,6 +1976,63 @@ export type ActionSkillOption = {
   difficulty: "regular" | "hard" | "extreme" | "opposed";
   reason: string;
   hidden: boolean;
+  bonus_dice?: number;
+  allow_push?: boolean;
+  scope?: string;
+  supporting_factors?: string[];
+  automatic_information?: string[];
+  failure_stakes?: string;
+  pushed_failure_stakes?: string;
+};
+
+export type ActionAdjudicationView = {
+  id: string;
+  action_id: string;
+  proposal_id?: string;
+  mode: ActionAdjudication["mode"];
+  status: ActionAdjudication["status"];
+  version: number;
+  reason: string;
+  prompt: string;
+  skill_options: Array<Omit<ActionSkillOption, "hidden"> & { hidden?: boolean }>;
+  selected_skill: string | null;
+  source_model: string;
+  source_error?: string | null;
+  tabletop_turn?: TabletopTurn | null;
+  ruling: ActionAdjudication["ruling"];
+};
+
+export type TabletopTurn = {
+  schema_version: "tabletop-turn.v1";
+  route: "conversation" | "information" | "roleplay" | "mechanical" | "clarification";
+  attempt_count: number;
+  audit_count: number;
+  audit_reason?: string;
+  validation_errors?: string[];
+  frame: {
+    kind: "out_of_character" | "world_question" | "npc_dialogue" | "action" | "multi_step_action" | "time_advance" | "result_assertion";
+    goal: string;
+    method: string;
+    target_entity_ids: string[];
+    dialogue: string;
+    steps: string[];
+    time_span: string;
+    ambiguity: {
+      field: "goal" | "method" | "target" | "scope" | "duration";
+      question: string;
+      why_material: string;
+    } | null;
+    confidence: "low" | "medium" | "high";
+  };
+  response: {
+    basis_hash?: string;
+    public_narration: string;
+    speaker_entity_ids: string[];
+    source: "model" | "model_repaired" | "deterministic";
+    attempt_count: number;
+    validation_errors?: string[];
+    actor_traces?: ActorExecutionTrace[];
+  } | null;
 };
 
 export type ActionAdjudication = {
@@ -1158,6 +2048,7 @@ export type ActionAdjudication = {
   selected_skill: string | null;
   source_model: string;
   source_error: string | null;
+  tabletop_turn?: TabletopTurn | null;
   ruling: {
     goal?: string;
     method?: string;
@@ -1169,12 +2060,101 @@ export type ActionAdjudication = {
   };
 };
 
+export type ParallelActionBatchStatus =
+  | "awaiting_confirmation"
+  | "awaiting_checks"
+  | "ready"
+  | "committing"
+  | "settled"
+  | "needs_attention"
+  | "superseded";
+
+export type ParallelActionPlayerPhase =
+  | "awaiting_confirmation"
+  | "waiting_for_others"
+  | "awaiting_check"
+  | "awaiting_push_decision"
+  | "waiting_for_checks"
+  | "ready"
+  | "settling"
+  | "settled"
+  | "needs_attention"
+  | "superseded";
+
+export type ParallelActionPlayerAdjudication = ActionAdjudicationView & {
+  updated_at: string;
+  confirmed_at: string | null;
+};
+
+export type ParallelActionPlayerCheck = VisibleSkillCheck & {
+  visibility: "public" | "private";
+  check_plan: NonNullable<SkillCheck["check_plan"]>;
+  created_at: string;
+};
+
+export type ParallelActionPlayerBatch = {
+  id: string;
+  status: ParallelActionBatchStatus;
+  version: number;
+  participant_count: number;
+  confirmed_count: number;
+  waiting_count: number;
+  self_phase: ParallelActionPlayerPhase;
+  own_item: {
+    action_id: string;
+    adjudication: ParallelActionPlayerAdjudication;
+    checks: ParallelActionPlayerCheck[];
+  };
+  updated_at: string;
+  settled_at: string | null;
+  public_message: string;
+};
+
+export type ParallelActionPlayerRegather = {
+  id: string;
+  status: "gathering" | "queued";
+  version: number;
+  participant_count: number;
+  submitted_count: number;
+  waiting_count: number;
+  self_phase: "awaiting_submission" | "waiting_for_others" | "processing";
+  own_action_id: string | null;
+  updated_at: string;
+  public_message: string;
+};
+
+/** KP-safe recovery summary; intentionally excludes item/check authority data. */
+export type ParallelActionAttentionBatch = {
+  id: string;
+  status: "needs_attention";
+  version: number;
+  attention_reason: string;
+  updated_at: string;
+  participant_count: number;
+  confirmed_count: number;
+  pending_check_count: number;
+  abandon_allowed: boolean;
+  abandon_block_reason: string;
+};
+
 export type AutoTurnResult = {
-  status: "queued" | "completed" | "awaiting_roll" | "awaiting_confirmation" | "needs_attention" | "failed";
+  status:
+    | "queued"
+    | "completed"
+    | "awaiting_roll"
+    | "awaiting_confirmation"
+    | "awaiting_checks"
+    | "ready"
+    | "settled"
+    | "awaiting_group_resubmission"
+    | "needs_attention"
+    | "failed";
   player_action: PlayerActionRecord;
   proposal: TurnProposal | null;
-  checks: SkillCheck[];
-  adjudication?: ActionAdjudication | null;
+  checks: VisibleSkillCheck[];
+  adjudication?: ActionAdjudicationView | null;
+  parallel_batch?: ParallelActionPlayerBatch | null;
+  parallel_regather?: ParallelActionPlayerRegather | null;
   job?: AutoKpJob;
   message: string;
 };
@@ -1478,6 +2458,7 @@ export type TurnProposal = {
   campaign_id: string;
   status: string;
   proposal_kind: "standard" | "check_consequence" | "world_expansion";
+  tabletop_turn?: TabletopTurn | null;
   check_consequence: {
     proposal_kind: "check_consequence";
     origin_proposal_id: string;
@@ -1506,6 +2487,51 @@ export type TurnProposal = {
       unreachable_anchor_count: number;
       deferred_source_count: number;
       world_fact_head_hash: string;
+      settlement_template?: {
+        setting_pack_id: string;
+        settlement_id: string;
+        settlement_kind: "city" | "town" | "village" | "rural";
+        scene_slots: Array<{
+          scene_id: string;
+          slot_id: string;
+          function: string;
+          frequency: "core" | "typical" | "conditional";
+          access_scope: "local" | "nearby";
+          building_candidates: string[];
+          play_affordances: string[];
+          interior_zones?: string[];
+          profession_candidates: Array<{
+            profession_id: string;
+            titles: string[];
+            institution_functions: string[];
+            authority: string[];
+            knowledge_domains: string[];
+            schedule_patterns: string[];
+            relationship_hooks: string[];
+          }>;
+          entity_archetype_candidates: EntityArchetype[];
+          service_capabilities: string[];
+          record_sources: string[];
+          access_patterns: string[];
+          investigation_surfaces: string[];
+          event_seed_kinds: string[];
+          selected: boolean;
+        }>;
+        assumptions: string[];
+        source_coverage: {
+          bindings: Array<{
+            mention_id: string;
+            mention_title: string;
+            status: "matched" | "ambiguous" | "unmatched";
+            matched_slot_id: string | null;
+          }>;
+          covered_slot_ids: string[];
+          missing_core_slot_ids: string[];
+          suggested_typical_slot_ids: string[];
+          conditional_slot_ids: string[];
+          assumptions: string[];
+        };
+      } | null;
       writes_performed: false;
     };
     candidate: {
@@ -1522,6 +2548,26 @@ export type TurnProposal = {
         tradeoff: string;
       }>;
       branch_plan: DynamicBranchPlan | null;
+      template_binding?: null | {
+        setting_pack_id: string;
+        settlement_kind: SettlementKind;
+        slot_id: string;
+        building_variant: string;
+        profession_ids: string[];
+        source_entity_ids?: string[];
+        entity_bindings?: Array<{
+          local_ref: string;
+          archetype_id: string;
+          entity_kind: EntityArchetypeKind;
+          label_variant: string;
+          profession_ids: string[];
+          relation_bindings: Array<{
+            relation_slot_id: string;
+            target_source: "candidate" | "existing_entity";
+            target_ref: string;
+          }>;
+        }>;
+      };
     };
   } | null;
   world_expansion_materialization?: {
@@ -1531,6 +2577,8 @@ export type TurnProposal = {
     fact_event_ids: string[];
     npc_id: string | null;
     map_token_id: string | null;
+    world_entity_ids?: string[];
+    npc_ids?: string[];
     investigator_encounter_ids?: string[];
     npc_reappearance_id?: string | null;
     dynamic_branch_id?: string | null;
@@ -1556,6 +2604,7 @@ export type TurnProposal = {
   proposed_npc_updates: Record<string, unknown>[];
   proposed_map_moves: Record<string, unknown>[];
   proposed_facts?: Record<string, unknown>[];
+  proposed_world_entity_states?: Record<string, unknown>[];
   applied_facts?: Array<{
     fact_key: string;
     event_id: string;
@@ -1573,6 +2622,12 @@ export type WorldExpansionEncounterInput = {
     predicate: string;
     object_text: string;
   }>;
+  entities?: Array<{
+    local_ref: string;
+    name: string;
+    description?: string;
+    visibility?: "table" | "kp" | "secret";
+  }>;
   npc?: {
     npc_id?: string | null;
     name?: string | null;
@@ -1587,12 +2642,88 @@ export type WorldExpansionEncounterInput = {
   map_placement?: {
     map_id: string;
     location_name: string;
+    entity_ref?: string | null;
     visibility: "table" | "kp";
     color: string;
   } | null;
   participant_investigator_ids?: string[];
   interaction_summary?: string | null;
   profession_context?: string | null;
+};
+
+export type CampaignWorldEntity = {
+  scenario_identity?: { run_id: string; entity_id: string; contract_hash: string } | null;
+  id: string;
+  campaign_id: string;
+  entity_kind: EntityArchetypeKind;
+  archetype_id: string | null;
+  name: string;
+  description: string;
+  visibility: "table" | "kp" | "secret";
+  origin_kind: "module_source" | "world_expansion";
+  origin_ref: string;
+  npc_id: string | null;
+  created_from_event_id: string;
+  data: Record<string, unknown>;
+  state_version: number;
+  states: CampaignWorldEntityState[];
+  created_at: string;
+};
+
+export type CampaignWorldEntityStateValue = string | number | boolean | null;
+
+export type CampaignWorldEntityState = {
+  entity_id: string;
+  dimension: string;
+  value: CampaignWorldEntityStateValue;
+  visibility: "table" | "kp" | "secret";
+  version: number;
+  source_event_id: string;
+  updated_at: string;
+};
+
+export type CampaignWorldEntityStateChange = {
+  id: string;
+  campaign_id: string;
+  entity_id: string;
+  dimension: string;
+  from_value: CampaignWorldEntityStateValue;
+  to_value: CampaignWorldEntityStateValue;
+  visibility: "table" | "kp" | "secret";
+  note?: string;
+  source_kind?: "human_kp" | "ai_kp" | "rules_kernel";
+  state_version: number;
+  event_id: string;
+  created_at: string;
+};
+
+export type CampaignWorldEntityGraph = {
+  entities: CampaignWorldEntity[];
+  relations: Array<{
+    id: string;
+    campaign_id: string;
+    source_entity_id: string;
+    relation_slot_id: string;
+    target_entity_id: string;
+    created_from_event_id: string;
+    created_at: string;
+  }>;
+  state_changes: CampaignWorldEntityStateChange[];
+};
+
+export type WorldEntityStateUpdateInput = {
+  expected_version: number;
+  dimension: string;
+  value: CampaignWorldEntityStateValue;
+  visibility: "table" | "kp" | "secret";
+  idempotency_key: string;
+  note?: string;
+  happened_at?: string | null;
+};
+
+export type WorldEntityStateUpdateResult = {
+  entity: Pick<CampaignWorldEntity, "id" | "campaign_id" | "state_version">;
+  change: CampaignWorldEntityStateChange;
 };
 
 export type NpcReappearanceCandidate = {
@@ -1764,4 +2895,58 @@ export type ContextAssembly = {
     label: string;
     excluded_reason?: string;
   }[];
+};
+
+export type CampaignSetupConfig = {
+  ruleset_id: string;
+  ruleset_version: string;
+  worldview: string;
+  hosting_mode: "human_kp" | "hybrid" | "ai_kp";
+  expected_player_count: number;
+  campaign_type: string;
+  starting_power: string;
+  allowed_character_options: string[];
+  house_rules: string[];
+  default_visibility: "public" | "party" | "private_by_default";
+  style: Record<string, number | string>;
+  content_warnings: string[];
+  lines: string[];
+  veils: string[];
+  safety_default: "pause" | "fade" | "change" | "rewind";
+  idle_policy: "wait" | "skip" | "defend" | "delegate" | "pause";
+  idle_timeout_seconds: number;
+  allow_player_whispers: boolean;
+};
+
+export type SessionZeroView = {
+  revision: null | {
+    id: string;
+    campaign_id: string;
+    version: number;
+    status: "pending" | "active" | "superseded";
+    config: CampaignSetupConfig;
+    created_at: string;
+    activated_at: string | null;
+  };
+  ready: boolean;
+  confirmed: boolean;
+  confirmed_count: number;
+  required_count: number;
+  public_preferences: Array<Record<string, unknown>>;
+  own_preferences: null | {
+    public_style?: Record<string, number | string>;
+    private_style?: Record<string, number | string>;
+    lines?: string[];
+    veils?: string[];
+  };
+  // Aggregate private boundaries are server-only input to generation agents.
+  model_policy: null;
+  active_safety_event: null | {
+    id: string;
+    status: "active";
+    response_kind: "pause" | "fade" | "change" | "rewind";
+    public_message: string;
+    created_at: string;
+  };
+  can_resolve_safety: boolean;
 };

@@ -20,9 +20,20 @@ describe("workspace routing", () => {
     });
   });
 
-  it("keeps KP and unauthenticated users on the requested workspace", () => {
+  it("keeps KP on the requested workspace and limits guests to onboarding", () => {
     expect(resolveWorkspaceRoute("models", "kp").id).toBe("models");
-    expect(resolveWorkspaceRoute("models", null).id).toBe("models");
+    expect(resolveWorkspaceRoute("models", null).id).toBe("campaigns");
+    expect(visibleWorkspaceRoutes(null).map((route) => route.id)).toEqual(["campaigns"]);
+  });
+
+  it("gives observers only the explicit read-only workspaces", () => {
+    expect(visibleWorkspaceRoutes("observer").map((route) => route.id)).toEqual([
+      "play",
+      "campaigns",
+      "handouts"
+    ]);
+    expect(resolveWorkspaceRoute("maps", "observer").id).toBe("play");
+    expect(resolveWorkspaceRoute("models", "observer").id).toBe("play");
   });
 
   it("redirects players away from KP-only workspaces", () => {

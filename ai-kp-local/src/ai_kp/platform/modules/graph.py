@@ -7,17 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ai_kp.platform.modules.knowledge import Visibility
+from ai_kp.platform.modules.knowledge import EntityType, Visibility
 
-EntityType = Literal[
-    "npc",
-    "location",
-    "clue",
-    "organization",
-    "item",
-    "event",
-    "anchor",
-]
 RelationPredicate = Literal[
     "contains",
     "located_at",

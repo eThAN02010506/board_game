@@ -347,17 +347,6 @@ url = "https://files.pythonhosted.org/packages/d5/38/b96a3de98cfbb009592b3870af4
 sha256 = "1bd94a1ce5b03a0c898771a3e759f0124300c6ab5155127906a1d50b1f3fcf19"
 
 [[packages]]
-name = "mpmath"
-version = "1.3.0"
-
-[[packages.wheels]]
-name = "mpmath-1.3.0-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl"
-
-[packages.wheels.hashes]
-sha256 = "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"
-
-[[packages]]
 name = "nano-vectordb"
 version = "0.0.4.3"
 
@@ -367,17 +356,6 @@ url = "https://files.pythonhosted.org/packages/9b/d8/f1876f59916da0a2147e6306665
 
 [packages.wheels.hashes]
 sha256 = "1b70401a54c02fabf76515b5dfb630076434547ed3c6861828ee8771b6dd7c19"
-
-[[packages]]
-name = "narwhals"
-version = "2.24.0"
-
-[[packages.wheels]]
-name = "narwhals-2.24.0-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/7e/85/a5bfaebfd305ac18b57b0854d74e37e586809061a91fda62f0bd50c8518e/narwhals-2.24.0-py3-none-any.whl"
-
-[packages.wheels.hashes]
-sha256 = "42fdedf44e5b2ca7505630d45b4ac3058f38d8485cba9fe1652ca23152df7489"
 
 [[packages]]
 name = "networkx"
@@ -622,39 +600,6 @@ url = "https://files.pythonhosted.org/packages/f5/b1/fa7c600e7dceae12e9606c7578c
 sha256 = "c80201d22cbf405b80647a60ada77bba06c8fba2da2743ba1e89cdcc39a81f25"
 
 [[packages]]
-name = "scikit-learn"
-version = "1.9.0"
-
-[[packages.wheels]]
-name = "scikit_learn-1.9.0-cp313-cp313-macosx_12_0_arm64.whl"
-url = "https://files.pythonhosted.org/packages/3e/04/5acd7ae280c5f93b6ac5ef6cdec14eef4c8d1cd91d85b3292989c94d96b1/scikit_learn-1.9.0-cp313-cp313-macosx_12_0_arm64.whl"
-
-[packages.wheels.hashes]
-sha256 = "5b934c45c252844a91d69fda3a34cff5e7307e1db10d77cb10a3980312c74713"
-
-[[packages]]
-name = "scipy"
-version = "1.18.0"
-
-[[packages.wheels]]
-name = "scipy-1.18.0-cp313-cp313-macosx_14_0_arm64.whl"
-url = "https://files.pythonhosted.org/packages/d3/0f/10ffa0b697a572f4e0d48b92a88895d366422f019f723e7e14a84c050dac/scipy-1.18.0-cp313-cp313-macosx_14_0_arm64.whl"
-
-[packages.wheels.hashes]
-sha256 = "68363b7eaacd8b5dd426df56d782cc156468ac79a127a1b87ca597d6e2e82197"
-
-[[packages]]
-name = "sentence-transformers"
-version = "5.6.1"
-
-[[packages.wheels]]
-name = "sentence_transformers-5.6.1-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/c1/ad/8f73f512dc7ad4031d2b64cbb67f70bdfb355756afbe0db610a5146415c1/sentence_transformers-5.6.1-py3-none-any.whl"
-
-[packages.wheels.hashes]
-sha256 = "cefbb17b6325a982a4732c8c49fb013375392687049d1de3d435c4b04060680b"
-
-[[packages]]
 name = "sentencepiece"
 version = "0.2.2"
 
@@ -664,17 +609,6 @@ url = "https://files.pythonhosted.org/packages/34/db/f9ea1a6844b4fa5dfe2312095cd
 
 [packages.wheels.hashes]
 sha256 = "201a8e0f55501a76e08dbf2c54bc45f4642b379271e89c667d517bfbc2191f2a"
-
-[[packages]]
-name = "setuptools"
-version = "83.0.0"
-
-[[packages.wheels]]
-name = "setuptools-83.0.0-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/5d/40/e1e72872c6354b306daef1703549e8e83b4d43cfea356311bf722a043752/setuptools-83.0.0-py3-none-any.whl"
-
-[packages.wheels.hashes]
-sha256 = "29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3"
 
 [[packages]]
 name = "shellingham"
@@ -710,28 +644,6 @@ url = "https://files.pythonhosted.org/packages/ec/bb/2799cc2ede3ed41131f8975621e
 sha256 = "c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6"
 
 [[packages]]
-name = "sympy"
-version = "1.14.0"
-
-[[packages.wheels]]
-name = "sympy-1.14.0-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl"
-
-[packages.wheels.hashes]
-sha256 = "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
-
-[[packages]]
-name = "threadpoolctl"
-version = "3.6.0"
-
-[[packages.wheels]]
-name = "threadpoolctl-3.6.0-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl"
-
-[packages.wheels.hashes]
-sha256 = "43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c4a7fb"
-
-[[packages]]
 name = "tiktoken"
 version = "0.13.0"
 
@@ -752,17 +664,6 @@ url = "https://files.pythonhosted.org/packages/2e/47/174dca0502ef88b28f1c9e06b73
 
 [packages.wheels.hashes]
 sha256 = "1e418a55456beedca4621dbab65a318981467a2b188e982a23e117f115ce5001"
-
-[[packages]]
-name = "torch"
-version = "2.13.0"
-
-[[packages.wheels]]
-name = "torch-2.13.0-cp313-cp313-macosx_14_0_arm64.whl"
-url = "https://files.pythonhosted.org/packages/0d/fa/c1c10b7aff4a9a3e8956d4f0a5f468fa6db7abc3208805719076772b4833/torch-2.13.0-cp313-cp313-macosx_14_0_arm64.whl"
-
-[packages.wheels.hashes]
-sha256 = "33449899ce5496c1b84b4853179d94fd102028ae1407314d9fb956bb79e70d09"
 
 [[packages]]
 name = "tqdm"

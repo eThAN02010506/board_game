@@ -22,5 +22,17 @@ class UpstreamServiceError(ApplicationError):
     """A configured model or other upstream service failed."""
 
 
+class UpstreamInvalidResponseError(ApplicationError):
+    """A configured model service returned an unusable structured response."""
+
+
+class DirectorHelpClientDisconnectedError(ApplicationError):
+    """The requesting KP disconnected before Need Help completed."""
+
+
+class DirectorHelpAuditUnavailableError(ApplicationError):
+    """Need Help cannot produce an untraceable response."""
+
+
 class KpSessionEndedError(RuntimeError):
     """Raised when a KP credential expires while an LLM turn is in flight."""

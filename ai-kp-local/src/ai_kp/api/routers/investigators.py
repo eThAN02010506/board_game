@@ -156,7 +156,7 @@ def submit_investigator_to_campaign(
     repo: Repository = Depends(get_repo),
 ) -> dict:
     require_campaign_role(identity, campaign_id, ("player",))
-    return InvestigatorService(repo).submit_to_campaign(
+    submitted = InvestigatorService(repo).submit_to_campaign(
         campaign_id=campaign_id,
         investigator_id=investigator_id,
         revision_id=payload.revision_id,
@@ -165,6 +165,14 @@ def submit_investigator_to_campaign(
         session_id=identity.session_id,
         timeline_branch_id=payload.timeline_branch_id,
     )
+    approved = _auto_approve_in_ai_kp_mode(
+        repo,
+        campaign_id=campaign_id,
+        investigator_id=investigator_id,
+        player_member_id=identity.member_id,
+        session_id=identity.session_id,
+    )
+    return approved or submitted
 
 
 @router.post("/investigators/{investigator_id}/timeline-branches")
@@ -339,3 +347,125 @@ def propose_investigator_permanent_change(
         member_id=identity.member_id,
         command=PermanentChangeCommand(**payload.model_dump()),
     )
+
+
+def _auto_approve_in_ai_kp_mode(
+    repo: Repository,
+    *,
+    campaign_id: str,
+    investigator_id: str,
+    player_member_id: str,
+    session_id: str,
+) -> dict | None:
+    """在 ai_kp 自动化模式下自动批准并绑定玩家提交的调查员。
+
+    只改变审批频率（FR-06 允许），不改变权限或事实边界：角色仍由玩家创建，
+    批准前经过确定性角色校验；校验未通过时保持 submitted 等待人类 KP。
+    """
+    run = repo.get_active_campaign_module_run(campaign_id)
+    if run is None or str(run.get("automation_level") or "conservative") != "ai_kp":
+        return
+    service = InvestigatorService(repo)
+    record = service.list_kp_campaign_investigators(campaign_id)
+    target = next(
+        (item for item in record if str(item["investigator_id"]) == investigator_id),
+        None,
+    )
+    if target is None or target.get("status") != "submitted":
+        return
+    # 确定性角色校验：通过才自动批准。
+    sheet = (target.get("submitted_revision") or {}).get("canonical_sheet")
+    if not sheet:
+        return
+    validation = service._validate_sheet(sheet)
+    if validation.report.has_errors:
+        return
+    kp_member = _system_kp_member(repo, campaign_id, session_id)
+    if kp_member is None:
+        return
+    seat = repo.seat_for_member(player_member_id)
+    if seat is None or seat.get("status") != "claimed":
+        return None
+    try:
+        approved = service.auto_approve_and_assign(
+            campaign_id=campaign_id,
+            investigator_id=investigator_id,
+            kp_member_id=str(kp_member["id"]),
+            player_member_id=player_member_id,
+            session_id=session_id,
+        )
+    except (KeyError, ValueError):
+        # The repository savepoint restores the submitted state on any failure.
+        return None
+    _auto_place_player_token(
+        repo,
+        campaign_id=campaign_id,
+        investigator_id=investigator_id,
+        display_name=target.get("name") or "玩家",
+    )
+    return approved
+
+
+def _auto_place_player_token(
+    repo: Repository,
+    *,
+    campaign_id: str,
+    investigator_id: str,
+    display_name: str,
+) -> None:
+    """自动批准后，把玩家的棋子放到团的第一张已发布地图的起点位置。"""
+    published = repo.list_maps(campaign_id, published_only=True)
+    if not published:
+        return
+    record = repo.get_campaign_investigator(campaign_id, investigator_id)
+    pc_id = record.get("legacy_pc_id")
+    if not pc_id:
+        return
+    existing = repo.connection.execute(
+        """
+        SELECT t.id FROM map_tokens t
+        JOIN maps m ON m.id = t.map_id
+        WHERE m.campaign_id = ? AND t.actor_type = 'pc' AND t.actor_id = ?
+        """,
+        (campaign_id, pc_id),
+    ).fetchone()
+    if existing is not None:
+        return
+    map_id = str(published[0]["id"])
+    first_location = repo.connection.execute(
+        """
+        SELECT name FROM map_locations
+        WHERE map_id = ? AND visibility IN ('player', 'table')
+        ORDER BY order_index, id LIMIT 1
+        """,
+        (map_id,),
+    ).fetchone()
+    start = str(first_location["name"]) if first_location is not None else ""
+    try:
+        repo.place_map_token(
+            map_id,
+            label=display_name,
+            location_name=start,
+            actor_type="pc",
+            actor_id=pc_id,
+            visibility="table",
+            color="#2f6db3",
+        )
+    except (KeyError, ValueError):
+        return
+
+
+def _system_kp_member(
+    repo: Repository,
+    campaign_id: str,
+    session_id: str,
+) -> dict | None:
+    row = repo.connection.execute(
+        """
+        SELECT id, session_id, campaign_id, display_name FROM session_members
+        WHERE session_id = ? AND campaign_id = ? AND role = 'kp'
+          AND revoked_at IS NULL ORDER BY joined_at, id LIMIT 1
+        """,
+        (session_id, campaign_id),
+    ).fetchone()
+    return dict(row) if row is not None else None

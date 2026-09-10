@@ -42,14 +42,14 @@ _NUMBERED_HEADING = re.compile(
 )
 _DATE_LIKE = re.compile(r"^\d{2,4}(?:[./-]\d{1,2}){1,2}\.?$")
 _SCENE_LABEL = re.compile(
-    r"^(?:场景|地点)\s*[:：]?\s*\S+|"
-    r"^(?:第)?[一二三四五六七八九十0-9]+号?(?:车厢|房间)$"
+    r"^(?:场景|地点|scene|location)\s*[:：]?\s*\S+",
+    re.IGNORECASE,
 )
 _CHECK = re.compile(
-    r"(?:进行|通过|要求|需要|可做|成功的?)?.{0,12}"
-    r"(?:侦查|聆听|图书馆使用|说服|话术|恐吓|心理学|幸运|灵感|教育|敏捷|力量|体质|"
-    r"斗殴|闪避|急救|医学|追踪|导航|妙手|机械维修|电气维修|信用评级)"
-    r".{0,10}(?:检定|成功|失败)",
+    r"(?:进行|通过|要求|需要|可做|必须)?.{0,24}?"
+    r"(?:《[^》《\n]{1,40}》|[A-Za-z][A-Za-z0-9 _-]{0,39}|[\u3400-\u9fff]{1,16})?"
+    r"(?:检定|判定|鉴定)(?:.{0,12}(?:成功|失败))?",
+    re.IGNORECASE,
 )
 _SAN = re.compile(r"(?:san|理智).{0,12}(?:检定|损失|失去|\d\s*/\s*(?:1?d)?\d)", re.IGNORECASE)
 _STATS = re.compile(
@@ -107,6 +107,12 @@ def infer_semantic_kind(
     lowered = normalized.casefold()
     if content_kind == "table":
         return StructureHint("table", 1.0)
+    if _SCENE_LABEL.match(normalized) and len(normalized) < 120:
+        return StructureHint(
+            "scene",
+            0.9 if styled_heading else 0.68,
+            ("verify_scene_boundary",),
+        )
     if looks_like_heading(normalized, styled_heading=styled_heading):
         return StructureHint("heading", 0.98 if styled_heading else 0.9)
     if _SAN.search(normalized):
@@ -129,9 +135,25 @@ def infer_semantic_kind(
         return StructureHint("scenario_metadata", 0.82)
     if any(key in lowered for key in ("线索", "可以发现", "调查员发现", "察觉到")):
         return StructureHint("clue", 0.72, ("verify_clue_role",))
-    if _SCENE_LABEL.match(normalized) and len(normalized) < 120:
-        return StructureHint("scene", 0.68, ("verify_scene_boundary",))
     return StructureHint("text", 0.5)
+
+
+def inherit_heading_semantics(
+    hint: StructureHint,
+    heading: str,
+) -> StructureHint:
+    """Apply a strong enclosing section only to otherwise unclassified prose."""
+
+    if hint.semantic_kind != "text":
+        return hint
+    normalized = " ".join(heading.split()).strip().casefold()
+    if normalized in {"结局", "尾声", "conclusion", "epilogue"}:
+        return StructureHint("ending", 0.9)
+    if normalized in {"展示材料", "玩家资料", "handouts"}:
+        return StructureHint("handout", 0.88)
+    if normalized in {"预设角色", "预设调查员", "pregenerated investigators"}:
+        return StructureHint("reference", 0.88)
+    return hint
 
 
 def infer_asset_role(

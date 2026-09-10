@@ -218,6 +218,29 @@ def test_automation_level_changes_are_versioned_and_audited(tmp_path: Path) -> N
             campaign["id"], kp_display_name="人工 KP"
         )["member"]
         module = _module(repo, campaign["id"], "自动化模组")
+        chunk = repo.list_module_chunks(module["id"])[0]
+        pending = ModuleKnowledgeService(repo).create_manual_candidate(
+            module["id"],
+            {
+                "kind": "module_canon",
+                "title": "自动化模组",
+                "statement": "自动化模组的第一幕",
+                "visibility": "kp",
+                "spoiler_tag": "act-1",
+                "entity_name": "自动化模组",
+                "entity_type": "location",
+                "citations": [
+                    {
+                        "chunk_id": chunk["id"],
+                        "evidence_text": "自动化模组的第一幕",
+                    }
+                ],
+            },
+        )
+        repo.connection.execute(
+            "UPDATE module_knowledge_candidates SET created_by = 'ai' WHERE id = ?",
+            (pending["id"],),
+        )
         run = repo.start_campaign_module_run(
             campaign_id=campaign["id"],
             module_id=module["id"],
@@ -260,6 +283,10 @@ def test_automation_level_changes_are_versioned_and_audited(tmp_path: Path) -> N
             member_id=kp["id"],
         )
         assert ai_kp["automation_level"] == "ai_kp"
+        assert repo.get_module_knowledge_candidate(pending["id"])["status"] == "approved"
+        assert [entity["name"] for entity in repo.list_module_entities(module["id"])] == [
+            "自动化模组"
+        ]
         assert [
             (item["from_level"], item["to_level"])
             for item in repo.list_module_run_automation_events(run["id"])
@@ -495,7 +522,7 @@ def test_auto_kp_jobs_are_durable_claimable_and_retryable(tmp_path: Path) -> Non
             "UPDATE auto_kp_jobs SET locked_at = datetime(CURRENT_TIMESTAMP, '-11 minutes') WHERE id = ?",
             (exhausted["id"],),
         )
-        assert repo.recover_stale_auto_kp_jobs() == 1
+        assert repo.recover_stale_auto_kp_jobs(campaign_id=None) == 1
         recovered_exhausted = repo.get_auto_kp_job(exhausted["id"])
         assert recovered_exhausted["status"] == "failed"
         assert recovered_exhausted["stage"] == "failed"
@@ -568,6 +595,20 @@ def test_module_run_api_is_kp_only_and_rejects_empty_or_null_updates(
             f"/module-runs/{run['id']}/director-state",
             headers=player_headers,
         ).status_code == 403
+        player_signals = client.get(
+            f"/campaigns/{campaign['id']}/consequence-signals",
+            headers=player_headers,
+        )
+        assert player_signals.status_code == 200
+        assert player_signals.json() == {
+            "run_id": run["id"],
+            "state_version": None,
+            "signals": [],
+            "events": [],
+        }
+        assert client.get(
+            f"/campaigns/{campaign['id']}/consequence-signals"
+        ).status_code == 401
         assert client.post(
             f"/module-runs/{run['id']}/scene-transitions",
             headers=player_headers,

@@ -12,6 +12,7 @@ AiSkillWorkflow = Literal[
     "check_consequence",
     "world_expansion",
     "session_recap",
+    "enemy_turn",
 ]
 
 _SKILLS = (
@@ -111,6 +112,19 @@ _SKILLS = (
         source_requirements=("frozen_event_window",),
         bundle_name="curate-session-memory",
     ),
+    AiSkillManifest(
+        skill_id="platform.enemy_turn_selection",
+        version="1.0.0",
+        display_name="敌方回合选择",
+        category="encounter_tactics",
+        description="从规则适配器给出的封闭动作与目标 ID 中选择一个敌方回合意图。",
+        input_schema_version="encounter-turn-snapshot.v1",
+        output_schema_version="enemy-turn-output.v1",
+        allowed_tools=("context.read", "rules.query", "proposal.create"),
+        source_requirements=("encounter_state", "ruleset_action_catalogue"),
+        bundle_name="select-enemy-turn",
+        ruleset_scope="coc7",
+    ),
 )
 
 _BY_ID = {skill.skill_id: skill for skill in _SKILLS}
@@ -133,6 +147,7 @@ _COMPOSITIONS: dict[AiSkillWorkflow, tuple[str, ...]] = {
         "platform.output_safety_review",
     ),
     "session_recap": ("platform.session_recap",),
+    "enemy_turn": ("platform.enemy_turn_selection",),
 }
 
 if len(_BY_ID) != len(_SKILLS):

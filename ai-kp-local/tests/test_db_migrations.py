@@ -16,8 +16,58 @@ from ai_kp.infrastructure.database.migrations import (
     v0024_rule_source_ruleset_hash,
     v0045_check_visibility,
     v0047_check_random_evidence,
+    v0062_scenario_contract_job_schema_repair,
+    v0069_parallel_batch_run_authority,
+    v0072_session_zero_safety,
+    v0073_observers_and_table_messages,
+    v0083_module_chunk_section_ancestry,
+    v0084_persistent_store_identity,
+    v0086_kernel_authority_basis,
 )
 from ai_kp.storage.migrations import LATEST_SCHEMA_VERSION, MIGRATIONS
+
+
+def test_v86_adds_idempotent_json_authority_basis_to_existing_receipts() -> None:
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute(
+            """
+            CREATE TABLE scenario_command_batches (
+              id TEXT PRIMARY KEY,
+              preview_json TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO scenario_command_batches (id, preview_json) VALUES ('old', '{}')"
+        )
+
+        v0086_kernel_authority_basis.migrate(connection)
+        v0086_kernel_authority_basis.migrate(connection)
+
+        columns = [
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(scenario_command_batches)"
+            ).fetchall()
+        ]
+        assert columns.count("authority_basis_json") == 1
+        assert connection.execute(
+            "SELECT authority_basis_json FROM scenario_command_batches WHERE id = 'old'"
+        ).fetchone()[0] is None
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE scenario_command_batches SET authority_basis_json = '[]'"
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE scenario_command_batches SET authority_basis_json = 'not-json'"
+            )
+        connection.execute(
+            "UPDATE scenario_command_batches SET authority_basis_json = '{}'"
+        )
+    finally:
+        connection.close()
 
 LEGACY_SCHEMA = """
 CREATE TABLE maps (
@@ -79,8 +129,274 @@ def _column_names(connection: sqlite3.Connection, table_name: str) -> set[str]:
     return {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table_name})")}
 
 
+def test_v72_requires_session_zero_for_existing_campaigns() -> None:
+    connection = connect(":memory:")
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE campaigns (id TEXT PRIMARY KEY);
+            INSERT INTO campaigns (id) VALUES ('legacy-campaign');
+            """
+        )
+
+        v0072_session_zero_safety.migrate(connection)
+
+        assert connection.execute(
+            "SELECT session_zero_required FROM campaigns WHERE id = 'legacy-campaign'"
+        ).fetchone()[0] == 1
+    finally:
+        connection.close()
+
+
+def test_v73_preserves_members_and_adds_observer_message_ledger() -> None:
+    connection = connect(":memory:")
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE session_members (
+              id TEXT PRIMARY KEY,
+              session_id TEXT NOT NULL,
+              campaign_id TEXT NOT NULL,
+              role TEXT NOT NULL CHECK (role IN ('kp', 'player')),
+              display_name TEXT NOT NULL,
+              pc_id TEXT,
+              token_hash TEXT NOT NULL UNIQUE,
+              joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              revoked_at TEXT,
+              player_profile_id TEXT
+            );
+            CREATE INDEX idx_session_members_legacy_session
+              ON session_members(session_id);
+            INSERT INTO session_members
+              (id, session_id, campaign_id, role, display_name, token_hash)
+            VALUES ('member-kp', 'session-1', 'campaign-1', 'kp', 'KP', 'hash');
+            """
+        )
+        connection.commit()
+        connection.execute("PRAGMA foreign_keys = OFF")
+
+        v0073_observers_and_table_messages.migrate(connection)
+
+        member_sql = connection.execute(
+            "SELECT sql FROM sqlite_schema WHERE name = 'session_members'"
+        ).fetchone()[0]
+        assert "'observer'" in member_sql
+        preserved_member = connection.execute(
+            "SELECT role, display_name FROM session_members WHERE id = 'member-kp'"
+        ).fetchone()
+        assert tuple(preserved_member) == ("kp", "KP")
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_schema WHERE name = 'idx_session_members_legacy_session'"
+        ).fetchone() is not None
+        assert _column_names(connection, "table_messages") >= {"sequence", "id"}
+    finally:
+        connection.close()
+
+
+def test_parallel_batch_v68_upgrade_matches_the_fresh_schema() -> None:
+    fresh = connect(":memory:")
+    upgraded = connect(":memory:")
+    try:
+        init_db(fresh)
+        init_db(upgraded)
+        for table_name in (
+            "parallel_action_batch_events",
+            "parallel_action_batch_items",
+            "parallel_action_batches",
+        ):
+            upgraded.execute(f"DROP TABLE {table_name}")
+        upgraded.execute("DELETE FROM schema_migrations WHERE version >= 68")
+        upgraded.commit()
+
+        apply_migrations(upgraded)
+
+        for table_name in (
+            "parallel_action_batch_items",
+            "parallel_action_batch_events",
+        ):
+            assert upgraded.execute(
+                "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?",
+                (table_name,),
+            ).fetchone()[0] == fresh.execute(
+                "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?",
+                (table_name,),
+            ).fetchone()[0]
+        assert _column_names(upgraded, "parallel_action_batches") == _column_names(
+            fresh, "parallel_action_batches"
+        )
+        unique_item_indexes = {
+            tuple(
+                column["name"]
+                for column in upgraded.execute(
+                    "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
+                    (index["name"],),
+                )
+            )
+            for index in upgraded.execute(
+                "SELECT name FROM pragma_index_list('parallel_action_batch_items') "
+                'WHERE "unique" = 1'
+            )
+        }
+        unique_event_indexes = {
+            tuple(
+                column["name"]
+                for column in upgraded.execute(
+                    "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
+                    (index["name"],),
+                )
+            )
+            for index in upgraded.execute(
+                "SELECT name FROM pragma_index_list('parallel_action_batch_events') "
+                'WHERE "unique" = 1'
+            )
+        }
+        assert ("action_id",) in unique_item_indexes
+        assert ("proposal_id",) in unique_item_indexes
+        assert ("adjudication_id",) in unique_item_indexes
+        assert ("batch_id", "version") in unique_event_indexes
+        assert upgraded.execute(
+            "SELECT MAX(version) FROM schema_migrations"
+        ).fetchone()[0] == LATEST_SCHEMA_VERSION
+        assert "model_configuration_version" in _column_names(
+            upgraded, "scenario_contract_jobs"
+        )
+        assert _column_names(upgraded, "scenario_contract_jobs") == _column_names(
+            fresh, "scenario_contract_jobs"
+        )
+        recovery_index_columns = tuple(
+            row["name"]
+            for row in upgraded.execute(
+                "SELECT name FROM pragma_index_info("
+                "'idx_parallel_action_batches_recovery') ORDER BY seqno"
+            )
+        )
+        assert recovery_index_columns == (
+            "campaign_id",
+            "session_id",
+            "status",
+            "updated_at",
+            "id",
+        )
+    finally:
+        fresh.close()
+        upgraded.close()
+
+
+def test_parallel_batch_v69_supersedes_every_unsettled_legacy_batch_with_audit() -> None:
+    connection = connect(":memory:")
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE campaign_module_runs (id TEXT PRIMARY KEY, version INTEGER);
+            CREATE TABLE parallel_action_batches (
+              id TEXT PRIMARY KEY,
+              run_id TEXT NOT NULL,
+              status TEXT NOT NULL,
+              version INTEGER NOT NULL,
+              attention_reason TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE parallel_action_batch_events (
+              id TEXT PRIMARY KEY,
+              batch_id TEXT NOT NULL,
+              version INTEGER NOT NULL,
+              event_type TEXT NOT NULL,
+              actor_member_id TEXT,
+              payload_json TEXT NOT NULL
+            );
+            CREATE TABLE parallel_action_batch_items (
+              batch_id TEXT NOT NULL,
+              action_id TEXT NOT NULL,
+              proposal_id TEXT NOT NULL,
+              adjudication_id TEXT NOT NULL
+            );
+            CREATE TABLE player_actions (
+              id TEXT PRIMARY KEY,
+              status TEXT NOT NULL,
+              resolved_at TEXT
+            );
+            CREATE TABLE turn_proposals (
+              id TEXT PRIMARY KEY,
+              status TEXT NOT NULL
+            );
+            CREATE TABLE player_action_adjudications (
+              id TEXT PRIMARY KEY,
+              status TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE skill_checks (
+              id TEXT PRIMARY KEY,
+              player_action_id TEXT,
+              status TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO campaign_module_runs (id, version) VALUES ('run-1', 7);
+            INSERT INTO parallel_action_batches (id, run_id, status, version)
+            VALUES ('batch-1', 'run-1', 'awaiting_confirmation', 3);
+            INSERT INTO parallel_action_batches
+              (id, run_id, status, version, attention_reason)
+            VALUES ('batch-2', 'run-1', 'needs_attention', 5, 'legacy pause');
+            INSERT INTO player_actions (id, status) VALUES ('action-1', 'reviewed');
+            INSERT INTO turn_proposals (id, status) VALUES ('proposal-1', 'draft');
+            INSERT INTO player_action_adjudications (id, status)
+            VALUES ('adjudication-1', 'pending');
+            INSERT INTO skill_checks (id, player_action_id, status)
+            VALUES ('check-1', 'action-1', 'requested');
+            INSERT INTO parallel_action_batch_items
+              (batch_id, action_id, proposal_id, adjudication_id)
+            VALUES ('batch-1', 'action-1', 'proposal-1', 'adjudication-1');
+            """
+        )
+
+        v0069_parallel_batch_run_authority.migrate(connection)
+
+        batch = connection.execute(
+            "SELECT * FROM parallel_action_batches WHERE id = 'batch-1'"
+        ).fetchone()
+        event = connection.execute(
+            "SELECT * FROM parallel_action_batch_events WHERE batch_id = 'batch-1'"
+        ).fetchone()
+        assert batch["module_run_version"] == 7
+        assert batch["status"] == "superseded"
+        assert batch["version"] == 4
+        assert "re-planned" in batch["attention_reason"]
+        assert event["version"] == 4
+        assert event["event_type"] == "supersede"
+        assert json.loads(event["payload_json"])["migration"] == 69
+        assert connection.execute(
+            "SELECT status FROM player_actions WHERE id = 'action-1'"
+        ).fetchone()[0] == "rejected"
+        assert connection.execute(
+            "SELECT status FROM turn_proposals WHERE id = 'proposal-1'"
+        ).fetchone()[0] == "rejected"
+        assert connection.execute(
+            "SELECT status FROM player_action_adjudications "
+            "WHERE id = 'adjudication-1'"
+        ).fetchone()[0] == "superseded"
+        assert connection.execute(
+            "SELECT status FROM skill_checks WHERE id = 'check-1'"
+        ).fetchone()[0] == "cancelled"
+        legacy_attention = connection.execute(
+            "SELECT * FROM parallel_action_batches WHERE id = 'batch-2'"
+        ).fetchone()
+        assert legacy_attention["status"] == "superseded"
+        assert legacy_attention["version"] == 6
+        assert legacy_attention["attention_reason"] == "legacy pause"
+
+        # Direct migration invocation is idempotent and preserves its audit row.
+        v0069_parallel_batch_run_authority.migrate(connection)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM parallel_action_batch_events"
+        ).fetchone()[0] == 2
+    finally:
+        connection.close()
+
+
 def test_check_visibility_migration_backfills_legacy_hidden_rows() -> None:
     connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
     try:
         connection.execute(
             "CREATE TABLE skill_checks (id TEXT PRIMARY KEY, hidden INTEGER NOT NULL)"
@@ -141,6 +457,56 @@ def test_random_evidence_migration_backfills_legacy_percentile_faces() -> None:
             "tens_digits": [4, 2],
         }
         assert len(payload["evidence_fingerprint"]) == 64
+    finally:
+        connection.close()
+
+
+def test_scenario_contract_job_schema_repair_backfills_prototype_columns() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute(
+            "CREATE TABLE scenario_contract_jobs (id TEXT PRIMARY KEY)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE scenario_contract_job_partitions (
+              job_id TEXT NOT NULL,
+              partition_index INTEGER NOT NULL,
+              PRIMARY KEY (job_id, partition_index)
+            )
+            """
+        )
+
+        v0062_scenario_contract_job_schema_repair.migrate(connection)
+        v0062_scenario_contract_job_schema_repair.migrate(connection)
+        connection.execute(
+            "INSERT INTO scenario_contract_jobs (id) VALUES ('job-1')"
+        )
+        connection.execute(
+            """
+            INSERT INTO scenario_contract_job_partitions (job_id, partition_index)
+            VALUES ('job-1', 0)
+            """
+        )
+
+        assert "retryable" in _column_names(connection, "scenario_contract_jobs")
+        assert {
+            "model_attempt_count",
+            "validation_errors_json",
+        } <= _column_names(connection, "scenario_contract_job_partitions")
+        assert connection.execute(
+            "SELECT retryable FROM scenario_contract_jobs WHERE id = 'job-1'"
+        ).fetchone()["retryable"] == 1
+        partition = connection.execute(
+            """
+            SELECT model_attempt_count, validation_errors_json
+            FROM scenario_contract_job_partitions
+            WHERE job_id = 'job-1' AND partition_index = 0
+            """
+        ).fetchone()
+        assert partition["model_attempt_count"] == 0
+        assert partition["validation_errors_json"] == "[]"
     finally:
         connection.close()
 
@@ -222,6 +588,7 @@ def test_init_db_migrates_legacy_schema_once_and_is_idempotent(tmp_path: Path) -
             "proposed_checks_json",
             "proposed_npc_updates_json",
             "proposed_facts_json",
+            "proposed_world_entity_states_json",
         }
         assert "client_action_id" in _column_names(connection, "player_actions")
         assert "visibility" in _column_names(connection, "skill_checks")
@@ -442,6 +809,45 @@ def test_knowledge_attempts_migrate_a_database_already_at_v21() -> None:
         assert connection.execute(
             "SELECT attempt_count FROM module_chunks WHERE id = 'module_processing'"
         ).fetchone()["attempt_count"] == 0
+    finally:
+        connection.close()
+
+
+def test_module_chunk_section_ancestry_migration_is_idempotent() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("CREATE TABLE module_chunks (id TEXT PRIMARY KEY)")
+        v0083_module_chunk_section_ancestry.migrate(connection)
+        v0083_module_chunk_section_ancestry.migrate(connection)
+
+        columns = _column_names(connection, "module_chunks")
+        assert {"heading_level", "section_path_json"} <= columns
+        connection.execute("INSERT INTO module_chunks (id) VALUES ('legacy')")
+        row = connection.execute(
+            "SELECT heading_level, section_path_json FROM module_chunks"
+        ).fetchone()
+        assert tuple(row) == (None, "[]")
+    finally:
+        connection.close()
+
+
+def test_persistent_store_identity_migration_is_idempotent() -> None:
+    connection = sqlite3.connect(":memory:")
+    try:
+        v0084_persistent_store_identity.migrate(connection)
+        first = connection.execute(
+            "SELECT singleton, persistent_store_id FROM persistent_store_identity"
+        ).fetchone()
+        v0084_persistent_store_identity.migrate(connection)
+        rows = connection.execute(
+            "SELECT singleton, persistent_store_id FROM persistent_store_identity"
+        ).fetchall()
+
+        assert len(rows) == 1
+        assert rows[0] == first
+        assert first[0] == 1
+        assert first[1].startswith("store_")
     finally:
         connection.close()
 

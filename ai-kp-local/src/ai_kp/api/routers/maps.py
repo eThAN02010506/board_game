@@ -181,7 +181,7 @@ def create_map_route_plan(
                 status_code=403,
                 detail="Players can only plan a route for their own token",
             )
-    return MapRoutePlanService(repo).create(
+    created = MapRoutePlanService(repo).create(
         campaign_id=campaign_id,
         map_id=map_id,
         member_id=identity.member_id,
@@ -198,6 +198,23 @@ def create_map_route_plan(
             player_submission=identity.role == "player",
         ),
     )
+    # ai_kp 自动化模式下自动批准玩家提交的移动计划。
+    run = repo.get_active_campaign_module_run(campaign_id)
+    if (
+        identity.role == "player"
+        and run is not None
+        and str(run.get("automation_level") or "conservative") == "ai_kp"
+        and created.get("status") == "proposed"
+    ):
+        try:
+            created = repo.update_map_route_plan_status(
+                str(created["id"]),
+                expected_version=int(created.get("version", 0)),
+                status="approved",
+            )
+        except (KeyError, ValueError):
+            pass
+    return created
 
 
 @router.patch("/map-route-plans/{plan_id}")
@@ -286,7 +303,32 @@ def get_map(
         if identity.role == "player" or view == "player"
         else ("player", "table", "kp")
     )
-    result = repo.get_map(map_id, allowed_visibility=allowed_visibility)
+    known_location_ids = None
+    if identity.role == "player":
+        states, _current_location_id = _player_map_awareness(
+            repo,
+            map_id=map_id,
+            campaign_id=campaign_id,
+            identity=identity,
+        )
+        known_location_ids = frozenset(
+            str(item["location_id"])
+            for item in states
+            if item["state"] in {"current", "seen"}
+        )
+        public_location_ids = frozenset(
+            repo.list_map_location_ids(
+                map_id,
+                allowed_visibility=("player", "table"),
+            )
+        )
+        if public_location_ids.issubset(known_location_ids):
+            known_location_ids = None
+    result = repo.get_map(
+        map_id,
+        allowed_visibility=allowed_visibility,
+        known_location_ids=known_location_ids,
+    )
     if identity.role == "kp":
         provider_configured = bool(settings.image_base_url and settings.image_model)
         revision_ready = bool(result.get("revision_id"))
@@ -433,6 +475,26 @@ def get_map_asset_content(
     require_campaign_role(identity, campaign_id)
     if identity.role == "player" and not repo.is_map_asset_player_visible(asset_id):
         raise HTTPException(status_code=404, detail="Map asset not found")
+    if identity.role == "player":
+        states, _current_location_id = _player_map_awareness(
+            repo,
+            map_id=str(asset["map_id"]),
+            campaign_id=campaign_id,
+            identity=identity,
+        )
+        known_location_ids = {
+            str(item["location_id"])
+            for item in states
+            if item["state"] in {"current", "seen"}
+        }
+        public_location_ids = set(
+            repo.list_map_location_ids(
+                str(asset["map_id"]),
+                allowed_visibility=("player", "table"),
+            )
+        )
+        if not public_location_ids.issubset(known_location_ids):
+            raise HTTPException(status_code=404, detail="Map asset not found")
     path = MapAssetFileStore(settings.map_asset_root).resolve(str(asset["storage_path"]))
     return FileResponse(
         path,
@@ -612,7 +674,7 @@ def get_map_awareness(
     States: current (where the player is), seen (visited), unknown (unexplored),
     destroyed (revealed to no longer exist). Players see only their own view.
     """
-    campaign_id = repo.get_map(map_id)["campaign_id"]
+    campaign_id = campaign_for_map(repo, map_id)
     require_campaign_role(identity, campaign_id)
     if identity.role == "player":
         require_approved_pc_binding(
@@ -623,23 +685,43 @@ def get_map_awareness(
         )
         if not repo.is_map_published(map_id):
             raise HTTPException(status_code=404, detail="Map not found")
+    states, current_location_id = _player_map_awareness(
+        repo,
+        map_id=map_id,
+        campaign_id=campaign_id,
+        identity=identity,
+    )
+    return {
+        # Unknown location ids are omitted rather than sent to the browser.
+        "states": [item for item in states if item["state"] != "unknown"],
+        "current_location_id": current_location_id,
+    }
+
+
+def _player_map_awareness(
+    repo: Repository,
+    *,
+    map_id: str,
+    campaign_id: str,
+    identity: AuthenticatedMember,
+) -> tuple[list[dict], str | None]:
     player_profile_id = identity.player_profile_id
     if player_profile_id is None:
-        return {"states": [], "current_location_id": None}
-    # 当前玩家 token 位置作为 current 的权威来源。
+        return [], None
     current_location_id = None
     if identity.role == "player" and identity.pc_id:
         token = repo.find_map_token_for_actor(map_id, "pc", identity.pc_id)
         if token is not None:
             current_location_id = token.get("location_id")
-    # 首次进入：若无任何 current 记录，以 token 位置为 current 并标记直接邻居为 seen。
     states = repo.get_map_location_awareness(
         map_id,
         campaign_id,
         player_profile_id,
     )
     if current_location_id is not None and not any(
-        s["state"] == "current" for s in states
+        item["state"] == "current"
+        and item["location_id"] == current_location_id
+        for item in states
     ):
         states = repo.refresh_player_location_awareness(
             map_id,
@@ -647,14 +729,4 @@ def get_map_awareness(
             player_profile_id,
             current_location_id,
         )
-    # 补 unknown 只填无记录的槽位，绝不覆盖已有 current/seen/destroyed。
-    repo.ensure_map_location_unknown_rows(map_id, campaign_id, player_profile_id)
-    states = repo.get_map_location_awareness(
-        map_id,
-        campaign_id,
-        player_profile_id,
-    )
-    return {
-        "states": states,
-        "current_location_id": current_location_id,
-    }
+    return states, current_location_id

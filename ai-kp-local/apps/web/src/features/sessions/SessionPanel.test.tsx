@@ -94,6 +94,7 @@ function renderPanel({
     onSeatLabelChange: vi.fn(),
     onPlayerDisplayNameChange: vi.fn(),
     onRefreshIdentity: vi.fn(),
+    onSwitchIdentity: vi.fn(),
     onRotateJoinCode: vi.fn(),
     onRefreshMembers: vi.fn(),
     onRefreshSeats: vi.fn(),
@@ -121,6 +122,7 @@ function renderPanel({
     <SessionPanel
       activeCampaignPresent={activeCampaignPresent}
       identity={identity}
+      joinRole="player"
       joinCodeInput=""
       kpDisplayName="守密人"
       members={members}
@@ -134,6 +136,7 @@ function renderPanel({
       session={identity ? session : null}
       visibleJoinCode=""
       visibleSeatInvites={{ seat_open: "SEAT-OPEN-CODE" }}
+      onJoinRoleChange={vi.fn()}
       {...callbacks}
     />
   );
@@ -142,6 +145,14 @@ function renderPanel({
 }
 
 describe("SessionPanel", () => {
+  it("lets an authenticated member return to identity selection", () => {
+    const { onSwitchIdentity } = renderPanel({ identity: kpIdentity });
+
+    fireEvent.click(screen.getByRole("button", { name: "切换身份" }));
+
+    expect(onSwitchIdentity).toHaveBeenCalledTimes(1);
+  });
+
   it("lets a visitor claim a seat and only recover active claimed seats", () => {
     const recoverableSeats: SessionSeat[] = [
       {

@@ -343,11 +343,15 @@ class BackupService:
 
     @staticmethod
     def _verify_database(path: Path, expected_schema_version: int) -> None:
-        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        from ai_kp.infrastructure.database.integrity import fts_integrity_issues
+
+        connection = sqlite3.connect(path)
         try:
             result = connection.execute("PRAGMA integrity_check").fetchone()
             if result is None or result[0] != "ok":
                 raise BackupVerificationError("Backup database integrity check failed")
+            if fts_integrity_issues(connection):
+                raise BackupVerificationError("Backup full-text index integrity check failed")
             row = connection.execute(
                 "SELECT MAX(version) FROM schema_migrations"
             ).fetchone()

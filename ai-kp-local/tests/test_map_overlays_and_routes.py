@@ -143,3 +143,143 @@ def test_handout_link_target_must_belong_to_same_campaign(tmp_path: Path) -> Non
             )
     finally:
         context.__exit__(None, None, None)
+
+
+def test_ai_kp_route_plan_auto_approves_player_submission(
+    tmp_path: Path,
+) -> None:
+    """ai_kp 模式下玩家提交的移动计划自动置为 approved。"""
+    from fastapi.testclient import TestClient
+
+    from ai_kp.api.main import create_app
+    from ai_kp.core.config import Settings
+    from ai_kp.core.db import connect
+    from ai_kp.platform.modules.ingestion import ModuleChunk
+
+    db_path = tmp_path / "ai-kp-route.sqlite3"
+    app = create_app(
+        Settings(
+            db_path=db_path,
+            local_admin_enabled=False,
+            admin_token="route-admin",
+        )
+    )
+    with TestClient(app) as client:
+        admin_headers = {"X-AI-KP-Admin-Token": "route-admin"}
+        campaign = client.post(
+            "/campaigns", headers=admin_headers, json={"title": "AI KP 路线测试"}
+        ).json()
+        session = client.post(
+            f"/campaigns/{campaign['id']}/sessions",
+            headers=admin_headers,
+            json={"kp_display_name": "测试 KP"},
+        ).json()
+        kp_headers = {"Authorization": f"Bearer {session['access_token']}"}
+
+        # 用 repo 创建模组 + ai_kp 自动化
+        observer = connect(db_path)
+        try:
+            repo = Repository(observer)
+            module = repo.create_module(
+                campaign["id"],
+                "测试模组",
+                [ModuleChunk(title="入口", text="车厢里很安静。", visibility="kp", order_index=0)],
+            )
+            run = repo.start_campaign_module_run(
+                campaign_id=campaign["id"],
+                module_id=module["id"],
+                current_scene_key="入口",
+                active_spoiler_tags=[],
+                state={},
+                started_by_member_id=session["member"]["id"],
+            )
+            repo.set_module_run_automation_level(
+                run["id"],
+                expected_version=run["version"],
+                level="ai_kp",
+                reason="测试",
+                member_id=session["member"]["id"],
+            )
+            observer.commit()
+        finally:
+            observer.close()
+
+        # 生成并发布地图
+        saved_map = client.post(
+            f"/campaigns/{campaign['id']}/maps/generate",
+            headers=kp_headers,
+            json={
+                "title": "末班电车",
+                "prompt": "末班电车内部结构图",
+                "locations": ["7号车厢", "6号车厢"],
+                "routes": [["7号车厢", "6号车厢"]],
+                "map_kind": "floorplan",
+            },
+        ).json()
+        client.post(
+            f"/maps/{saved_map['id']}/publish",
+            headers=kp_headers,
+            json={"expected_revision_id": saved_map["revision_id"]},
+        )
+
+        # 玩家认领席位并绑定调查员
+        profile = client.post("/player-profiles", json={"display_name": "玩家"}).json()
+        seat = client.post(
+            f"/sessions/{session['session']['id']}/seats",
+            headers=kp_headers,
+            json={"label": "玩家席位"},
+        ).json()
+        player = client.post(
+            "/session-seats/claim",
+            headers={"X-AI-KP-Player-Token": profile["player_token"]},
+            json={"invitation_code": seat["invitation_code"], "display_name": "玩家"},
+        ).json()
+        player_headers = {
+            "Authorization": f"Bearer {player['access_token']}",
+            "X-AI-KP-Player-Token": profile["player_token"],
+        }
+        inv = client.post(
+            "/investigators",
+            headers=player_headers,
+            json={"canonical_sheet": _coc7_sheet("测试员"), "source_type": "manual"},
+        ).json()
+        client.post(
+            f"/campaigns/{campaign['id']}/investigators/{inv['id']}/submit",
+            headers=player_headers,
+            json={},
+        )
+
+        # 玩家创建路线计划：ai_kp 下应自动 approved
+        token = next(
+            t
+            for t in client.get(
+                f"/maps/{saved_map['id']}?view=player", headers=player_headers
+            ).json()["tokens"]
+            if t["actor_type"] == "pc"
+        )
+        plan = client.post(
+            f"/maps/{saved_map['id']}/route-plans",
+            headers=player_headers,
+            json={
+                "title": "前往6号",
+                "note": "",
+                "token_routes": [
+                    {"token_id": token["id"], "waypoints": ["7号车厢", "6号车厢"]}
+                ],
+            },
+        )
+        assert plan.status_code == 200, plan.text
+        assert plan.json()["status"] == "approved", plan.json()
+
+
+def _coc7_sheet(name: str) -> dict:
+    return {
+        "schema_version": "coc7-investigator-v1",
+        "ruleset_id": "coc7-keeper-cn-2002c",
+        "identity": {"name": name, "occupation": "调查员", "age": 30, "era": "1920s"},
+        "characteristics": {k: 50 for k in ("str","con","siz","dex","app","int","pow","edu","luck")},
+        "skills": [],
+        "assets": {"items": []},
+        "background": {},
+        "provenance": {"source_type": "test"},
+    }

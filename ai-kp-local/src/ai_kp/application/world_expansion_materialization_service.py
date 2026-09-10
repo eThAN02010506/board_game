@@ -15,6 +15,10 @@ from ai_kp.application.npc_reappearance_service import NpcReappearanceService
 from ai_kp.application.ports.world_expansion_materializations import (
     WorldExpansionMaterializationStore,
 )
+from ai_kp.application.world_entity_materializer import (
+    EncounterEntityRealization,
+    WorldEntityMaterializer,
+)
 from ai_kp.core.ids import new_id
 from ai_kp.platform.facts import FactLedgerEntry, WorldFact
 from ai_kp.platform.sessions.models import AuthenticatedMember
@@ -54,6 +58,7 @@ class EncounterNpc:
 class EncounterMapPlacement:
     map_id: str
     location_name: str
+    entity_ref: str | None = None
     visibility: Literal["table", "kp"] = "table"
     color: str = "#b93f2d"
 
@@ -64,6 +69,7 @@ class MaterializeWorldExpansionCommand:
     summary: str
     happened_at: str | None
     facts: tuple[EncounterFact, ...]
+    entities: tuple[EncounterEntityRealization, ...] = ()
     npc: EncounterNpc | None = None
     map_placement: EncounterMapPlacement | None = None
     participant_investigator_ids: tuple[str, ...] = ()
@@ -117,13 +123,8 @@ class WorldExpansionMaterializationService:
             command.idempotency_key,
         )
         if by_key is not None:
-            if (
-                by_key["proposal_id"] != proposal_id
-                or by_key["command_hash"] != command_hash
-            ):
-                raise ConflictError(
-                    "Idempotency key was already used for a different encounter"
-                )
+            if by_key["proposal_id"] != proposal_id or by_key["command_hash"] != command_hash:
+                raise ConflictError("Idempotency key was already used for a different encounter")
             return self.repo.get_turn_proposal(proposal_id)
 
         existing = self.repo.get_world_expansion_materialization(proposal_id)
@@ -132,9 +133,7 @@ class WorldExpansionMaterializationService:
         if proposal.get("proposal_kind") != "world_expansion":
             raise InvalidInputError("Only world expansion proposals can be materialized")
         if proposal["status"] != "approved":
-            raise ConflictError(
-                "World expansion must be approved before confirming contact"
-            )
+            raise ConflictError("World expansion must be approved before confirming contact")
         if not self.repo.is_session_member_active(
             identity.member_id,
             identity.session_id,
@@ -182,8 +181,30 @@ class WorldExpansionMaterializationService:
                 "proposal_id": proposal_id,
                 "module_run_id": expansion["module_run_id"],
                 "candidate_subject": expansion["candidate"]["subject"],
+                "template_binding": expansion["candidate"].get("template_binding"),
             },
         )
+
+        template_entities = WorldEntityMaterializer(self.repo).materialize(
+            campaign_id=campaign_id,
+            proposal_id=proposal_id,
+            encounter_event_id=str(encounter_event["id"]),
+            expansion=expansion,
+            realizations=command.entities,
+            happened_at=command.happened_at,
+        )
+        candidate_bindings = (
+            (expansion["candidate"].get("template_binding") or {}).get(
+                "entity_bindings", ()
+            )
+        )
+        if command.npc is not None and any(
+            item.get("entity_kind") == "npc" for item in candidate_bindings
+        ):
+            raise InvalidInputError(
+                "Typed NPC candidates are materialized from entity realizations; "
+                "a separate manual NPC would not match the approved candidate"
+            )
 
         npc = self._materialize_npc(
             campaign_id,
@@ -196,6 +217,7 @@ class WorldExpansionMaterializationService:
             identity,
             command,
             npc,
+            template_entities.entities_by_ref,
         )
 
         fact_entries: list[FactLedgerEntry] = []
@@ -216,11 +238,21 @@ class WorldExpansionMaterializationService:
                     "module_run_id": expansion["module_run_id"],
                     "module_source_hash": expansion["module_source_hash"],
                     "candidate_fingerprint": expansion["fingerprint"],
+                    "template_binding": expansion["candidate"].get("template_binding"),
                 },
                 happened_at=command.happened_at,
             )
             fact_entries.append(self.repo.append_fact_entry(sourced_entry))
 
+        npc_records = list(template_entities.npc_records)
+        if npc is not None:
+            npc_records.append(npc)
+        npc_records = list({str(item["id"]): item for item in npc_records}.values())
+        if command.participant_investigator_ids and not npc_records:
+            raise InvalidInputError(
+                "Investigator/NPC history requires a materialized NPC entity"
+            )
+        primary_npc = npc or (npc_records[0] if npc_records else None)
         materialization = self.repo.create_world_expansion_materialization(
             materialization_id=materialization_id,
             proposal_id=proposal_id,
@@ -229,22 +261,31 @@ class WorldExpansionMaterializationService:
             command_hash=command_hash,
             encounter_event_id=str(encounter_event["id"]),
             fact_event_ids=[item.event_id for item in fact_entries],
-            npc_id=str(npc["id"]) if npc else None,
+            npc_id=str(primary_npc["id"]) if primary_npc else None,
             map_token_id=str(map_token["id"]) if map_token else None,
             created_by_member_id=identity.member_id,
             payload={
                 "summary": command.summary,
                 "happened_at": command.happened_at,
                 "fact_count": len(fact_entries),
-                "map_id": command.map_placement.map_id
-                if command.map_placement
-                else None,
+                "map_id": command.map_placement.map_id if command.map_placement else None,
                 "map_location_name": command.map_placement.location_name
                 if command.map_placement
                 else None,
                 "participant_investigator_ids": list(participant_ids),
+                "template_binding": expansion["candidate"].get("template_binding"),
+                "world_entity_ids": [
+                    item["world_entity_id"] for item in template_entities.attachments
+                ],
             },
         )
+        self.repo.attach_world_expansion_materialization_entities(
+            materialization_id,
+            list(template_entities.attachments),
+        )
+        materialization = self.repo.get_world_expansion_materialization(proposal_id)
+        if materialization is None:
+            raise RuntimeError("World expansion entity attachments were not persisted")
         appearance = None
         if is_reappearance and npc is not None:
             appearance = self.repo.record_npc_reappearance(
@@ -254,24 +295,25 @@ class WorldExpansionMaterializationService:
                 appeared_at=command.happened_at,
             )
         investigator_encounters = []
-        if npc is not None and participant_ids:
+        if npc_records and participant_ids:
             interaction_summary = self._text(
                 command.interaction_summary or command.summary,
                 "interaction_summary",
                 1000,
             )
-            for investigator_id in participant_ids:
-                investigator_encounters.append(
-                    self.repo.record_investigator_npc_encounter(
-                        investigator_id=investigator_id,
-                        npc_id=str(npc["id"]),
-                        campaign_id=campaign_id,
-                        source_event_id=str(encounter_event["id"]),
-                        materialization_id=materialization_id,
-                        interaction_summary=interaction_summary,
-                        happened_at=command.happened_at,
+            for npc_record in npc_records:
+                for investigator_id in participant_ids:
+                    investigator_encounters.append(
+                        self.repo.record_investigator_npc_encounter(
+                            investigator_id=investigator_id,
+                            npc_id=str(npc_record["id"]),
+                            campaign_id=campaign_id,
+                            source_event_id=str(encounter_event["id"]),
+                            materialization_id=materialization_id,
+                            interaction_summary=interaction_summary,
+                            happened_at=command.happened_at,
+                        )
                     )
-                )
         dynamic_branch = DynamicBranchService(self.repo).activate_after_contact(
             proposal_id,
             identity,
@@ -284,14 +326,12 @@ class WorldExpansionMaterializationService:
             "fact_event_ids": materialization["fact_event_ids"],
             "npc_id": materialization["npc_id"],
             "map_token_id": materialization["map_token_id"],
-            "investigator_encounter_ids": [
-                item["id"] for item in investigator_encounters
-            ],
+            "world_entity_ids": materialization["world_entity_ids"],
+            "npc_ids": [str(item["id"]) for item in npc_records],
+            "investigator_encounter_ids": [item["id"] for item in investigator_encounters],
             "npc_reappearance_id": appearance["id"] if appearance else None,
             "dynamic_branch_id": dynamic_branch["id"] if dynamic_branch else None,
-            "dynamic_branch_status": (
-                dynamic_branch["status"] if dynamic_branch else None
-            ),
+            "dynamic_branch_status": (dynamic_branch["status"] if dynamic_branch else None),
             "created_at": materialization["created_at"],
         }
         self.repo.add_proposal_action(
@@ -334,8 +374,7 @@ class WorldExpansionMaterializationService:
             participant_ids,
         ):
             raise InvalidInputError(
-                "Existing NPC requires a qualifying prior encounter by an "
-                "approved participant"
+                "Existing NPC requires a qualifying prior encounter by an approved participant"
             )
         policy = self.repo.get_campaign_npc_reappearance_policy(campaign_id)
         used = self.repo.count_npc_reappearances(campaign_id)
@@ -344,9 +383,7 @@ class WorldExpansionMaterializationService:
         gate_service = NpcReappearanceService(self.repo)
         profile = self.repo.get_npc_availability_profile(npc_id)
         context_location = (
-            command.map_placement.location_name
-            if command.map_placement is not None
-            else None
+            command.map_placement.location_name if command.map_placement is not None else None
         )
         decision = gate_service.evaluate(
             campaign_time=self.repo.get_campaign(campaign_id).get("current_time"),
@@ -363,9 +400,7 @@ class WorldExpansionMaterializationService:
             final=True,
         )
         if decision["decision"] == "blocked":
-            raise ConflictError(
-                "NPC appearance is impossible: " + "; ".join(decision["warnings"])
-            )
+            raise ConflictError("NPC appearance is impossible: " + "; ".join(decision["warnings"]))
 
     def _prepare_facts(
         self,
@@ -445,8 +480,7 @@ class WorldExpansionMaterializationService:
                 npc = self.repo.get_npc(item.npc_id)
             else:
                 raise InvalidInputError(
-                    "Existing NPC requires a qualifying prior encounter by an "
-                    "approved participant"
+                    "Existing NPC requires a qualifying prior encounter by an approved participant"
                 )
         else:
             npc = self.repo.create_npc(
@@ -503,22 +537,25 @@ class WorldExpansionMaterializationService:
         identity: AuthenticatedMember,
         command: MaterializeWorldExpansionCommand,
         npc: dict | None,
+        entities_by_ref: dict[str, dict],
     ) -> dict | None:
         placement = command.map_placement
         if placement is None:
             return None
+        if placement.entity_ref is not None:
+            world_entity = entities_by_ref.get(placement.entity_ref)
+            if world_entity is None:
+                raise InvalidInputError("Map placement references an unknown approved entity")
+            if not world_entity.get("npc_id"):
+                raise InvalidInputError("Map placement currently requires an NPC entity")
+            npc = self.repo.get_npc(str(world_entity["npc_id"]))
         if npc is None:
             raise InvalidInputError("Map placement requires an encountered NPC")
         saved_map = self.repo.get_map(placement.map_id)
         if saved_map["campaign_id"] != campaign_id:
             raise InvalidInputError("Map placement belongs to another campaign")
-        if not any(
-            item["name"] == placement.location_name
-            for item in saved_map["locations"]
-        ):
-            raise InvalidInputError(
-                "Map placement must use an existing reviewed map location"
-            )
+        if not any(item["name"] == placement.location_name for item in saved_map["locations"]):
+            raise InvalidInputError("Map placement must use an existing reviewed map location")
         npc_id = str(npc["id"])
         existing = self.repo.find_map_token_for_actor(
             placement.map_id,
@@ -558,20 +595,28 @@ class WorldExpansionMaterializationService:
             has_id = bool(command.npc.npc_id)
             has_name = bool(command.npc.name and command.npc.name.strip())
             if has_id == has_name:
-                raise InvalidInputError(
-                    "Encountered NPC requires exactly one of npc_id or name"
-                )
+                raise InvalidInputError("Encountered NPC requires exactly one of npc_id or name")
             if not -100 <= command.npc.relationship_score <= 100:
                 raise InvalidInputError("NPC relationship_score must be between -100 and 100")
-        if command.map_placement is not None and command.npc is None:
-            raise InvalidInputError("Map placement requires an encountered NPC")
+        if (
+            command.map_placement is not None
+            and command.npc is None
+            and command.map_placement.entity_ref is None
+        ):
+            raise InvalidInputError(
+                "Map placement requires an encountered NPC or approved entity ref"
+            )
         if len(command.participant_investigator_ids) > 12:
             raise InvalidInputError("Contact can include at most 12 investigators")
         if len(set(command.participant_investigator_ids)) != len(
             command.participant_investigator_ids
         ):
             raise InvalidInputError("Contact participant investigators must be unique")
-        if command.participant_investigator_ids and command.npc is None:
+        if (
+            command.participant_investigator_ids
+            and command.npc is None
+            and not command.entities
+        ):
             raise InvalidInputError("Investigator/NPC history requires an encountered NPC")
         if command.interaction_summary is not None:
             WorldExpansionMaterializationService._text(
@@ -603,9 +648,7 @@ class WorldExpansionMaterializationService:
         if not normalized and not allow_blank:
             raise InvalidInputError(f"{field_name} cannot be blank")
         if len(normalized) > max_length:
-            raise InvalidInputError(
-                f"{field_name} cannot exceed {max_length} characters"
-            )
+            raise InvalidInputError(f"{field_name} cannot exceed {max_length} characters")
         return normalized
 
     @classmethod
@@ -637,6 +680,7 @@ class WorldExpansionMaterializationService:
 
 
 __all__ = [
+    "EncounterEntityRealization",
     "EncounterFact",
     "EncounterMapPlacement",
     "EncounterNpc",

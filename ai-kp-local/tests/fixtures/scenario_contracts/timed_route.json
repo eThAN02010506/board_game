@@ -1,0 +1,69 @@
+{
+  "contract_id": "fixture-timed-route",
+  "schema_version": 1,
+  "source_version": 1,
+  "ruleset_id": "coc7",
+  "title": "Timed route fixture",
+  "initial_scene_id": "entry",
+  "initial_facts": {"objective": {"controls_reached": false}},
+  "locations": [
+    {"location_id": "entry", "title": "Entry"},
+    {"location_id": "obstacle", "title": "Obstacle"},
+    {"location_id": "controls", "title": "Controls"}
+  ],
+  "location_links": [
+    {"from_location_id": "entry", "to_location_id": "obstacle"},
+    {"from_location_id": "obstacle", "to_location_id": "controls"}
+  ],
+  "clocks": [
+    {"clock_id": "threat", "title": "Approaching threat", "maximum_value": 4}
+  ],
+  "operators": [
+    {
+      "operator_id": "cross-obstacle",
+      "title": "Cross the obstacle",
+      "policy": "optional_check",
+      "preconditions": [{"path": "scene_id", "operator": "eq", "value": "obstacle"}],
+      "skill_choices": [
+        {"skill_key": "stealth", "reason": "Avoid drawing attention."},
+        {"skill_key": "dex", "reason": "Move quickly through danger."}
+      ],
+      "success_commands": [
+        {"kind": "set_scene", "value": "controls"},
+        {"kind": "set_fact", "path": "objective.controls_reached", "value": true}
+      ],
+      "failure_commands": [
+        {"kind": "advance_clock", "clock_id": "threat", "delta": 1}
+      ],
+      "maximum_effect": "Reach the controls; this does not choose an ending."
+    },
+    {
+      "operator_id": "choose-safe-control",
+      "title": "Choose the safe control",
+      "policy": "automatic",
+      "preconditions": [
+        {"path": "facts.objective.controls_reached", "operator": "eq", "value": true}
+      ],
+      "success_commands": [
+        {"kind": "set_fact", "path": "outcome.safe", "value": true}
+      ]
+    }
+  ],
+  "endings": [
+    {
+      "ending_id": "safe",
+      "title": "Safe ending",
+      "priority": 10,
+      "all_conditions": [
+        {"path": "facts.outcome.safe", "operator": "eq", "value": true}
+      ]
+    },
+    {
+      "ending_id": "caught",
+      "title": "Threat ending",
+      "all_conditions": [
+        {"path": "clocks.threat", "operator": "gte", "value": 4}
+      ]
+    }
+  ]
+}

@@ -8,7 +8,11 @@ from typing import Any
 from ai_kp.core.ids import new_id
 from ai_kp.infrastructure.database.rows import decode_json_field, row_to_dict
 from ai_kp.infrastructure.database.sqlite import SQLiteRepository
-from ai_kp.platform.resolution import build_check_consequence_snapshot
+from ai_kp.platform.resolution import (
+    build_check_consequence_snapshot,
+    has_pending_push_decision,
+)
+from ai_kp.rulesets.coc7.mechanics.runtime_effects import runtime_skill_target
 
 _SUCCESS_LEVEL_RANK = {
     "fumble": -1,
@@ -66,11 +70,16 @@ class SkillCheckRepository(SQLiteRepository):
         proposal_id: str | None = None,
         player_action_id: str | None = None,
         pushed_from_check_id: str | None = None,
+        check_plan: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._validate_check_scope(campaign_id, session_id, requested_by_member_id)
         effective_visibility = visibility or ("blind" if hidden else "public")
         if effective_visibility not in {"public", "private", "blind"}:
             raise ValueError("Unsupported check visibility")
+        # Repository-level defense for callers that do not pass through
+        # proposal planning.  Pushing requires the player to know the failure
+        # and describe a changed method, which is impossible for a blind roll.
+        effective_allow_push = allow_push and effective_visibility != "blind"
         self._validate_check_origin(
             campaign_id=campaign_id,
             session_id=session_id,
@@ -96,8 +105,9 @@ class SkillCheckRepository(SQLiteRepository):
                requested_by_member_id, roller_member_id, pc_id, investigator_id,
                skill_key, skill_name, target, target_source, difficulty, bonus_dice,
                hidden, visibility, allow_push, pushed_from_check_id, ruleset_id,
-               ruleset_version, source_reference_json, investigator_state_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ruleset_version, source_reference_json, investigator_state_version,
+               check_plan_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 check_id, campaign_id, session_id, proposal_id, player_action_id,
@@ -105,10 +115,11 @@ class SkillCheckRepository(SQLiteRepository):
                 target_values["investigator_id"], target_values["skill_key"],
                 normalized_skill, target_values["target"], target_values["target_source"],
                 difficulty, bonus_dice, int(effective_visibility != "public"),
-                effective_visibility, int(allow_push), pushed_from_check_id,
+                effective_visibility, int(effective_allow_push), pushed_from_check_id,
                 ruleset_id, ruleset_version,
                 json.dumps(source_reference, ensure_ascii=False),
                 target_values["state_version"],
+                json.dumps(check_plan or {}, ensure_ascii=False),
             ),
         )
         self._add_check_action(check_id, "requested", requested_by_member_id)
@@ -260,6 +271,9 @@ class SkillCheckRepository(SQLiteRepository):
         result["source_reference"] = decode_json_field(
             result.pop("source_reference_json"), {}
         )
+        result["check_plan"] = decode_json_field(
+            result.pop("check_plan_json", None), {}
+        )
         original_result_json = result.pop("original_result_json")
         result["original_result"] = (
             decode_json_field(original_result_json, None)
@@ -267,6 +281,13 @@ class SkillCheckRepository(SQLiteRepository):
             else None
         )
         result["actions"] = self.list_skill_check_actions(check_id)
+        push_decision = self.connection.execute(
+            "SELECT * FROM skill_check_push_decisions WHERE check_id = ?",
+            (check_id,),
+        ).fetchone()
+        result["push_decision"] = (
+            row_to_dict(push_decision) if push_decision is not None else None
+        )
         return result
 
     def list_skill_checks(self, campaign_id: str, session_id: str) -> list[dict[str, Any]]:
@@ -680,6 +701,7 @@ class SkillCheckRepository(SQLiteRepository):
             proposal_id=check.get("proposal_id"),
             player_action_id=check.get("player_action_id"),
             pushed_from_check_id=check_id,
+            check_plan=dict(check.get("check_plan") or {}),
         )
         self._add_check_action(
             check_id,
@@ -690,6 +712,46 @@ class SkillCheckRepository(SQLiteRepository):
         )
         return child
 
+    def decline_skill_check_push(
+        self, check_id: str, *, actor_member_id: str, reason: str
+    ) -> dict[str, Any]:
+        self.begin_immediate()
+        check = self.get_skill_check(check_id)
+        self._assert_check_consequence_not_finalized(check)
+        if check["status"] not in {"resolved", "overridden"} or check["passed"]:
+            raise ValueError("Only a failed resolved check can accept failure")
+        if not check["allow_push"]:
+            raise ValueError("This check has no pending push decision")
+        child = self.connection.execute(
+            "SELECT id FROM skill_checks WHERE pushed_from_check_id = ?",
+            (check_id,),
+        ).fetchone()
+        if child is not None:
+            raise ValueError("This check has already been pushed")
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise ValueError("A reason for accepting failure is required")
+        updated = self.connection.execute(
+            """
+            UPDATE skill_checks SET allow_push = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND allow_push = 1
+            """,
+            (check_id,),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("Push decision changed before it could be recorded")
+        self.connection.execute(
+            """
+            INSERT INTO skill_check_push_decisions
+              (id, check_id, actor_member_id, decision, reason)
+            VALUES (?, ?, ?, 'accept_failure', ?)
+            """,
+            (new_id("pushdecision"), check_id, actor_member_id, normalized_reason),
+        )
+        self._append_check_realtime(check_id, "check.push_declined")
+        self._notify_consequence_ready_when_checks_terminal(check_id)
+        return self.get_skill_check(check_id)
+
     def _resolve_check_target(
         self, campaign_id: str, pc_id: str | None, skill_name: str
     ) -> dict[str, Any] | None:
@@ -697,20 +759,30 @@ class SkillCheckRepository(SQLiteRepository):
             return None
         row = self.connection.execute(
             """
-            SELECT ci.investigator_id, ir.canonical_json, ics.state_version
+            SELECT ci.investigator_id, ir.canonical_json, ics.state_version,
+                   ics.current_san, ics.current_luck, ics.conditions_json
             FROM campaign_investigators ci
             JOIN investigator_revisions ir ON ir.id = ci.approved_revision_id
             LEFT JOIN investigator_campaign_state ics
               ON ics.campaign_id = ci.campaign_id
              AND ics.investigator_id = ci.investigator_id
             WHERE ci.campaign_id = ? AND ci.legacy_pc_id = ?
-              AND ci.status = 'approved'
+              AND ci.approved_revision_id IS NOT NULL
             """,
             (campaign_id, pc_id),
         ).fetchone()
         if row is not None:
             canonical = decode_json_field(row["canonical_json"], {})
+            runtime_conditions = decode_json_field(row["conditions_json"] or "[]", [])
             wanted = skill_name.casefold()
+            if wanted in {"san", "sanity", "理智", "理智值"} and row["current_san"] is not None:
+                return {
+                    "target": int(row["current_san"]),
+                    "target_source": "investigator_campaign_state",
+                    "investigator_id": str(row["investigator_id"]),
+                    "state_version": row["state_version"],
+                    "skill_key": "san",
+                }
             for skill in canonical.get("skills") or []:
                 names = {
                     str(skill.get("skill_key") or "").casefold(),
@@ -718,9 +790,14 @@ class SkillCheckRepository(SQLiteRepository):
                     str(skill.get("specialization") or "").casefold(),
                 }
                 if wanted in names:
+                    target = runtime_skill_target(skill, runtime_conditions)
                     return {
-                        "target": int(skill.get("current_value") or 0),
-                        "target_source": "approved_investigator_revision",
+                        "target": target,
+                        "target_source": (
+                            "investigator_campaign_state"
+                            if target != int(skill.get("current_value") or 0)
+                            else "approved_investigator_revision"
+                        ),
                         "investigator_id": str(row["investigator_id"]),
                         "state_version": row["state_version"],
                         "skill_key": str(skill.get("skill_key") or skill_name),
@@ -747,6 +824,14 @@ class SkillCheckRepository(SQLiteRepository):
                 "luck": "luck",
                 "幸运": "luck",
             }.get(wanted, wanted)
+            if normalized_characteristic_key == "luck" and row["current_luck"] is not None:
+                return {
+                    "target": int(row["current_luck"]),
+                    "target_source": "investigator_campaign_state",
+                    "investigator_id": str(row["investigator_id"]),
+                    "state_version": row["state_version"],
+                    "skill_key": "luck",
+                }
             for key, value in characteristics.items():
                 if str(key).casefold() == normalized_characteristic_key:
                     return {
@@ -787,20 +872,27 @@ class SkillCheckRepository(SQLiteRepository):
             return []
         row = self.connection.execute(
             """
-            SELECT ir.canonical_json FROM campaign_investigators ci
+            SELECT ir.canonical_json, ics.current_san, ics.current_luck,
+                   ics.conditions_json
+            FROM campaign_investigators ci
             JOIN investigator_revisions ir ON ir.id = ci.approved_revision_id
-            WHERE ci.campaign_id = ? AND ci.legacy_pc_id = ? AND ci.status = 'approved'
+            LEFT JOIN investigator_campaign_state ics
+              ON ics.campaign_id = ci.campaign_id
+             AND ics.investigator_id = ci.investigator_id
+            WHERE ci.campaign_id = ? AND ci.legacy_pc_id = ?
+              AND ci.approved_revision_id IS NOT NULL
             """,
             (campaign_id, pc_id),
         ).fetchone()
         if row is None:
             return []
         canonical = decode_json_field(row["canonical_json"], {})
+        runtime_conditions = decode_json_field(row["conditions_json"] or "[]", [])
         result = [
             {
                 "skill_name": str(item.get("display_name") or item.get("skill_key")),
                 "skill_key": str(item.get("skill_key") or item.get("display_name")),
-                "target": int(item.get("current_value") or 0),
+                "target": runtime_skill_target(item, runtime_conditions),
             }
             for item in canonical.get("skills") or []
             if item.get("display_name") or item.get("skill_key")
@@ -809,11 +901,24 @@ class SkillCheckRepository(SQLiteRepository):
             {
                 "skill_name": str(key).upper(),
                 "skill_key": str(key),
-                "target": int(value),
+                "target": int(
+                    row["current_luck"]
+                    if str(key).casefold() == "luck"
+                    and row["current_luck"] is not None
+                    else value
+                ),
             }
             for key, value in (canonical.get("characteristics") or {}).items()
             if isinstance(value, (int, float))
         )
+        if row["current_san"] is not None:
+            result.append(
+                {
+                    "skill_name": "SAN",
+                    "skill_key": "san",
+                    "target": int(row["current_san"]),
+                }
+            )
         return result
 
     def _add_check_action(
@@ -889,6 +994,8 @@ class SkillCheckRepository(SQLiteRepository):
             return
         checks = self.list_skill_checks_for_action(str(action_id))
         if not checks or any(item["status"] == "requested" for item in checks):
+            return
+        if has_pending_push_decision(checks):
             return
         opposed_checks = self.list_opposed_checks_for_action(str(action_id))
         if any(

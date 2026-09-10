@@ -113,6 +113,7 @@ def update_model_settings(
         model=model,
         local_model_path=local_model_path,
         local_port=payload.local_port,
+        semantic_profile=payload.semantic_profile,
     )
     request.app.state.settings = apply_model_configuration(settings, saved)
     result = public_model_configuration(request.app.state.settings, saved)

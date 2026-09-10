@@ -16,6 +16,7 @@ import {
   generateWorldExpansionProposal,
   getModuleRunDirectorState,
   isApiError,
+  requestJson,
   transitionModuleRunScene,
   updateAutomationLevel,
   updateDirectorControl,
@@ -31,10 +32,27 @@ import type {
   TurnProposal
 } from "../../api/types";
 import { DynamicBranchPanel } from "./DynamicBranchPanel";
+import { ScenarioContractPanel } from "./ScenarioContractPanel";
+import { SettingProfilePanel } from "./SettingProfilePanel";
+import { WorldEntityStatePanel } from "./WorldEntityStatePanel";
 
 type Props = {
   run: ModuleRun;
   onRunChanged: (run: ModuleRun) => void;
+};
+
+type ScenarioOverlay = {
+  id: string;
+  proposal_key: string;
+  sequence_no: number;
+  status: "review_required" | "active" | "rejected";
+  proposal: {
+    confidence: "low" | "medium" | "high";
+    assumptions: string[];
+    rationale: string;
+  };
+  decision: { blockers?: string[] };
+  activated_at: string | null;
 };
 
 const paceOptions: Array<[ModulePlayPace, string, string]> = [
@@ -67,6 +85,7 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
   const [directorState, setDirectorState] = useState<ModuleRunDirectorState | null>(null);
   const [analysis, setAnalysis] = useState<DirectorAnalysis | null>(null);
   const [generatedProposal, setGeneratedProposal] = useState<TurnProposal | null>(null);
+  const [scenarioOverlays, setScenarioOverlays] = useState<ScenarioOverlay[]>([]);
   const [intent, setIntent] = useState("");
   const [sceneKey, setSceneKey] = useState(run.current_scene_key ?? "");
   const [sceneTitle, setSceneTitle] = useState(
@@ -131,9 +150,13 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
     const epoch = ++requestEpoch.current;
     if (!silent) setBusy(true);
     try {
-      const loaded = await getModuleRunDirectorState(runId);
+      const [loaded, overlays] = await Promise.all([
+        getModuleRunDirectorState(runId),
+        requestJson<ScenarioOverlay[]>(`/module-runs/${runId}/scenario-overlays`)
+      ]);
       if (epoch !== requestEpoch.current) return;
       setDirectorState(loaded);
+      setScenarioOverlays(overlays);
       setEntityDrafts(Object.fromEntries(
         loaded.entity_states.map((item) => [item.entity_id, item.status])
       ));
@@ -245,6 +268,21 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
     }
   }
 
+  async function approveOverlay(overlayId: string) {
+    setBusy(true);
+    try {
+      await requestJson(`/scenario-overlays/${overlayId}/approve`, {
+        method: "POST"
+      });
+      await loadState(run.id, true);
+      setMessage("运行级契约扩展已审核并原子激活。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function analyzeIntent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!intent.trim()) {
@@ -301,6 +339,20 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
           {activeRun.status === "active" ? "AI 可辅助" : "AI 已停止推进"}
         </span>
       </header>
+
+      <ScenarioContractPanel run={activeRun} />
+      <SettingProfilePanel
+        entities={(directorState?.entity_states ?? []).map((item) => ({
+          entity_id: item.entity_id,
+          entity_type: item.entity_type,
+          name: item.name,
+        }))}
+        onRunChanged={(updatedRun) => {
+          onRunChanged(updatedRun);
+          void loadState(updatedRun.id, true);
+        }}
+        run={activeRun}
+      />
 
       <div className="scene-director-grid">
         <section className="director-control-card" aria-label="导演控制权">
@@ -492,6 +544,22 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
                   <span>待审批 · {generatedProposal.world_expansion.candidate.confidence}</span>
                   <strong>{generatedProposal.world_expansion.candidate.subject}</strong>
                   <p>{generatedProposal.world_expansion.candidate.proposal}</p>
+                  {generatedProposal.world_expansion.analysis.settlement_template ? (
+                    <details>
+                      <summary>查看本子地点与通用模板关联</summary>
+                      <p>
+                        已关联：
+                        {generatedProposal.world_expansion.analysis.settlement_template
+                          .source_coverage.covered_slot_ids.join("、") || "无"}
+                      </p>
+                      <p>
+                        尚缺核心功能候选：
+                        {generatedProposal.world_expansion.analysis.settlement_template
+                          .source_coverage.missing_core_slot_ids.join("、") || "无"}
+                      </p>
+                      <small>缺失只表示可补全候选；审批前不会加入世界。</small>
+                    </details>
+                  ) : null}
                   <a href="/play">前往游玩页审批</a>
                 </article>
               )}
@@ -552,10 +620,47 @@ export function SceneDirectorPanel({ run, onRunChanged }: Props) {
           </p>
         )}
       </section>
+      <section className="investigation-ledger" aria-label="运行级契约扩展">
+        <div className="director-card-title">
+          <GitBranch size={17} />
+          <div>
+            <strong>运行级契约扩展</strong>
+            <small>大模型只提交新增候选；服务端绑定版本并执行边界校验</small>
+          </div>
+        </div>
+        {scenarioOverlays.length ? (
+          <div className="investigation-ledger-list">
+            {scenarioOverlays.map((overlay) => (
+              <article key={overlay.id}>
+                <div>
+                  <span>{overlay.status}</span>
+                  <strong>{overlay.proposal_key}</strong>
+                  <small>{overlay.proposal.rationale}</small>
+                  {!!overlay.decision.blockers?.length && (
+                    <small>{overlay.decision.blockers.join(" · ")}</small>
+                  )}
+                </div>
+                {overlay.status === "review_required" && (
+                  <button
+                    disabled={busy}
+                    onClick={() => void approveOverlay(overlay.id)}
+                    type="button"
+                  >
+                    审核并激活
+                  </button>
+                )}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <small>当前运行还没有大模型提出的契约扩展。</small>
+        )}
+      </section>
       <DynamicBranchPanel
         campaignId={activeRun.campaign_id}
         moduleRunId={activeRun.id}
       />
+      <WorldEntityStatePanel campaignId={activeRun.campaign_id} />
 
       <p className="inline-message" role="status">{message}</p>
 

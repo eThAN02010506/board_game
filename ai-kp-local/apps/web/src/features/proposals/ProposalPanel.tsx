@@ -9,6 +9,7 @@ import type {
   WorldExpansionEncounterInput
 } from "../../api/types";
 import { ProposalEffectList } from "../../shared/ProposalEffectList";
+import { ActorExecutionTraceList } from "../../shared/ActorExecutionTraceList";
 import { statusLabel } from "../../ui/statusLabels";
 import { DynamicBranchPlanPreview } from "./DynamicBranchPlanPreview";
 import { WorldExpansionContactForm } from "./WorldExpansionContactForm";
@@ -73,6 +74,9 @@ export function ProposalPanel(props: Props) {
                 : ""}
             </span>
             <p>{props.activeProposal.public_narration}</p>
+            <ActorExecutionTraceList
+              traces={props.activeProposal.tabletop_turn?.response?.actor_traces}
+            />
             <small>{props.activeProposal.kp_notes}</small>
             {props.activeProposal.action_ruling && (
               <section className={`action-ruling ruling-${props.activeProposal.action_ruling.feasibility}`}>
@@ -169,6 +173,7 @@ export function ProposalPanel(props: Props) {
               <ProposalEffectList title={t("proposals.effectNpcUpdates")} items={props.activeProposal.proposed_npc_updates} />
               <ProposalEffectList title={t("proposals.effectMapMoves")} items={props.activeProposal.proposed_map_moves} />
               <ProposalEffectList title={t("proposals.effectFacts")} items={props.activeProposal.proposed_facts ?? []} />
+              <ProposalEffectList title={t("proposals.effectWorldEntityStates")} items={props.activeProposal.proposed_world_entity_states ?? []} />
             </div>
           </>
         ) : (

@@ -7,9 +7,14 @@ import sqlite3
 from pathlib import Path, PurePosixPath
 from threading import Event, RLock, Thread
 
+from ai_kp.bootstrap.settings import Settings
 from ai_kp.infrastructure.database.module_imports import ModuleImportClaimLost
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.schema import connect, init_db
+from ai_kp.infrastructure.llm.model_execution import (
+    ModelExecutionSnapshot,
+    ModelExecutionSuperseded,
+)
 from ai_kp.infrastructure.modules import ModuleDocumentStorage
 from ai_kp.infrastructure.modules.document_sandbox import (
     DocumentParsePolicy,
@@ -81,33 +86,6 @@ def queue_module_import_retry(
         connection.close()
 
 
-def run_module_import(
-    db_path: Path,
-    module_asset_root: Path,
-    job_id: str,
-    *,
-    synchronous: str = "FULL",
-    parse_policy: DocumentParsePolicy | None = None,
-) -> None:
-    connection = connect(db_path, synchronous=synchronous)
-    storage = ModuleDocumentStorage(module_asset_root)
-    try:
-        init_db(connection)
-        repo = Repository(connection)
-        job = repo.claim_module_import_job(job_id)
-        connection.commit()
-        if job is None:
-            return
-        _process_claimed_module_import(
-            connection,
-            storage,
-            job,
-            parse_policy=parse_policy or DocumentParsePolicy(),
-        )
-    finally:
-        connection.close()
-
-
 class ModuleImportWorker:
     """One local thread that drains the SQLite-backed module import queue."""
 
@@ -119,12 +97,14 @@ class ModuleImportWorker:
         synchronous: str = "FULL",
         poll_interval_seconds: float = 0.25,
         parse_policy: DocumentParsePolicy | None = None,
+        settings: Settings | None = None,
     ):
         self.db_path = db_path
         self.module_asset_root = module_asset_root
         self.synchronous = synchronous
         self.poll_interval_seconds = poll_interval_seconds
         self.parse_policy = parse_policy or DocumentParsePolicy()
+        self.settings = settings
         self._stop_event = Event()
         self._wake_event = Event()
         self._ready_event = Event()
@@ -213,6 +193,7 @@ class ModuleImportWorker:
                     storage,
                     job,
                     parse_policy=self.parse_policy,
+                    model_fallback_settings=self.settings,
                 )
         except BaseException as exc:  # noqa: BLE001 - propagate startup failure to lifespan
             self._startup_error = exc
@@ -233,6 +214,7 @@ def _process_claimed_module_import(
     job: dict,
     *,
     parse_policy: DocumentParsePolicy,
+    model_fallback_settings: Settings | None = None,
 ) -> None:
     repo = Repository(connection)
     job_id = str(job["id"])
@@ -285,6 +267,15 @@ def _process_claimed_module_import(
             assets=tuple(stored_assets),
         )
         connection.commit()
+        # 导入完成后自动抽取知识候选并确认结构化实体，让 AI 只基于
+        # 已确认记录叙事。失败不阻塞导入：抽取是后台 best-effort。
+        if model_fallback_settings is not None:
+            _auto_extract_imported_module(
+                connection,
+                repo,
+                job_id,
+                fallback_settings=model_fallback_settings,
+            )
     except ModuleImportClaimLost:
         connection.rollback()
     except Exception as exc:  # noqa: BLE001 - persistent job boundary records parser failures
@@ -300,6 +291,51 @@ def _process_claimed_module_import(
             # The campaign/job may have been deliberately deleted while a
             # parser was running; that must not terminate the durable worker.
             connection.rollback()
+
+
+def _auto_extract_imported_module(
+    connection: sqlite3.Connection,
+    repo: Repository,
+    job_id: str,
+    *,
+    fallback_settings: Settings,
+) -> None:
+    """Best-effort extraction with one bounded retry after a model switch."""
+
+    from ai_kp.infrastructure.modules.auto_extract import (
+        auto_extract_and_confirm_entities,
+    )
+
+    module_id = repo.get_module_import_job(job_id).get("module_id")
+    if not module_id:
+        return
+    module = repo.get_module(str(module_id))
+    run = repo.get_active_campaign_module_run(str(module["campaign_id"]))
+    auto_approve = bool(
+        run is not None
+        and str(run.get("module_id")) == str(module_id)
+        and str(run.get("automation_level") or "conservative") == "ai_kp"
+    )
+    for attempt in range(2):
+        model_execution = ModelExecutionSnapshot.capture(repo, fallback_settings)
+        try:
+            auto_extract_and_confirm_entities(
+                connection,
+                str(module_id),
+                settings=model_execution.settings,
+                auto_approve=auto_approve,
+            )
+            model_execution.revalidate(repo)
+            connection.commit()
+            return
+        except ModelExecutionSuperseded:
+            connection.rollback()
+            if attempt == 0:
+                continue
+            return
+        except Exception:  # noqa: BLE001 - extraction never invalidates the import
+            connection.rollback()
+            return
 
 
 def _canonical_asset_suffix(mime_type: str) -> str:

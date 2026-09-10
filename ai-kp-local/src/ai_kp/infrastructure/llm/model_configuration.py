@@ -78,8 +78,10 @@ def public_model_configuration(
             "model": settings.llm_model,
             "local_model_path": None,
             "local_port": 8011,
+            "semantic_profile": "small",
             "api_key_configured": bool(settings.llm_api_key),
             "persisted": False,
+            "version": 0,
         }
     return {
         "provider_type": configuration["provider_type"],
@@ -87,8 +89,10 @@ def public_model_configuration(
         "model": configuration["model"],
         "local_model_path": configuration["local_model_path"],
         "local_port": configuration["local_port"],
+        "semantic_profile": configuration.get("semantic_profile", "small"),
         "api_key_configured": bool(configuration.get("api_key")),
         "persisted": True,
+        "version": int(configuration["version"]),
         "updated_at": configuration["updated_at"],
     }
 

@@ -19,6 +19,11 @@ from ai_kp.infrastructure.modules.legacy_doc_converter import (
     convert_legacy_doc_to_docx,
     terminate_recorded_converter_group,
 )
+from ai_kp.infrastructure.modules.mineru_parser import (
+    MineruParseError,
+    parse_with_mineru,
+    terminate_recorded_mineru_group,
+)
 from ai_kp.platform.modules.documents import (
     MAX_ASSETS,
     MAX_DOCUMENT_CHUNKS,
@@ -30,6 +35,7 @@ from ai_kp.platform.modules.documents import (
     DocumentChunk,
     ExtractedModuleDocument,
 )
+from ai_kp.platform.modules.pdf_quality import assess_native_pdf
 
 _RESULT_MANIFEST_MAX_BYTES = max(
     128 * 1024 * 1024,
@@ -46,11 +52,15 @@ class ModuleDocumentSandboxError(ValueError):
 class DocumentParsePolicy(DocumentProcessPolicy):
     """Resource budget applied to one PDF, DOC, or DOCX parsing attempt."""
 
-    timeout_seconds: float = 90
-    memory_limit_mib: int = 1024
-    cpu_seconds: int = 60
+    timeout_seconds: float = 10_800
+    memory_limit_mib: int = 8192
+    cpu_seconds: int = 10_800
     legacy_doc_converter_command: str = "soffice"
     legacy_doc_converter_timeout_seconds: float = 60
+    parser: str = "native_first"
+    mineru_command: str = "mineru"
+    mineru_backend: str = "pipeline"
+    mineru_model_source: str = "modelscope"
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -63,6 +73,10 @@ class DocumentParsePolicy(DocumentProcessPolicy):
             raise ValueError("Legacy DOC converter command is invalid")
         if self.legacy_doc_converter_timeout_seconds <= 0:
             raise ValueError("Legacy DOC converter timeout must be positive")
+        if self.parser not in {"native_first", "builtin", "mineru"}:
+            raise ValueError("Module document parser must be native_first, builtin, or mineru")
+        if self.mineru_backend not in {"pipeline", "vlm-engine", "hybrid-engine"}:
+            raise ValueError("Unsupported local MinerU backend")
 
 
 def extract_module_document_isolated(
@@ -87,7 +101,8 @@ def extract_module_document_isolated(
                 expected_hash=expected_hash,
             ),
             termination_hook=lambda result_root, force: (
-                terminate_recorded_converter_group(result_root, force=force)
+                terminate_recorded_converter_group(result_root, force=force),
+                terminate_recorded_mineru_group(result_root, force=force),
             ),
         )
     except DocumentProcessSandboxError as exc:
@@ -112,10 +127,6 @@ def _parse_document_child(
         if hashlib.sha256(data).hexdigest() != expected_hash:
             raise ValueError("KP 本源文件哈希校验失败")
 
-        # Resolve the parser after applying limits; every untrusted decoding
-        # path executes inside the child resource budget.
-        from ai_kp.platform.modules.documents import extract_module_document
-
         if Path(source_filename.lower()).suffix == ".doc":
             converted = convert_legacy_doc_to_docx(
                 data,
@@ -126,14 +137,21 @@ def _parse_document_child(
                     max(0.1, policy.timeout_seconds * 0.8),
                 ),
             )
-            extracted = extract_module_document(
-                converted,
-                f"{Path(source_filename).stem}.docx",
-                title=title,
-            )
-            extracted = replace(extracted, source_hash=expected_hash)
+            parse_data = converted
+            parse_filename = f"{Path(source_filename).stem}.docx"
         else:
-            extracted = extract_module_document(data, source_filename, title=title)
+            parse_data = data
+            parse_filename = source_filename
+        extracted = _parse_with_policy(
+            parse_data,
+            parse_filename,
+            result_root=Path(result_root),
+            title=title,
+            source_hash=expected_hash,
+            policy=policy,
+        )
+        if Path(source_filename.lower()).suffix == ".doc":
+            extracted = replace(extracted, source_hash=expected_hash)
         if extracted.source_hash != expected_hash:
             raise ValueError("解析结果与源文件哈希不一致")
         _write_child_result(Path(result_root), extracted)
@@ -142,6 +160,89 @@ def _parse_document_child(
     except BaseException as exc:  # noqa: BLE001 - child must report bounded failure
         message = str(exc).strip() or type(exc).__name__
         write_process_error(Path(result_root), message)
+
+
+def _parse_with_policy(
+    data: bytes,
+    filename: str,
+    *,
+    result_root: Path,
+    title: str,
+    source_hash: str,
+    policy: DocumentParsePolicy,
+) -> ExtractedModuleDocument:
+    if policy.parser == "mineru":
+        return _parse_mineru(
+            data,
+            filename,
+            result_root=result_root,
+            title=title,
+            source_hash=source_hash,
+            policy=policy,
+        )
+
+    from ai_kp.platform.modules.documents import extract_module_document
+
+    native = extract_module_document(data, filename, title=title)
+    if policy.parser == "builtin" or native.source_type != "pdf":
+        return native
+
+    quality = assess_native_pdf(native)
+    if quality.accepted:
+        return native
+    try:
+        fallback = _parse_mineru(
+            data,
+            filename,
+            result_root=result_root,
+            title=title,
+            source_hash=source_hash,
+            policy=policy,
+        )
+    except MineruParseError as exc:
+        reasons = ", ".join(quality.reasons)
+        raise ValueError(f"内置 PDF 文本质量不足（{reasons}）；MinerU 降级失败：{exc}") from exc
+    return _add_review_flags(
+        fallback,
+        ("native_pdf_fallback", *quality.reasons),
+    )
+
+
+def _parse_mineru(
+    data: bytes,
+    filename: str,
+    *,
+    result_root: Path,
+    title: str,
+    source_hash: str,
+    policy: DocumentParsePolicy,
+) -> ExtractedModuleDocument:
+    return parse_with_mineru(
+        data,
+        filename,
+        result_root,
+        title=title,
+        source_hash=source_hash,
+        command=policy.mineru_command,
+        backend=policy.mineru_backend,
+        model_source=policy.mineru_model_source,
+        timeout_seconds=max(1, policy.timeout_seconds * 0.95),
+    )
+
+
+def _add_review_flags(
+    document: ExtractedModuleDocument,
+    flags: tuple[str, ...],
+) -> ExtractedModuleDocument:
+    return replace(
+        document,
+        chunks=tuple(
+            replace(chunk, review_flags=(*flags, *chunk.review_flags)) for chunk in document.chunks
+        ),
+        assets=tuple(
+            replace(asset, review_flags=(*flags, *asset.review_flags)) for asset in document.assets
+        ),
+    )
 
 
 def _write_child_result(
@@ -186,6 +287,9 @@ def _write_child_result(
                 "classification_confidence": chunk.classification_confidence,
                 "style_annotations": list(chunk.style_annotations),
                 "review_flags": list(chunk.review_flags),
+                "heading_level": chunk.heading_level,
+                "section_path": list(chunk.section_path),
+                "scene_key": chunk.scene_key,
             }
             for chunk in extracted.chunks
         ],
@@ -270,6 +374,13 @@ def _decode_chunk(item: object) -> DocumentChunk:
         classification_confidence=float(item["classification_confidence"]),
         style_annotations=_string_tuple(item["style_annotations"]),
         review_flags=_string_tuple(item["review_flags"]),
+        heading_level=_optional_int(item.get("heading_level")),
+        section_path=_string_tuple(item.get("section_path", [])),
+        scene_key=(
+            str(item["scene_key"])
+            if isinstance(item.get("scene_key"), str) and item["scene_key"].strip()
+            else None
+        ),
     )
 
 

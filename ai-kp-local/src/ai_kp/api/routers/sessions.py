@@ -9,17 +9,28 @@ from ai_kp.api.dependencies import (
     get_repo,
 )
 from ai_kp.api.schemas import (
+    CampaignSetupConfigInput,
     SessionCreate,
     SessionJoin,
     SessionKpCredentialRecovery,
     SessionMemberPcAssign,
+    SessionSafetyResolveInput,
+    SessionSafetyTriggerInput,
     SessionSeatClaim,
     SessionSeatCreate,
     SessionSeatPcAssign,
+    SessionZeroConfirmInput,
+    SessionZeroPreferencesInput,
 )
+from ai_kp.application.auto_kp_queue_service import AutoKpQueueService
 from ai_kp.application.session_service import SessionService
+from ai_kp.application.session_zero_service import SessionZeroService
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.platform.sessions.models import AuthenticatedMember, AuthenticatedPlayer
+from ai_kp.platform.sessions.session_zero import (
+    CampaignSetupConfig,
+    SessionZeroPreferences,
+)
 
 router = APIRouter()
 
@@ -57,6 +68,7 @@ def join_campaign_session(
     return SessionService(repo).join(
         payload.join_code,
         display_name=payload.display_name,
+        role=payload.role,
     )
 
 
@@ -255,3 +267,101 @@ def recover_session_seat(
     repo: Repository = Depends(get_repo),
 ) -> dict:
     return SessionService(repo).recover_seat(seat_id, player)
+
+
+@router.get("/campaigns/{campaign_id}/session-zero")
+def get_session_zero(
+    campaign_id: str,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp", "player"))
+    return SessionZeroService(repo).view(identity)
+
+
+@router.put("/campaigns/{campaign_id}/session-zero/config")
+def save_session_zero_config(
+    campaign_id: str,
+    payload: CampaignSetupConfigInput,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp",))
+    values = payload.model_dump()
+    expected_version = values.pop("expected_version")
+    return SessionZeroService(repo).save_config(
+        identity,
+        expected_version=expected_version,
+        config=CampaignSetupConfig.model_validate(values),
+    )
+
+
+@router.put("/campaigns/{campaign_id}/session-zero/preferences")
+def save_session_zero_preferences(
+    campaign_id: str,
+    payload: SessionZeroPreferencesInput,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp", "player"))
+    values = payload.model_dump()
+    expected_version = values.pop("expected_version")
+    return SessionZeroService(repo).save_preferences(
+        identity,
+        expected_version=expected_version,
+        preferences=SessionZeroPreferences.model_validate(values),
+    )
+
+
+@router.post("/campaigns/{campaign_id}/session-zero/confirm")
+def confirm_session_zero(
+    campaign_id: str,
+    payload: SessionZeroConfirmInput,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp", "player"))
+    return SessionZeroService(repo).confirm(
+        identity,
+        revision_id=payload.revision_id,
+        expected_version=payload.expected_version,
+    )
+
+
+@router.post("/campaigns/{campaign_id}/safety-tool")
+def trigger_session_safety_tool(
+    campaign_id: str,
+    payload: SessionSafetyTriggerInput,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp", "player"))
+    return SessionZeroService(repo).trigger_safety(
+        identity, response_kind=payload.response_kind
+    )
+
+
+@router.post("/campaigns/{campaign_id}/safety-tool/{event_id}/resolve")
+def resolve_session_safety_tool(
+    campaign_id: str,
+    event_id: str,
+    payload: SessionSafetyResolveInput,
+    request: Request,
+    identity: AuthenticatedMember = Depends(get_identity),
+    repo: Repository = Depends(get_repo),
+) -> dict:
+    require_campaign_role(identity, campaign_id, ("kp", "player"))
+    result = SessionZeroService(repo).resolve_safety(
+        identity,
+        event_id=event_id,
+        resolution_kind=payload.resolution_kind,
+    )
+    queued = False
+    for encounter in repo.list_coc7_encounters(campaign_id, identity.session_id):
+        if encounter["status"] != "active":
+            continue
+        if AutoKpQueueService(repo).enqueue_encounter_turn(str(encounter["id"])):
+            queued = True
+    if queued:
+        request.app.state.auto_kp_worker.wake()
+    return result

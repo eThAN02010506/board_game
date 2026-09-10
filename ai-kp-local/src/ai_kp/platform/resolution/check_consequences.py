@@ -225,7 +225,7 @@ def _normalize_check(check: Mapping[str, Any]) -> dict[str, Any]:
     if type(hidden) is not bool:
         raise ValueError(f"{check_id}.hidden must be a boolean")
 
-    return {
+    normalized = {
         "id": check_id,
         "status": status,
         "hidden": hidden,
@@ -281,6 +281,58 @@ def _normalize_check(check: Mapping[str, Any]) -> dict[str, Any]:
             field_name=f"{check_id}.source_reference",
         ),
     }
+    check_plan = _json_object(
+        check.get("check_plan") or {},
+        field_name=f"{check_id}.check_plan",
+    )
+    normalized["consequence_contract"] = {
+        "failure_stakes": str(check_plan.get("failure_stakes") or "").strip(),
+        "pushed_failure_stakes": str(
+            check_plan.get("pushed_failure_stakes") or ""
+        ).strip(),
+        "automatic_information": _normalize_json(
+            check_plan.get("automatic_information") or [],
+            field_name=f"{check_id}.check_plan.automatic_information",
+        ),
+    }
+    actions = check.get("actions")
+    if isinstance(actions, list):
+        pushed = next(
+            (
+                item
+                for item in actions
+                if isinstance(item, dict)
+                and item.get("action_type") == "pushed"
+                and str(item.get("reason") or "").strip()
+            ),
+            None,
+        )
+        if pushed is not None:
+            normalized["push_approach"] = _required_text(
+                pushed.get("reason"),
+                field_name=f"{check_id}.push_approach",
+                collapse=True,
+            )
+    push_decision = check.get("push_decision")
+    if push_decision is not None:
+        decision = _json_object(
+            push_decision, field_name=f"{check_id}.push_decision"
+        )
+        if decision.get("decision") != "accept_failure":
+            raise ValueError(f"{check_id}.push_decision is unsupported")
+        normalized["push_decision"] = {
+            "decision": "accept_failure",
+            "actor_member_id": _required_text(
+                decision.get("actor_member_id"),
+                field_name=f"{check_id}.push_decision.actor_member_id",
+            ),
+            "reason": _required_text(
+                decision.get("reason"),
+                field_name=f"{check_id}.push_decision.reason",
+                collapse=True,
+            ),
+        }
+    return normalized
 
 
 def _prepare_checks(
@@ -343,6 +395,40 @@ def _prepare_checks(
     return origin, ordered, children
 
 
+def has_pending_push_decision(
+    checks: Iterable[Mapping[str, Any]],
+) -> bool:
+    """Return whether a failed check still needs its player-owned push choice.
+
+    This predicate deliberately accepts the repository-shaped check mappings
+    instead of the stricter consequence snapshot schema.  Callers use it before
+    a terminal consequence is legal, when a failed root may still be pushable.
+    A push is no longer pending once a child exists or the player explicitly
+    accepts the ordinary failure.
+    """
+
+    materialized = tuple(checks)
+    pushed_parent_ids = {
+        str(check["pushed_from_check_id"])
+        for check in materialized
+        if check.get("pushed_from_check_id") is not None
+    }
+    for check in materialized:
+        if (
+            check.get("status") not in {"resolved", "overridden"}
+            or check.get("passed") is not False
+            or check.get("allow_push") is not True
+            or str(check.get("id")) in pushed_parent_ids
+        ):
+            continue
+        decision = check.get("push_decision")
+        if not isinstance(decision, Mapping) or (
+            decision.get("decision") != "accept_failure"
+        ):
+            return True
+    return False
+
+
 def _canonical_payload(
     checks: Iterable[Mapping[str, Any]],
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, list[str]]]:
@@ -378,6 +464,39 @@ def check_consequence_fingerprint(
     return _payload_fingerprint(payload)
 
 
+def exact_kernel_outcome(
+    preview: Mapping[str, Any],
+    checks: Iterable[Mapping[str, Any]],
+) -> str:
+    """Map terminal checks to the most specific branch authorized by a preview."""
+
+    _origin, ordered, children = _prepare_checks(checks)
+    if any(item["status"] == "cancelled" for item in ordered):
+        raise ValueError("Cancelled checks cannot authorize a kernel outcome")
+    leaves = [item for item in ordered if not children[item["id"]]]
+    if len(leaves) != 1:
+        raise ValueError(
+            "Exact kernel outcomes require one independent resolved check chain"
+        )
+    leaf = leaves[0]
+
+    available = {
+        str(item.get("outcome_key"))
+        for item in preview.get("outcome_branches") or ()
+        if isinstance(item, Mapping)
+    }
+    if (
+        leaf.get("passed") is False
+        and leaf.get("pushed_from_check_id")
+        and "pushed_failure" in available
+    ):
+        return "pushed_failure"
+    level = str(leaf["success_level"]).strip()
+    if level in available:
+        return level
+    return "success" if leaf.get("passed") is True else "failure"
+
+
 def build_check_consequence_snapshot(
     checks: Iterable[Mapping[str, Any]],
     opposed_checks: Iterable[Mapping[str, Any]] = (),
@@ -396,6 +515,21 @@ def build_check_consequence_snapshot(
             chain_ids.append(parent_id)
             parent_id = by_id[parent_id]["pushed_from_check_id"]
         chain_ids.reverse()
+        chain = [by_id[item] for item in chain_ids]
+        push_approach = next(
+            (
+                str(item["push_approach"])
+                for item in chain
+                if item.get("push_approach")
+            ),
+            "",
+        )
+        pushed_failure = (
+            len(chain_ids) > 1
+            and check["passed"] is False
+            and check["status"] in {"resolved", "overridden"}
+        )
+        consequence_contract = dict(check["consequence_contract"])
         effective_results.append(
             {
                 "check_id": check["id"],
@@ -410,6 +544,26 @@ def build_check_consequence_snapshot(
                 "passed": check["passed"],
                 "was_overridden": check["status"] == "overridden",
                 "push_chain_ids": chain_ids,
+                "outcome": (
+                    "pushed_failure"
+                    if pushed_failure
+                    else "success" if check["passed"] is True else "failure"
+                ),
+                "push_approach": push_approach,
+                "failure_stakes": consequence_contract["failure_stakes"],
+                "pushed_failure_stakes": consequence_contract[
+                    "pushed_failure_stakes"
+                ],
+                "accepted_stakes": (
+                    consequence_contract["pushed_failure_stakes"]
+                    if pushed_failure
+                    else consequence_contract["failure_stakes"]
+                    if check["passed"] is False
+                    else ""
+                ),
+                "automatic_information": consequence_contract[
+                    "automatic_information"
+                ],
                 "ruleset": check["ruleset"],
             }
         )
@@ -452,9 +606,53 @@ def build_check_consequence_snapshot(
     }
 
 
+def project_public_check_consequences(
+    snapshot: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep observable fiction while dropping every mechanical result field.
+
+    A blind check hides its roll, target, skill and success tier, not effects the
+    characters can observe. The only text crossing this boundary was fixed
+    before the roll: automatic information and player-accepted failure stakes.
+    Outcome narration is supplied separately from the contract's public cues.
+    """
+
+    automatic_information: list[str] = []
+    accepted_stakes: list[dict[str, Any]] = []
+    results = snapshot.get("effective_results")
+    if not isinstance(results, (list, tuple)):
+        results = ()
+    for result in results:
+        if not isinstance(result, Mapping):
+            continue
+        information = result.get("automatic_information")
+        if isinstance(information, (list, tuple)):
+            for item in information:
+                text = str(item).strip()
+                if text and text not in automatic_information:
+                    automatic_information.append(text)
+        stakes = str(result.get("accepted_stakes") or "").strip()
+        if not stakes or any(item["text"] == stakes for item in accepted_stakes):
+            continue
+        accepted_stakes.append(
+            {
+                "text": stakes,
+                "push_approach": str(result.get("push_approach") or "").strip(),
+                "was_pushed": result.get("outcome") == "pushed_failure",
+            }
+        )
+    return {
+        "automatic_information": automatic_information,
+        "accepted_stakes": accepted_stakes,
+    }
+
+
 __all__ = [
     "CHECK_CONSEQUENCE_SCHEMA_VERSION",
     "HIDDEN_CHECK_PUBLIC_NARRATION",
     "build_check_consequence_snapshot",
     "check_consequence_fingerprint",
+    "exact_kernel_outcome",
+    "has_pending_push_decision",
+    "project_public_check_consequences",
 ]

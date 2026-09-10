@@ -24,14 +24,15 @@ class WorldRepository(SQLiteRepository):
         ruleset_version: str = "2002c",
         character_schema_version: str = "coc7-investigator-v1",
         event_schema_version: str = "coc7-event-v1",
+        session_zero_required: bool = False,
     ) -> dict:
         campaign_id = new_id("camp")
         self.connection.execute(
             """
             INSERT INTO campaigns
               (id, title, system, current_time, ruleset_id, ruleset_version,
-               character_schema_version, event_schema_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               character_schema_version, event_schema_version, session_zero_required)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 campaign_id,
@@ -42,6 +43,7 @@ class WorldRepository(SQLiteRepository):
                 ruleset_version,
                 character_schema_version,
                 event_schema_version,
+                int(session_zero_required),
             ),
         )
         return self.get_campaign(campaign_id)
@@ -177,6 +179,10 @@ class WorldRepository(SQLiteRepository):
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(campaign_id, npc_id) DO UPDATE SET
               role = excluded.role,
+              first_seen_time = COALESCE(
+                campaign_npcs.first_seen_time,
+                excluded.first_seen_time
+              ),
               last_seen_time = COALESCE(excluded.last_seen_time, campaign_npcs.last_seen_time),
               relationship_score = excluded.relationship_score,
               notes = excluded.notes
@@ -252,7 +258,7 @@ class WorldRepository(SQLiteRepository):
             rows = self.connection.execute(
                 """
                 SELECT * FROM modules
-                WHERE campaign_id = ? OR campaign_id IS NULL
+                WHERE campaign_id = ?
                 ORDER BY created_at DESC
                 """,
                 (campaign_id,),
@@ -297,6 +303,10 @@ class WorldRepository(SQLiteRepository):
             )
             item["review_flags"] = decode_json_field(
                 item.pop("review_flags_json", "[]"),
+                [],
+            )
+            item["section_path"] = decode_json_field(
+                item.pop("section_path_json", "[]"),
                 [],
             )
         return result

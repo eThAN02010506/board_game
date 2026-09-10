@@ -10,6 +10,7 @@ from ai_kp.api.main import create_app
 from ai_kp.core.config import Settings
 from ai_kp.core.db import connect, init_db
 from ai_kp.infrastructure.database.repositories import Repository
+from ai_kp.platform.modules.ingestion import ModuleChunk
 from ai_kp.security.tokens import hash_access_token, hash_join_code
 from tests.support_investigators import coc7_sheet, create_approved_player
 
@@ -70,6 +71,27 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
         self.other_investigator = approved_other["investigator"]
         self.player_a = approved_a["bundle"]
         self.player_a_headers = approved_a["headers"]
+        session_zero = (
+            await self.client.get(
+                f"/campaigns/{self.campaign_a['id']}/session-zero",
+                headers=self.kp_a_headers,
+            )
+        ).json()
+        confirmation = {
+            "revision_id": session_zero["revision"]["id"],
+            "expected_version": session_zero["revision"]["version"],
+        }
+        for headers in (
+            self.kp_a_headers,
+            approved_a["headers"],
+            approved_other["headers"],
+        ):
+            response = await self.client.post(
+                f"/campaigns/{self.campaign_a['id']}/session-zero/confirm",
+                headers=headers,
+                json=confirmation,
+            )
+            self.assertEqual(response.status_code, 200, response.text)
         self.map_a = (
             await self.client.post(
                 f"/campaigns/{self.campaign_a['id']}/maps/generate",
@@ -540,6 +562,46 @@ class SessionPermissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(first.json()["proposal_id"])
         self.assertEqual(first.json()["location"], "Start")
         self.assertEqual(len(kp_actions.json()), 1)
+
+    async def test_completed_module_run_rejects_new_player_actions(self) -> None:
+        connection = connect(self.db_path)
+        try:
+            repo = Repository(connection)
+            module = repo.create_module(
+                self.campaign_a["id"],
+                "Completed module",
+                [
+                    ModuleChunk(
+                        title="Scene", text="An ending.", visibility="kp", order_index=0
+                    )
+                ],
+            )
+            run = repo.start_campaign_module_run(
+                campaign_id=self.campaign_a["id"], module_id=module["id"],
+                current_scene_key="ending", active_spoiler_tags=[], state={},
+                started_by_member_id=self.player_a["member"]["id"],
+            )
+            repo.update_campaign_module_run(
+                run["id"], {"expected_version": run["version"], "status": "completed"}
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        play_state = await self.client.get(
+            f"/campaigns/{self.campaign_a['id']}/module-runs/play-state",
+            headers=self.player_a_headers,
+        )
+        submitted = await self.client.post(
+            f"/campaigns/{self.campaign_a['id']}/actions",
+            headers=self.player_a_headers,
+            json={"action_text": "I act after the ending."},
+        )
+
+        self.assertEqual(play_state.status_code, 200)
+        self.assertEqual(play_state.json()["status"], "completed")
+        self.assertFalse(play_state.json()["accepts_actions"])
+        self.assertEqual(submitted.status_code, 409)
 
     async def test_player_cannot_use_kp_write_endpoints(self) -> None:
         attempts = [

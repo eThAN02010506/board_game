@@ -19,6 +19,7 @@ class ModuleGraphService:
         payload: ModuleEntityCreate,
         *,
         member_id: str,
+        extra_candidate_ids: tuple[str, ...] = (),
     ) -> dict:
         candidate = self._require_approved_source(
             module_id,
@@ -34,7 +35,27 @@ class ModuleGraphService:
             spoiler_tag=payload.spoiler_tag,
             label="Entity",
         )
-        return self.repo.create_module_entity(module_id, payload, member_id=member_id)
+        validated_extra: list[str] = []
+        normalized_name = normalize_entity_name(payload.name)
+        for extra in dict.fromkeys(extra_candidate_ids):
+            if extra == payload.source_candidate_id:
+                continue
+            extra_candidate = self._require_approved_source(module_id, str(extra))
+            attributed_name = normalize_entity_name(
+                str(extra_candidate.get("entity_name") or "")
+            )
+            if attributed_name:
+                if attributed_name != normalized_name:
+                    raise ValueError("Entity source attribution does not match entity name")
+            elif normalized_name not in self._candidate_text(extra_candidate):
+                raise ValueError("Entity name is not present in an additional source")
+            validated_extra.append(str(extra))
+        return self.repo.create_module_entity(
+            module_id,
+            payload,
+            member_id=member_id,
+            extra_candidate_ids=tuple(validated_extra),
+        )
 
     def create_relation(
         self,
@@ -80,6 +101,31 @@ class ModuleGraphService:
                 label=label,
             )
         return self.repo.create_module_relation(module_id, payload, member_id=member_id)
+
+    def attach_candidate(
+        self,
+        module_id: str,
+        entity_id: str,
+        candidate_id: str,
+    ) -> dict:
+        """Attach current approved evidence without changing the entity's scope."""
+        entity = self.repo.get_module_entity(entity_id)
+        if entity["module_id"] != module_id:
+            raise ValueError("Entity belongs to another module")
+        candidate = self._require_approved_source(module_id, candidate_id)
+        attributed_type = str(candidate.get("entity_type") or "").strip()
+        if attributed_type and attributed_type != entity["entity_type"]:
+            raise ValueError("Entity source attribution does not match entity type")
+        normalized_name = normalize_entity_name(str(entity["name"]))
+        attributed_name = normalize_entity_name(
+            str(candidate.get("entity_name") or "")
+        )
+        if attributed_name:
+            if attributed_name != normalized_name:
+                raise ValueError("Entity source attribution does not match entity name")
+        elif normalized_name not in self._candidate_text(candidate):
+            raise ValueError("Entity name is not present in its approved source candidate")
+        return self.repo.link_candidate_to_entity(entity_id, candidate_id)
 
     def check_reachability(
         self,

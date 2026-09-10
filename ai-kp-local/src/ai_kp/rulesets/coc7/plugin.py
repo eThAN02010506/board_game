@@ -8,7 +8,13 @@ from ai_kp.platform.randomness import (
     DiceRollRequest,
     DiceRollResult,
 )
-from ai_kp.rulesets.base import RulesetManifest
+from ai_kp.platform.resolution.check_catalog import ScenarioCheckCatalog
+from ai_kp.platform.resolution.effect_catalog import ScenarioEffectCatalog
+from ai_kp.rulesets.base import (
+    RulesetEffectFollowUp,
+    RulesetEffectTransition,
+    RulesetManifest,
+)
 from ai_kp.rulesets.coc7.character.pipeline import (
     normalize_character_sheet,
     validate_character_sheet,
@@ -27,6 +33,8 @@ from ai_kp.rulesets.coc7.mechanics.skill_check import (
     SuccessLevel,
     resolve_d100,
 )
+from ai_kp.rulesets.coc7.scenario_checks import coc7_scenario_check_catalog
+from ai_kp.rulesets.coc7.scenario_effects import coc7_scenario_effect_catalog
 from ai_kp.rulesets.sdk.characters import CharacterSheetValidation
 
 
@@ -89,6 +97,82 @@ class Coc7Ruleset:
 
     def list_skill_catalog(self) -> list[dict[str, Any]]:
         return list_coc7_skill_catalog()
+
+    def scenario_check_catalog(self) -> ScenarioCheckCatalog:
+        return coc7_scenario_check_catalog()
+
+    def scenario_effect_catalog(self) -> ScenarioEffectCatalog:
+        return coc7_scenario_effect_catalog()
+
+    def translate_scenario_effect(
+        self, effect_key: str, payload: Mapping[str, Any]
+    ) -> RulesetEffectTransition:
+        errors = self.scenario_effect_catalog().validate_effect(
+            effect_key, dict(payload)
+        )
+        if errors:
+            raise ValueError("Invalid CoC7 scenario effect: " + "; ".join(errors))
+        if effect_key == "san_loss":
+            return RulesetEffectTransition(
+                command_type="san_loss",
+                payload={"loss_expression": payload["loss"]},
+            )
+        if effect_key == "damage":
+            return RulesetEffectTransition(
+                command_type="damage",
+                payload={"damage_expression": payload["damage"]},
+                follow_ups=(
+                    RulesetEffectFollowUp(
+                        result_flag="requires_major_wound_con_check",
+                        command_type="major_wound_con",
+                        payload={},
+                    ),
+                    RulesetEffectFollowUp(
+                        result_flag="requires_dying_con_check",
+                        command_type="dying_con",
+                        payload={},
+                    ),
+                ),
+            )
+        resource_effects = {
+            "san_restore": ("san", "gain"),
+            "mp_gain": ("mp", "gain"),
+            "mp_loss": ("mp", "loss"),
+            "luck_gain": ("luck", "gain"),
+            "luck_reduction": ("luck", "loss"),
+        }
+        if effect_key in resource_effects:
+            resource, direction = resource_effects[effect_key]
+            return RulesetEffectTransition(
+                command_type="resource_adjust",
+                payload={
+                    "resource": resource,
+                    "direction": direction,
+                    "amount_expression": payload["amount"],
+                },
+            )
+        if effect_key in {"armor_gain", "armor_reduction"}:
+            return RulesetEffectTransition(
+                command_type="armor_adjust",
+                payload={
+                    "direction": (
+                        "gain" if effect_key == "armor_gain" else "loss"
+                    ),
+                    "amount_expression": payload["amount"],
+                },
+            )
+        if effect_key in {"skill_gain", "skill_reduction"}:
+            return RulesetEffectTransition(
+                command_type="skill_adjust",
+                payload={
+                    "skill_key": payload["skill_key"],
+                    "direction": (
+                        "gain" if effect_key == "skill_gain" else "loss"
+                    ),
+                    "amount_expression": payload["amount"],
+                },
+            )
+        raise ValueError(f"Unsupported CoC7 scenario effect: {effect_key}")
 
     def recommend_skill_points(self, **payload: Any) -> dict[str, Any]:
         return recommend_coc7_skill_points(**payload)

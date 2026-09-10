@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("backend proxy and primary workspaces remain navigable", async ({ page, request }) => {
+test("backend proxy and guest onboarding remain navigable without privileged links", async ({ page, request }) => {
   const health = await request.get("/api/health");
   expect(health.ok()).toBeTruthy();
   await expect(health.json()).resolves.toEqual({ ok: true });
@@ -9,27 +9,18 @@ test("backend proxy and primary workspaces remain navigable", async ({ page, req
   await expect(page.locator(".brand")).toContainText("AI KP Local");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-  const workspaces = [
-    ["团与权限", "/campaigns"],
-    ["调查员", "/investigators"],
-    ["地图棋子", "/maps"],
-    ["规则知识", "/rules"],
-    ["KP 本", "/modules"],
-    ["模型设置", "/models"],
-    ["功能规划", "/planning"]
-  ] as const;
-  for (const [label, pathname] of workspaces) {
-    await page.getByRole("navigation").getByRole("link", { name: label }).click();
-    await expect(page).toHaveURL(new RegExp(`${pathname}$`));
-    await expect(page.getByText(label, { exact: true }).first()).toBeVisible();
-  }
+  await expect(page.getByRole("navigation").getByRole("link")).toHaveCount(1);
+  await page.getByRole("navigation").getByRole("link", { name: "团与权限" }).click();
+  await expect(page).toHaveURL(/\/campaigns$/);
+  await expect(page.getByText("团与权限", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "模型设置" })).toHaveCount(0);
 });
 
-test("unknown paths fall back to the play workspace without a blank screen", async ({ page }) => {
+test("unknown guest paths fall back to onboarding without a blank screen", async ({ page }) => {
   await page.goto("/does-not-exist");
   await expect(page.locator(".brand")).toContainText("AI KP Local");
   await expect(
-    page.getByRole("navigation").getByRole("link", { name: "游玩桌面" })
+    page.getByRole("navigation").getByRole("link", { name: "团与权限" })
   ).toHaveAttribute(
     "aria-current",
     "page"

@@ -5,8 +5,10 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from starlette.types import Message, Receive, Scope, Send
 
 from ai_kp.api.main import create_app
+from ai_kp.api.security import RequestBodyLimitMiddleware
 from ai_kp.bootstrap.settings import Settings
 
 
@@ -152,6 +154,47 @@ def test_json_body_limit_rejects_declared_and_chunked_payloads(
     assert healthy.status_code == 200
 
 
+def test_json_body_replay_preserves_later_disconnect_message() -> None:
+    received: list[Message] = []
+    upstream = iter(
+        (
+            {"type": "http.request", "body": b'\n{"question":"help"}', "more_body": False},
+            {"type": "http.disconnect"},
+        )
+    )
+
+    async def downstream(_scope: Scope, receive: Receive, _send: Send) -> None:
+        received.append(await receive())
+        received.append(await receive())
+
+    async def exercise() -> None:
+        async def receive() -> Message:
+            return next(upstream)
+
+        async def send(_message: Message) -> None:
+            return None
+
+        middleware = RequestBodyLimitMiddleware(downstream, max_json_bytes=1024)
+        await middleware(
+            {
+                "type": "http",
+                "method": "POST",
+                "headers": ((b"content-type", b"application/json"),),
+            },
+            receive,
+            send,
+        )
+
+    asyncio.run(exercise())
+
+    assert received[0] == {
+        "type": "http.request",
+        "body": b'\n{"question":"help"}',
+        "more_body": False,
+    }
+    assert received[1] == {"type": "http.disconnect"}
+
+
 def test_lan_rate_limit_covers_anonymous_player_profile_creation(
     tmp_path: Path,
 ) -> None:
@@ -174,3 +217,28 @@ def test_lan_rate_limit_covers_anonymous_player_profile_creation(
     assert second.status_code == 200
     assert limited.status_code == 429
     assert limited.json()["code"] == "rate_limit_exceeded"
+
+
+def test_lan_rate_limit_covers_director_help(tmp_path: Path) -> None:
+    app = create_app(
+        Settings(
+            db_path=tmp_path / "director-help-rate-limit.sqlite3",
+            deployment_mode="lan",
+            admin_token="lan-admin",
+            trusted_hosts="table.local,testserver",
+            sensitive_rate_limit_requests=2,
+            sensitive_rate_limit_window_seconds=60,
+        )
+    )
+    with TestClient(app, base_url="http://table.local") as client:
+        responses = [
+            client.post(
+                "/module-runs/missing/director/help",
+                json={"question": "What should I reveal?"},
+            )
+            for _ in range(3)
+        ]
+
+    assert [response.status_code for response in responses[:2]] == [401, 401]
+    assert responses[2].status_code == 429
+    assert responses[2].json()["code"] == "rate_limit_exceeded"

@@ -22,7 +22,9 @@ SENSITIVE_POST_PATHS = (
     ("map-generate", re.compile(r"^/campaigns/[^/]+/maps/generate$")),
     ("map-image-generate", re.compile(r"^/maps/[^/]+/image-assets/generate$")),
     ("kp-turn", re.compile(r"^/kp/turn$")),
+    ("kp-turn", re.compile(r"^/campaigns/[^/]+/actions/settle$")),
     ("auto-kp-retry", re.compile(r"^/auto-kp/jobs/[^/]+/retry$")),
+    ("director-help", re.compile(r"^/module-runs/[^/]+/director/help$")),
     ("model-discover", re.compile(r"^/model-settings/discover$")),
     ("image-model-discover", re.compile(r"^/image-model-settings/discover$")),
     ("player-profile-write", re.compile(r"^/player-profiles$")),
@@ -98,7 +100,10 @@ class RequestBodyLimitMiddleware:
                 message = buffered[index]
                 index += 1
                 return message
-            return {"type": "http.request", "body": b"", "more_body": False}
+            # Once the buffered body has been replayed, keep delegating to the
+            # server receive channel. Long-running handlers must still be able
+            # to observe a later ``http.disconnect`` from the client.
+            return await receive()
 
         await self.app(scope, replay, send)
 

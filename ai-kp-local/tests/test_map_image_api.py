@@ -201,7 +201,10 @@ async def _exercise_period_map_realcase(tmp_path: Path) -> None:
         assert published.status_code == 200
         assert player_map_response.status_code == 200
         player_map = player_map_response.json()
-        assert player_map["render"]["selected_asset_id"] == first_asset["id"]
+        # A full-map raster is withheld until this player has discovered every
+        # public location; otherwise it bypasses location-level awareness.
+        assert player_map["render"]["selected_asset_id"] is None
+        assert player_map["locations"] == []
         assert "scene_brief" not in player_map["map_spec"]
         assert "provenance" not in player_map["map_spec"]
         assert "forbidden_visuals" not in player_map["map_spec"]["era"]
@@ -216,8 +219,7 @@ async def _exercise_period_map_realcase(tmp_path: Path) -> None:
         ):
             assert private_key not in player_map
         assert "assets" not in player_map
-        assert selected_content.status_code == 200
-        assert selected_content.headers["content-type"] == "image/png"
+        assert selected_content.status_code == 404
         assert unselected_content.status_code == 404
 
     restarted = create_app(settings)
@@ -240,5 +242,4 @@ async def _exercise_period_map_realcase(tmp_path: Path) -> None:
 
     assert restored_map.status_code == 200
     assert "revision_id" not in restored_map.json()
-    assert restored_asset.status_code == 200
-    assert restored_asset.content == _png(1024, 1024, 7)
+    assert restored_asset.status_code == 404

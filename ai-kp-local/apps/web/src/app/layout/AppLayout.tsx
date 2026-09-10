@@ -43,7 +43,9 @@ export function AppLayout({
       ? t("common.workspace.kp")
       : role === "player"
         ? t("common.workspace.player")
-        : t("common.workspace.local");
+        : role === "observer"
+          ? "观战工作台"
+          : t("common.workspace.local");
 
   useEffect(() => {
     if (initialRoute.current) {

@@ -4,7 +4,7 @@ import {
   Footprints,
   RefreshCw
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { requestJson } from "../../api/client";
@@ -14,7 +14,9 @@ import type {
   CampaignInvestigator,
   Coc7CharacterGameplayState,
   Coc7Encounter,
-  Coc7GameplayEvent
+  Coc7GameplayEvent,
+  EncounterActionOptions,
+  EncounterActionRequest
 } from "../../api/types";
 import {
   CharacterStatePanel,
@@ -52,6 +54,10 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
   const [characterState, setCharacterState] =
     useState<Coc7CharacterGameplayState | null>(null);
   const [events, setEvents] = useState<Coc7GameplayEvent[]>([]);
+  const [encounterActions, setEncounterActions] = useState<EncounterActionOptions | null>(null);
+  const [encounterActionText, setEncounterActionText] = useState("");
+  const [encounterActionKey, setEncounterActionKey] = useState("");
+  const [encounterTargetId, setEncounterTargetId] = useState("");
   const [message, setMessage] = useState(t("gameplay.messageInitial"));
   const [busy, setBusy] = useState(false);
   const [kind, setKind] = useState<"combat" | "chase">("combat");
@@ -61,6 +67,8 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
   const [npcDex, setNpcDex] = useState("55");
   const [npcHp, setNpcHp] = useState("10");
   const [npcMove, setNpcMove] = useState("8");
+  const [npcAttackTarget, setNpcAttackTarget] = useState("50");
+  const [npcDamage, setNpcDamage] = useState("1d3");
   const [locations, setLocations] = useState(t("gameplay.locationsDefault"));
   const [targetParticipantId, setTargetParticipantId] = useState("");
   const [damage, setDamage] = useState("1");
@@ -103,6 +111,16 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
     () => encounters.find((item) => item.id === selectedEncounterId) ?? null,
     [encounters, selectedEncounterId]
   );
+  const activeParticipant = useMemo(() => {
+    if (!selectedEncounter || selectedEncounter.status !== "active") return null;
+    const activeId = selectedEncounter.state.turn_order[selectedEncounter.turn_index];
+    return (
+      selectedEncounter.state.participants.find(
+        (item) => item.participant_id === activeId
+      ) ?? null
+    );
+  }, [selectedEncounter]);
+  const encounterPollGeneration = useRef(0);
   const approved = useMemo(
     () => investigators.filter((item) => item.status === "approved" && item.campaign_state),
     [investigators]
@@ -187,6 +205,28 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
         ...current,
         participantId: current.participantId || first
       }));
+      if (identity?.role === "player") {
+        try {
+          const actionOptions = await requestJson<EncounterActionOptions>(
+            `/coc7/encounters/${encounter.id}/action-options`
+          );
+          setEncounterActions(actionOptions);
+          setEncounterActionKey((current) =>
+            actionOptions.options.some((item) => item.action_key === current)
+              ? current
+              : actionOptions.options[0]?.action_key ?? ""
+          );
+          setEncounterTargetId((current) =>
+            actionOptions.targets.some((item) => item.participant_id === current)
+              ? current
+              : actionOptions.targets[0]?.participant_id ?? ""
+          );
+        } catch {
+          setEncounterActions(null);
+        }
+      } else {
+        setEncounterActions(null);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     }
@@ -241,6 +281,34 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
   }, [selectedEncounter?.id, selectedEncounter?.version]);
 
   useEffect(() => {
+    const generation = ++encounterPollGeneration.current;
+    if (!selectedEncounter || selectedEncounter.status !== "active" || !identity) return;
+    const refresh = async () => {
+      try {
+        const current = await requestJson<Coc7Encounter>(
+          `/coc7/encounters/${selectedEncounter.id}`
+        );
+        if (encounterPollGeneration.current !== generation) return;
+        setEncounters((items) =>
+          items.map((item) => (item.id === current.id ? current : item))
+        );
+      } catch {
+        // The normal manual refresh surface remains available during outages.
+      }
+    };
+    const interval = window.setInterval(() => void refresh(), 1500);
+    return () => {
+      encounterPollGeneration.current += 1;
+      window.clearInterval(interval);
+    };
+  }, [
+    selectedEncounter?.id,
+    selectedEncounter?.status,
+    identity?.member_id,
+    identity?.session_id
+  ]);
+
+  useEffect(() => {
     void loadCharacter(selectedInvestigatorId);
   }, [campaign?.id, selectedInvestigatorId, investigators.length]);
 
@@ -278,6 +346,7 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
         participant_id: `investigator-${item.investigator_id}`,
         name: item.name,
         investigator_id: item.investigator_id,
+        side: "party",
         chase_role: (index === 0 ? "fleeing" : "pursuer") as
           | "fleeing"
           | "pursuer",
@@ -292,6 +361,16 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
         move: Number(npcMove),
         max_hp: Number(npcHp),
         current_hp: Number(npcHp),
+        side: "opposition",
+        action_profiles: [
+          {
+            action_key: "primary_attack",
+            label: "主要攻击",
+            kind: "melee",
+            skill_target: Number(npcAttackTarget),
+            damage_expression: npcDamage
+          }
+        ],
         chase_role: "pursuer",
         location_index: 0
       }
@@ -387,6 +466,51 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
           payload
         })
       }
+    );
+  }
+
+  async function previewEncounterAction() {
+    if (!selectedEncounter || !encounterActions || !encounterActionKey) return;
+    const option = encounterActions.options.find(
+      (item) => item.action_key === encounterActionKey
+    );
+    const request = await requestJson<EncounterActionRequest>(
+      `/coc7/encounters/${selectedEncounter.id}/action-previews`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          client_action_id: commandId("encounter-action"),
+          expected_encounter_version: encounterActions.encounter_version,
+          action_text: encounterActionText,
+          action_key: encounterActionKey,
+          target_id: option?.target_required ? encounterTargetId : null
+        })
+      }
+    );
+    setEncounterActions({ ...encounterActions, active_request: request });
+  }
+
+  async function decideEncounterAction(
+    request: EncounterActionRequest,
+    decision: "confirm" | "cancel"
+  ) {
+    await requestJson(`/encounter-action-requests/${request.id}/${decision}`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: request.version })
+    });
+    setEncounterActionText("");
+  }
+
+  async function requestEncounterAgentProposal(request: EncounterActionRequest) {
+    const proposed = await requestJson<EncounterActionRequest>(
+      `/encounter-action-requests/${request.id}/agent-proposal`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expected_version: request.version })
+      }
+    );
+    setEncounterActions((current) =>
+      current ? { ...current, active_request: proposed } : current
     );
   }
 
@@ -491,6 +615,27 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
                 onChange={(event) => setNpcHp(event.target.value)}
               />
             </label>
+            {kind === "combat" && (
+              <>
+                <label>
+                  NPC 攻击技能值
+                  <input
+                    min={1}
+                    max={100}
+                    type="number"
+                    value={npcAttackTarget}
+                    onChange={(event) => setNpcAttackTarget(event.target.value)}
+                  />
+                </label>
+                <label>
+                  NPC 伤害骰
+                  <input
+                    value={npcDamage}
+                    onChange={(event) => setNpcDamage(event.target.value)}
+                  />
+                </label>
+              </>
+            )}
             {kind === "chase" && (
               <>
                 <label>
@@ -621,6 +766,108 @@ export function GameplayWorkbench({ campaign, identity }: Props) {
               </div>
             ))}
           </div>
+
+          {activeParticipant && !activeParticipant.investigator_id && (
+            <p className="status-copy" role="status">
+              AI KP 正在让敌方回合 Agent 从规则允许的动作中选择；骰子、伤害与回合推进由确定性内核结算。
+            </p>
+          )}
+          {selectedEncounter.status === "completed" && (
+            <p className="status-copy" role="status">
+              遭遇已经由规则状态机结束。已存在且可见的敌方物品会进入战利品清单，隐藏属性仍保持隐藏。
+            </p>
+          )}
+
+          {identity.role === "player" && encounterActions && (
+            <section className="player-encounter-action" aria-label="我的遭遇回合">
+              <h3>我的遭遇回合</h3>
+              {encounterActions.active_request ? (
+                <article className="encounter-action-preview">
+                  <strong>{encounterActions.active_request.preview.action_label}</strong>
+                  <p>{encounterActions.active_request.preview.action_text}</p>
+                  {encounterActions.active_request.preview.target_name && (
+                    <small>目标：{encounterActions.active_request.preview.target_name}</small>
+                  )}
+                  {encounterActions.active_request.preview.maneuver_effect && (
+                    <small>有限效果：{encounterActions.active_request.preview.maneuver_effect}</small>
+                  )}
+                  <p>{encounterActions.active_request.preview.public_message}</p>
+                  <div className="inline-actions">
+                    {encounterActions.active_request.status === "needs_attention" &&
+                      encounterActions.active_request.action_key === "improvised" && (
+                        <button
+                          className="primary-button"
+                          disabled={busy}
+                          onClick={() => void runAction("请求遭遇 Agent 提案", () =>
+                            requestEncounterAgentProposal(encounterActions.active_request!))}
+                          type="button"
+                        >让遭遇 Agent 提案</button>
+                      )}
+                    {encounterActions.active_request.status === "awaiting_confirmation" && (
+                      <button
+                        className="primary-button"
+                        disabled={busy}
+                        onClick={() => void runAction("确认遭遇行动", () =>
+                          decideEncounterAction(encounterActions.active_request!, "confirm"))}
+                        type="button"
+                      >确认并结算</button>
+                    )}
+                    <button
+                      className="ghost-button"
+                      disabled={busy}
+                      onClick={() => void runAction("修改遭遇行动", () =>
+                        decideEncounterAction(encounterActions.active_request!, "cancel"))}
+                      type="button"
+                    >修改行动</button>
+                  </div>
+                </article>
+              ) : (
+                <div className="gameplay-command-stack">
+                  <label>
+                    规则动作
+                    <select
+                      aria-label="遭遇规则动作"
+                      value={encounterActionKey}
+                      onChange={(event) => setEncounterActionKey(event.target.value)}
+                    >
+                      {encounterActions.options.map((option) => (
+                        <option key={option.action_key} value={option.action_key}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {encounterActions.options.find((item) => item.action_key === encounterActionKey)?.target_required && (
+                    <label>
+                      目标
+                      <select
+                        aria-label="遭遇行动目标"
+                        value={encounterTargetId}
+                        onChange={(event) => setEncounterTargetId(event.target.value)}
+                      >
+                        {encounterActions.targets.map((target) => (
+                          <option key={target.participant_id} value={target.participant_id}>{target.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label>
+                    台词或具体做法
+                    <textarea
+                      aria-label="遭遇行动描述"
+                      onChange={(event) => setEncounterActionText(event.target.value)}
+                      placeholder="说出台词，或描述你如何行动。"
+                      value={encounterActionText}
+                    />
+                  </label>
+                  <button
+                    className="primary-button"
+                    disabled={busy || !encounterActionText.trim()}
+                    onClick={() => void runAction("预览遭遇行动", previewEncounterAction)}
+                    type="button"
+                  >预览并手动确认</button>
+                </div>
+              )}
+            </section>
+          )}
 
           {identity.role === "kp" && selectedEncounter.status === "active" && (
             <details>

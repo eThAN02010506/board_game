@@ -8,21 +8,29 @@ from threading import Event, RLock, Thread
 from typing import Any
 
 from ai_kp.application.action_adjudication_service import ActionAdjudicationService
+from ai_kp.application.auto_kp_job_authority import AutoKpJobAuthorityValidator
 from ai_kp.application.auto_turn_service import AutoTurnService
 from ai_kp.application.auto_world_expansion_service import AutoWorldExpansionService
+from ai_kp.application.encounter_automation_service import EncounterAutomationService
+from ai_kp.application.kernel_action_service import KernelActionService
 from ai_kp.application.module_run_service import ModuleRunService
-from ai_kp.application.parallel_action_settlement_service import (
-    ParallelActionSettlementCommand,
-    ParallelActionSettlementService,
-)
 from ai_kp.application.turn_service import TurnService, WorldExpansionCommand
 from ai_kp.bootstrap.settings import Settings
 from ai_kp.director.orchestrator import KpOrchestrator
+from ai_kp.infrastructure.auto_kp_parallel_recovery import recover_stale_parallel_job
+from ai_kp.infrastructure.auto_kp_parallel_worker import (
+    execute_parallel_action_job,
+    kp_identity_for_parallel_actions,
+)
 from ai_kp.infrastructure.database.repositories import Repository
 from ai_kp.infrastructure.database.schema import connect, init_db
 from ai_kp.infrastructure.llm.call_registry import CampaignAiCallRegistry
+from ai_kp.infrastructure.llm.model_execution import ModelExecutionSnapshot
 from ai_kp.infrastructure.llm.openai_compatible import OpenAICompatibleClient
 from ai_kp.platform.sessions.models import AuthenticatedMember
+
+AUTO_KP_LLM_MAX_TOKENS = 2_048
+AUTO_KP_LLM_TIMEOUT_SECONDS = 180
 
 
 class AutoKpWorker:
@@ -103,7 +111,8 @@ class AutoKpWorker:
             )
             init_db(connection)
             repo = Repository(connection)
-            repo.recover_stale_auto_kp_jobs()
+            # Startup owns the one intentional global recovery boundary.
+            repo.recover_stale_auto_kp_jobs(campaign_id=None)
             connection.commit()
             self._ready_event.set()
 
@@ -149,14 +158,19 @@ def process_claimed_auto_kp_job(
     job_id = str(job["id"])
     expected_attempt = int(job["attempt_count"])
     try:
+        model_execution = ModelExecutionSnapshot.capture(repo, settings)
         result = asyncio.run(
             _dispatch_auto_kp_job(
                 repo,
                 job,
-                settings=settings,
+                settings=model_execution.settings,
                 call_registry=call_registry,
             )
         )
+        # All model-backed writes above still share this outer transaction.
+        # A settings change must discard them instead of attributing an old
+        # provider's proposal to the newly selected model generation.
+        model_execution.revalidate(repo)
         if result["status"] == "failed":
             raise RuntimeError(str(result.get("message") or "Auto KP job failed"))
         status = "needs_attention" if result["status"] == "needs_attention" else "succeeded"
@@ -188,13 +202,44 @@ async def _dispatch_auto_kp_job(
     settings: Settings,
     call_registry: CampaignAiCallRegistry | None,
 ) -> dict[str, Any]:
-    director = _director(repo, settings, call_registry)
-    job_type = str(job["job_type"])
+    try:
+        authority = AutoKpJobAuthorityValidator(repo).validate_job(job)
+    except (KeyError, PermissionError, TypeError, ValueError) as exc:
+        recovery = recover_stale_parallel_job(
+            repo,
+            job,
+            reason=str(exc),
+            identity_resolver=kp_identity_for_parallel_actions,
+        )
+        if recovery is not None:
+            return recovery
+        encounter_recovery = _recover_stale_encounter_job(repo, job, reason=str(exc))
+        if encounter_recovery is not None:
+            return encounter_recovery
+        raise
+    job_type = authority.job_type
     payload = dict(job.get("payload") or {})
     if job_type == "player_action":
+        director = _director(repo, settings, call_registry)
         action = repo.get_player_action(str(job["resource_id"]))
+        tabletop_result = await AutoTurnService(repo).advance_unbound_tabletop(
+            str(job["resource_id"]),
+            director=director,
+            source_model=settings.llm_model,
+        )
+        if tabletop_result is not None:
+            return {
+                "status": tabletop_result.status,
+                "stage": "player_action",
+                **tabletop_result.as_dict(),
+            }
         run = repo.get_active_campaign_module_run(str(action["campaign_id"]))
-        if run is not None:
+        if (
+            run is not None
+            and KernelActionService(repo).bound_context(
+                str(action["campaign_id"])
+            ) is None
+        ):
             analysis = ModuleRunService(repo).analyze(
                 str(run["id"]), str(action["action_text"])
             )
@@ -210,9 +255,11 @@ async def _dispatch_auto_kp_job(
             str(job["resource_id"]),
             director=director,
             source_model=settings.llm_model,
+            skip_unbound_tabletop=True,
         )
         return {"status": result.status, "stage": "player_action", **result.as_dict()}
     if job_type == "check_consequence":
+        director = _director(repo, settings, call_registry)
         result = await AutoTurnService(repo).advance_after_check(
             str(job["resource_id"]),
             director=director,
@@ -226,26 +273,40 @@ async def _dispatch_auto_kp_job(
             }
         return {"status": result.status, "stage": "check_consequence", **result.as_dict()}
     if job_type == "parallel_actions":
-        action_ids = tuple(str(item) for item in payload.get("action_ids") or ())
-        identity = _kp_identity_for_parallel_actions(repo, action_ids)
-        result = await ParallelActionSettlementService(repo).settle(
-            str(job["campaign_id"]),
-            identity,
-            ParallelActionSettlementCommand(
-                action_ids=action_ids,
-                auto_approve=False,
-                player_confirmation=True,
-            ),
-            director,
-            source_model=settings.llm_model,
+        return await execute_parallel_action_job(
+            repo,
+            job,
+            payload=payload,
+            settings=settings,
+            call_registry=call_registry,
+            director_factory=_director,
         )
-        return {"status": result.status, "stage": "parallel_actions", **result.as_dict()}
+    if job_type == "encounter_turn":
+        director = _director(repo, settings, call_registry)
+        result = await EncounterAutomationService(repo).advance(
+            str(job["resource_id"]),
+            phase=str(payload["phase"]),
+            policy=str(payload["policy"]),
+            identity=_kp_identity_for_session(
+                repo, authority.campaign_id, authority.session_id
+            ),
+            director=director,
+            source_model=settings.llm_model,
+            expected_episode_id=str(payload["episode_id"]),
+            expected_episode_version=int(payload["episode_version"]),
+        )
+        return result
     if job_type == "world_expansion":
+        director = _director(repo, settings, call_registry)
         run_id = str(payload.get("run_id") or job.get("run_id") or "")
         player_intent = str(payload.get("player_intent") or "")
         if not run_id or not player_intent.strip():
             raise ValueError("world_expansion jobs require run_id and player_intent")
-        identity = _kp_identity_for_campaign(repo, str(job["campaign_id"]))
+        identity = _kp_identity_for_session(
+            repo,
+            authority.campaign_id,
+            authority.session_id,
+        )
         result = await AutoWorldExpansionService(repo).create_and_maybe_materialize(
             WorldExpansionCommand(
                 run_id=run_id,
@@ -259,6 +320,39 @@ async def _dispatch_auto_kp_job(
         )
         return {"status": result.status, "stage": "world_expansion", **result.as_dict()}
     raise ValueError(f"Unsupported Auto KP job type: {job_type}")
+
+
+def _recover_stale_encounter_job(
+    repo: Repository, job: dict[str, Any], *, reason: str
+) -> dict[str, Any] | None:
+    """Treat an obsolete same-session turn reservation as a safe no-op.
+
+    A player may act before an idle deadline or another transition may advance
+    the encounter. Retrying that old reservation cannot make it authoritative
+    again, so it must not consume the failure budget or require KP cleanup.
+    Cross-campaign/session mismatches deliberately fall through to the normal
+    fail-closed job error path.
+    """
+
+    if job.get("job_type") != "encounter_turn":
+        return None
+    try:
+        encounter = repo.get_coc7_encounter(str(job.get("resource_id") or ""))
+    except KeyError:
+        return None
+    payload = job.get("payload") or {}
+    if (
+        encounter.get("campaign_id") != job.get("campaign_id")
+        or not isinstance(payload, dict)
+        or payload.get("session_id") != encounter.get("session_id")
+    ):
+        return None
+    return {
+        "status": "succeeded",
+        "stage": "encounter_turn_superseded",
+        "message": "遭遇已推进或自动化权限已改变；旧回合任务已安全失效。",
+        "reason": reason[:500],
+    }
 
 
 async def _adjudicate_player_world_gap(
@@ -339,39 +433,11 @@ def _director(
             settings.llm_base_url,
             settings.llm_api_key,
             settings.llm_model,
+            max_tokens=AUTO_KP_LLM_MAX_TOKENS,
+            timeout_seconds=AUTO_KP_LLM_TIMEOUT_SECONDS,
         ),
         call_registry=call_registry,
     )
-
-
-def _kp_identity_for_parallel_actions(
-    repo: Repository,
-    action_ids: tuple[str, ...],
-) -> AuthenticatedMember:
-    if not action_ids:
-        raise ValueError("parallel_actions jobs require action_ids")
-    action = repo.get_player_action(action_ids[0])
-    return _kp_identity_for_session(
-        repo,
-        str(action["campaign_id"]),
-        str(action["session_id"]),
-    )
-
-
-def _kp_identity_for_campaign(repo: Repository, campaign_id: str) -> AuthenticatedMember:
-    row = repo.connection.execute(
-        """
-        SELECT id, session_id, campaign_id, display_name
-        FROM session_members
-        WHERE campaign_id = ? AND role = 'kp' AND revoked_at IS NULL
-        ORDER BY joined_at, id
-        LIMIT 1
-        """,
-        (campaign_id,),
-    ).fetchone()
-    if row is None:
-        raise ValueError("No active KP member exists for Auto KP job")
-    return _identity_from_member_row(row)
 
 
 def _kp_identity_for_session(

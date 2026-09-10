@@ -10,7 +10,12 @@ The backend has explicit composition, transport, application, domain, ruleset, a
 - `src/ai_kp/application/ports/` defines the narrow persistence and AI-director contracts used by
   each service. Application code must not import `api`, `bootstrap`, or `infrastructure`;
   concrete adapters are supplied at the composition/delivery boundary.
-- `src/ai_kp/platform/` owns ruleset-neutral memory, module, and scene logic. `director/` owns AI KP context and proposal orchestration. `rule_authoring/` owns extracted rule objects and deterministic validation/execution.
+- `src/ai_kp/platform/` owns ruleset-neutral memory, module, and scene logic. Its scene layer defines
+  versioned Setting Packs, connected region patterns, settlement function slots, professions and typed
+  entity archetypes; module-specific Setting Profiles bind source locations without turning template
+  candidates into facts, and classify existing source entities by archetype without copying or mutating
+  their provenance. `director/` owns AI KP context and proposal orchestration. `rule_authoring/`
+  owns extracted rule objects and deterministic validation/execution.
 - `src/ai_kp/platform/randomness/` records system-neutral dice requests, faces and integrity
   fingerprints without interpreting success. `rulesets/<system>` converts that evidence into
   system-specific candidates and results.
@@ -20,7 +25,13 @@ The backend has explicit composition, transport, application, domain, ruleset, a
   bounded, allow-listed and content-hashed; their UI metadata is shipped in the wheel. Player
   actions compose action understanding, visible-module scene interpretation, NPC portrayal, scene
   direction and safety review into one model call. Check consequences use a dedicated immutable-
-  result narration bundle; world expansion reuses module-scene interpretation; session recap uses
+  result narration bundle; world expansion reuses module-scene interpretation and projects only
+  intent-relevant selected template slots into the model context, while human-KP tools retain the
+  complete immutable Profile. The caller selects the expansion workflow before inference; a narrow
+  transport compiler may canonicalize local references or strip unauthorized source IDs, but the
+  deterministic catalog validator remains authoritative. Approved typed candidates enter the shared
+  `WorldEntityMaterializer`, which atomically projects NPCs, organizations, items, documents, vehicles,
+  events and clue carriers plus typed relations for both AI and human KP; session recap uses
   source-bound memory curation. The context budget accounts for every injected bundle, and proposal
   audit actions record each Skill ID and version.
 - `src/ai_kp/infrastructure/database/` owns SQLite mechanics, schema, ordered migrations, and feature repositories. Its `Repository` facade intentionally supplies one shared transaction boundary to current application services.
@@ -32,6 +43,77 @@ The backend has explicit composition, transport, application, domain, ruleset, a
   from those adapters.
 - `src/ai_kp/planning/capabilities.py` is the only product capability catalogue. It records available, partial, and planned capabilities together with dependencies and acceptance criteria.
 - `rulesets` is the application-facing executable-system boundary and currently registers only CoC7. Former `kp`, `maps`, `memory`, `modules`, `llm`, `security`, `realtime`, `rulebook`, `rules`, `characters`, `storage`, and selected `core` modules are compatibility paths only.
+
+## Multi-Agent resolution boundary
+
+Every submitted text first becomes a ruleset-neutral `TabletopTurnFrame`. This boundary
+classifies OOC conversation, visible-world questions, NPC dialogue, concrete actions,
+multi-step plans, time advancement, and unsupported result assertions. A deterministic
+policy routes only mechanical frames to semantic operator selection. Information and RP
+frames can produce public conversation but cannot carry `WorldCommand` values; material
+ambiguities and result assertions become one player-facing question. The selected frame
+and route are persisted with the proposal and shown in the player UI.
+This preflight also runs for legacy or newly created campaigns without a published contract.
+Their empty authority basis may answer that public state is insufficient or request a concrete
+method, but it cannot invent an NPC, location, clue, or world fact. Only a mechanical frame may
+continue into the legacy world-gap compatibility path.
+
+The product uses several narrow, on-demand Agent roles, not one permanent model process per
+entity. A Director normalizes the player's goal and method; a Rules Judge selects only published
+operator and skill identifiers; an Actor receives one entity's canonical, derived, and run-time
+projection; a Narrator realizes an immutable outcome; and an independent Verifier rejects omitted
+obligations, secret disclosure, or claims outside that outcome. Small and large models use this
+same pipeline. Capability profiles change context budget and approval frequency, never authority.
+
+Every synchronous or background Agent execution captures the persisted text-model configuration
+and its monotonically increasing version at the work boundary. Long-lived workers never keep the
+provider selected at process startup. The version is revalidated before model-derived writes commit;
+resumable scenario authoring additionally binds all partitions, supplements and reviews to one
+model generation. A switch discards only those derived intermediates and restarts from immutable
+source evidence, so two models cannot silently co-author one executable contract.
+
+The deterministic resolution layer remains the sole authority. `ScenarioContract` owns
+`CheckPlan`, response obligations, semantic `TriggerRule` records, generic pressure tracks and
+entity run-time state. The model may emit a typed semantic event, but fixed-point world-rule
+expansion chooses its source-authored consequences. Dice, success level, pushed-failure branches,
+ruleset effects, HP/SAN, endings and the resulting snapshot are committed by one application
+transaction. Replaying the same command or expanding an already-expanded batch is idempotent.
+
+Scenario authoring separates hard mechanics from advisory world materialization. Source-explicit
+checks, pressure, ruleset effects, and ending conditions must close before automatic publication.
+Substantive scene/NPC/clue prose is materialized best-effort and remains coverage-visible, while
+headings and short labels create no executable obligation. Independent review may therefore
+remove an unsupported world record without the post-review worker repeatedly regenerating it.
+
+Actor instances are deliberately ephemeral. Durable characterization belongs to entity data:
+source-backed canonical facts and secrets are immutable, compiler-derived style is replaceable,
+and per-run emotion, physical state, attitude, goal and memory references live in the scenario
+snapshot. This avoids context growth proportional to the number of NPCs while preserving behavior
+across turns.
+
+Campaign-memory retrieval applies authorization before relevance scoring. The deterministic first
+stage combines Unicode lexical scoring and SQLite FTS5 trigram ranks with Reciprocal Rank Fusion;
+every returned item carries its score components for replay and evaluation. An optional local
+semantic reranker receives only the bounded, already-authorized candidate DTO and can return IDs,
+but cannot read identities, widen visibility, or mutate state. A declared reranker-availability
+failure falls back to the deterministic ranks. This port is ruleset-neutral: future systems may
+change memory content and rules, but not the authorization or ranking boundary.
+
+Scenario compilation deliberately separates `valid` from `release_ready`. Schema validity and
+local referential integrity are necessary for storing and reviewing a draft; publication also
+requires a bounded exact-state playability proof. The analyzer explores authoritative commands,
+operator outcomes, location links, and reactive rules (never generated prose), stops at terminal
+states, and fails closed after its state budget. It proves six generic invariants: scene
+reachability, observably different checked branches, source-bound clue content delivery,
+failure recovery, core-clue discoverability, and at least one reachable ending. Proof witnesses
+and counterexamples are persisted and shown in the module UI.
+
+A source-named roll is not an executable check by itself. Ordinary failure must have a declared
+observable consequence; if pushing is enabled, the contract must additionally predeclare the
+severe pushed-failure consequence and an authoritative `pushed_failure` branch. Likewise, a clue
+fact without player-facing source content is not delivery. These rules prevent generic narration
+from impersonating state transitions and prevent a valid-looking contract from becoming
+unwinnable after one roll.
 
 The React workspace follows the same separation:
 
@@ -54,6 +136,12 @@ activation and incremental migration rules are tracked in
 [`ARCHITECTURE_SKELETON.md`](ARCHITECTURE_SKELETON.md). A source module is created only with a
 real vertical slice and focused tests; planned capability status lives in the capability catalogue.
 
+`platform/resolution/scenario_authoring.py` currently preserves one stable public import surface,
+but its internal review, repair, coverage-supplement and generation responsibilities are an explicit
+split candidate. They must move behind that facade one responsibility at a time with focused tests;
+a line-count-only rewrite is prohibited because review normalization and dependency removal share
+contract invariants and are easy to separate incorrectly.
+
 ## Router-Service-Repository Boundary
 
 The dependency direction is `Router -> Application Service -> Repository/domain component`.
@@ -64,6 +152,25 @@ The dependency direction is `Router -> Application Service -> Repository/domain 
 4. `api/dependencies.py:get_repo` commits once after a successful request, rolls back on every exception, and always closes the connection. Nested atomic operations such as proposal approval use SQLite savepoints so validation failure cannot leave partial events, memories, NPC changes, map moves, or outbox rows.
 
 Plain read-only or single-table use cases still pass through a service when a domain policy is involved. A router may call a repository only for transport-level ownership lookup or a simple authenticated read where no orchestration is needed.
+
+Bound play services share `application/scenario_authority.py`. Its frozen
+`ScenarioAuthorityContext` is the sole application-level assembly of module-run identity,
+contract binding, spoiler scope and scenario snapshot. AI KP, parallel action flows and human KP
+tools project different prompts or UI but revalidate the same authority identity after async
+work. Its explicit state policy keeps Need Help read-only while execution paths initialize or
+require durable state.
+
+`platform/resolution/action_catalog.py` is the corresponding pure evidence boundary. It derives
+ranked candidates, kernel-checked availability, skill allow-lists and stable contract evidence IDs
+once for AI selection, human manual selection and Need Help. Database-retrieved module/rulebook
+text stays outside this executable catalog as explicitly supplemental context.
+
+`platform/resolution/settlement.py` is the shared primitive-settlement projection. Sequential and
+parallel adapters both use it to bind one exact outcome to a stable `action_resolved` event and the
+preview-declared commands. Both command-batch receipts persist `KernelAuthorityBasis`; the database
+validates run, effective contract hash, state version and artifact hash inside the write lock. The
+single-action service and parallel workflow deliberately keep separate transaction coordinators,
+because parallel settlement must finalize every participant or roll the whole round back.
 
 ## SQLite Lifecycle and Migrations
 
@@ -274,17 +381,40 @@ aesthetic acceptance remains an explicit KP decision. See
 3. A manual KP flow may claim the item directly. An automated flow creates a linked draft plus a
    persisted `player_action_adjudication` in exactly one visible mode: direct resolution, skill
    check, or roleplay/clarification. The append-only adjudication event log records skill changes,
-   confirmation, supersession and actor identity.
+   confirmation, supersession and actor identity. Parallel collection considers only other
+   queued actions whose owners explicitly requested Auto KP; a manual-KP submission is never
+   opted in by another player's request, and an in-flight action is reserved to one cohort.
 4. The owning player must confirm the ruling, choose one of the validated character-sheet options,
    or revise the action. Revision supersedes the old ruling and submits a new action; page reloads
    recover pending rulings from SQLite instead of relying on worker response payloads.
 5. Confirmation uses optimistic version checks. A skill ruling creates the deterministic check;
-   a direct ruling atomically applies validated effects. For a parallel proposal, every owning
-   player must confirm before the shared draft can commit.
-6. Weak-model, malformed-output, impossible-action and era-conflict paths fail closed as a concrete
+   a direct single-player ruling atomically applies validated effects. Simultaneous mechanical
+   actions instead enter one durable batch bound to the campaign, session, active module-run
+   version, scenario state version, operator previews, and preparation hash. Each owner receives
+   only their own adjudication and must confirm it independently before any check is created.
+6. After the consent barrier, each visible check remains owned by its player. In Full AI mode,
+   blind checks use a separate restart-safe digital-roll job and cannot be pushed; this avoids
+   inventing a player-owned method while keeping roll, target and success tier out of the player
+   projection. Contract-authorized observable clues/effects and accepted failure stakes are still
+   delivered, because hiding dice does not hide what the characters can perceive.
+   The batch advances only after every visible, private, blind, opposed, and pushed check reaches
+   an exact terminal result.
+7. The parallel kernel re-previews every action against the same state version, detects competing
+   writes, and commits one command batch or nothing. Balanced mode leaves the ready batch for KP;
+   Full AI queues the same deterministic commit. Queue retries reuse the stored receipt and never
+   reroll or reapply a result.
+8. Conversation, table information, clarification, roleplay, and constrained world-expansion
+   routes are not forced through a mechanical batch. If a mixed collection window cannot be
+   represented by the deterministic kernel, it performs no partial write and fans the exact
+   actions back into their existing independent three-state adjudication jobs without recollecting
+   them into the same batch. If the planning model remains unavailable, both the parent and these
+   child jobs converge on a zero-world-write clarification rather than exhausting the queue.
+9. Weak-model, malformed-output, impossible-action and era-conflict paths fail closed as a concrete
    clarification. Server-side prechecks remove any model-authored effects before dangerous or
    deceptive prerequisite rolls.
-7. Rejecting or superseding a linked draft applies no world changes.
+10. Rejecting or superseding a linked draft applies no world changes. A player may revise a
+    simultaneous action only before any roll; after the dice are known, avoiding a failed outcome
+    requires an audited KP retcon rather than silently abandoning the batch.
 
 The player-action response does not embed the linked proposal, KP notes, secret context, or final prompt.
 
@@ -313,6 +443,13 @@ direct repository use cannot bypass the application policy; any handler failure 
 proposal and all affected world state.
 
 ## AI Turn Flow
+
+Before context assembly, `ConstrainedTabletopTurnAdapter` classifies the player's contribution.
+High-precision deterministic guards keep visible-world questions, already-asserted results, and
+explicit first-person social influence out of unreliable weak-model route guessing. After two
+invalid frames, only an explicit first-person ordered plan may recover as multiple steps; all other
+unknown input fails to a concrete clarification. This layer grants no operator, outcome, or state
+authority and is shared across rulesets.
 
 1. `ContextBuilder` reads campaign time, the exact investigator revision approved for this
    campaign plus its mutable runtime state, relevant memories, eligible old NPCs, recent events,

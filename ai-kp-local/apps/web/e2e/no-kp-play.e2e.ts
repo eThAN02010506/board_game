@@ -1,4 +1,14 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+const faultEvidencePath = process.env.AI_KP_RPS_FAULT_EVIDENCE_PATH;
+const sourceCommit = process.env.AI_KP_REALCASE_SOURCE_COMMIT;
+if (faultEvidencePath && (!sourceCommit || !/^[0-9a-f]{7,40}$/.test(sourceCommit))) {
+  throw new Error(
+    "AI_KP_REALCASE_SOURCE_COMMIT must be set to a lowercase Git hash when writing RPS fault evidence"
+  );
+}
 
 async function postJson<T>(
   request: APIRequestContext,
@@ -72,6 +82,20 @@ test("a seated player safely reviews Auto KP when the model is unavailable", asy
     ...playerHeaders,
     Authorization: `Bearer ${claimed.access_token}`
   };
+  const sessionZero = await request.get(
+    `/api/campaigns/${campaign.id}/session-zero`,
+    { headers: kpHeaders }
+  );
+  expect(sessionZero.ok(), await sessionZero.text()).toBeTruthy();
+  const revision = (await sessionZero.json() as {
+    revision: { id: string; version: number };
+  }).revision;
+  for (const headers of [kpHeaders, authenticatedPlayerHeaders]) {
+    await postJson(request, `/campaigns/${campaign.id}/session-zero/confirm`, {
+      revision_id: revision.id,
+      expected_version: revision.version
+    }, headers);
+  }
   const investigator = await postJson<{
     id: string;
     current_revision_id: string;
@@ -128,17 +152,86 @@ test("a seated player safely reviews Auto KP when the model is unavailable", asy
 
   await expect(page.getByRole("heading", { name: "你的行动桌面" })).toBeVisible();
   await expect(page.getByText("实时同步", { exact: true })).toBeVisible();
+  const publicTurnsBefore = await getJson<unknown[]>(
+    request,
+    `/campaigns/${campaign.id}/public-turns`,
+    authenticatedPlayerHeaders
+  );
+  const submittedActionResponse = page.waitForResponse((response) =>
+    response.request().method() === "POST"
+    && /\/api\/campaigns\/[^/]+\/actions$/.test(new URL(response.url()).pathname)
+  );
   await page.getByLabel("玩家行动").fill("我检查钟楼入口是否有危险。 ");
   await page.getByRole("button", { name: "提交并后台推进" }).click();
+  const submittedActionPayload = await (await submittedActionResponse).json() as {
+    player_action?: { id?: unknown };
+  };
+  const submittedActionId = submittedActionPayload.player_action?.id;
+  expect(typeof submittedActionId).toBe("string");
 
   const jobs = page.getByLabel("自动 KP 任务");
   await expect(jobs).toBeVisible();
-  await expect(jobs).toContainText("succeeded", { timeout: 20_000 });
+  await expect(jobs).toContainText("裁定流程已完成", { timeout: 20_000 });
   await expect(page.getByText("需要 RP / 补充说明")).toBeVisible();
   await expect(page.getByText("AI 初步裁定 · 尚未执行")).toBeVisible();
   await expect(page.getByRole("button", { name: "确认此裁定" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "修改行动并重新裁定" })).toBeVisible();
   await expect(page.getByText("你的行动桌面")).toBeVisible();
+
+  const failedAction = await getJson<{ status: string }>(
+    request,
+    `/player-actions/${submittedActionId as string}`,
+    authenticatedPlayerHeaders
+  );
+  const adjudication = await getJson<{
+    status: string;
+    mode: string;
+    source_model: string;
+    source_error: string | null;
+  }>(
+    request,
+    `/player-actions/${submittedActionId as string}/adjudication`,
+    authenticatedPlayerHeaders
+  );
+  const publicTurnsAfter = await getJson<unknown[]>(
+    request,
+    `/campaigns/${campaign.id}/public-turns`,
+    authenticatedPlayerHeaders
+  );
+  expect(failedAction.status).toBe("reviewed");
+  expect(adjudication.status).toBe("pending");
+  expect(adjudication.mode).toBe("roleplay_or_clarification");
+  expect(adjudication.source_model).toBe("auto-kp-fallback");
+  expect(adjudication.source_error).toBeTruthy();
+  expect(publicTurnsAfter).toEqual(publicTurnsBefore);
+
+  if (faultEvidencePath) {
+    const outputPath = path.resolve(faultEvidencePath);
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, `${JSON.stringify({
+      evidence_kind: "rps_ai_failure_ui",
+      source_commit: sourceCommit,
+      observed_at: new Date().toISOString(),
+      requirement_id: "RPS-07",
+      surface: "player_ui",
+      ui_observations: [
+        "auto_kp_terminal_fallback_visible",
+        "unexecuted_ruling_visible",
+        "confirm_action_absent",
+        "revise_action_visible"
+      ],
+      authority_observations: {
+        player_action_id: submittedActionId,
+        action_status: failedAction.status,
+        adjudication_status: adjudication.status,
+        adjudication_mode: adjudication.mode,
+        source_model: adjudication.source_model,
+        source_error_present: Boolean(adjudication.source_error),
+        public_turn_count_before: publicTurnsBefore.length,
+        public_turn_count_after: publicTurnsAfter.length
+      }
+    }, null, 2)}\n`, "utf8");
+  }
 
   const checkedAction = await postJson<{ id: string }>(
     request,
@@ -175,9 +268,12 @@ test("a seated player safely reviews Auto KP when the model is unavailable", asy
   );
 
   await page.getByRole("tab", { name: "检定" }).click();
-  const rollButton = page.getByRole("button", { name: "数字骰" });
-  await expect(rollButton).toBeVisible();
-  await rollButton.click();
+  const checkCard = page.locator(".check-card").filter({ hasText: "侦查" }).first();
+  await expect(checkCard).toBeVisible();
+  await checkCard.getByText("录入实体骰", { exact: true }).click();
+  await checkCard.getByRole("spinbutton", { name: "个位" }).fill("1");
+  await checkCard.getByRole("textbox", { name: /十位骰/ }).fill("0");
+  await checkCard.getByRole("button", { name: "确认实体骰" }).click();
   await expect(page.getByRole("button", { name: "重放校验" })).toBeVisible();
   await expect.poll(async () => {
     const response = await request.get(`/api/player-actions/${checkedAction.id}`, {
@@ -186,3 +282,13 @@ test("a seated player safely reviews Auto KP when the model is unavailable", asy
     return (await response.json() as { status: string }).status;
   }, { timeout: 20_000 }).toBe("resolved");
 });
+
+async function getJson<T>(
+  request: APIRequestContext,
+  path: string,
+  headers: Record<string, string>
+): Promise<T> {
+  const response = await request.get(`/api${path}`, { headers });
+  expect(response.ok(), `${path}: ${await response.text()}`).toBeTruthy();
+  return response.json() as Promise<T>;
+}

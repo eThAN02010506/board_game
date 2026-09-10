@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ai_kp.application.initial_asset_materializer import InitialAssetMaterializer
 from ai_kp.application.investigators.review_policy import validate_review_decision
 from ai_kp.application.ports.repositories import InvestigatorStore
 from ai_kp.rulesets import DEFAULT_RULESET_ID, get_ruleset
@@ -145,6 +146,13 @@ class InvestigatorService:
             kp_member_id=kp_member_id,
             session_id=session_id,
         )
+        if action == "approved":
+            self._materialize_initial_assets(
+                campaign_id=campaign_id,
+                investigator_id=investigator_id,
+                kp_member_id=kp_member_id,
+                result=result,
+            )
         return self._with_diff(result)
 
     def _validate_sheet(
@@ -162,6 +170,50 @@ class InvestigatorService:
             session_id=session_id,
             member_id=member_id,
             investigator_id=investigator_id,
+        )
+
+    def auto_approve_and_assign(
+        self,
+        *,
+        campaign_id: str,
+        investigator_id: str,
+        kp_member_id: str,
+        player_member_id: str,
+        session_id: str,
+    ) -> dict:
+        result = self.repo.approve_and_assign_investigator(
+            campaign_id=campaign_id,
+            investigator_id=investigator_id,
+            comment="ai-kp 自动化批准：角色通过确定性校验",
+            kp_member_id=kp_member_id,
+            player_member_id=player_member_id,
+            session_id=session_id,
+        )
+        self._materialize_initial_assets(
+            campaign_id=campaign_id,
+            investigator_id=investigator_id,
+            kp_member_id=kp_member_id,
+            result=result,
+        )
+        return self._with_diff(result)
+
+    def _materialize_initial_assets(
+        self,
+        *,
+        campaign_id: str,
+        investigator_id: str,
+        kp_member_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        revision = result.get("approved_revision") or result.get("submitted_revision")
+        if not revision:
+            return
+        InitialAssetMaterializer(self.repo).materialize(
+            campaign_id=campaign_id,
+            investigator_id=investigator_id,
+            revision_id=str(revision["id"]),
+            canonical_sheet=dict(revision.get("canonical_sheet") or {}),
+            actor_member_id=kp_member_id,
         )
 
     def list_public(self, campaign_id: str) -> list[dict]:

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -7,12 +8,15 @@ from ai_kp.application.errors import ConflictError, InvalidInputError
 from ai_kp.application.npc_reappearance_service import NpcReappearanceService
 from ai_kp.application.turn_service import TurnService, WorldExpansionCommand
 from ai_kp.application.world_expansion_materialization_service import (
+    EncounterEntityRealization,
     EncounterFact,
     EncounterMapPlacement,
     EncounterNpc,
     MaterializeWorldExpansionCommand,
     WorldExpansionMaterializationService,
 )
+from ai_kp.application.world_service import WorldService
+from ai_kp.director.context_builder import ContextBuilder
 from ai_kp.platform.scenes.map_generation import generate_map
 from tests.test_world_expansion_proposals import (
     FakeWorldExpansionDirector,
@@ -20,16 +24,22 @@ from tests.test_world_expansion_proposals import (
 )
 
 
-def approved_world_expansion(tmp_path: Path) -> tuple:
+def approved_world_expansion(
+    tmp_path: Path,
+    *,
+    typed_entities: bool = False,
+) -> tuple:
     connection, repo, campaign, identity, run = setup_world_gap(tmp_path)
     proposal = asyncio.run(
         TurnService(repo).create_world_expansion_proposal(
             WorldExpansionCommand(
                 run_id=run["id"],
                 player_intent="我去寻找镇上的警察局",
+                setting_pack_id="us.1920s" if typed_entities else None,
+                settlement_kind="town" if typed_entities else None,
             ),
             identity,
-            FakeWorldExpansionDirector(),
+            FakeWorldExpansionDirector(include_entities=typed_entities),
             source_model="fake-local-model",
         )
     )
@@ -227,6 +237,156 @@ def test_confirmed_contact_atomically_writes_fact_npc_and_map_token(
                     idempotency_key="contact:different-retry-key",
                 ),
             )
+    finally:
+        connection.close()
+
+
+def test_typed_candidate_entities_and_relations_materialize_atomically(
+    tmp_path: Path,
+) -> None:
+    connection, repo, campaign, identity, proposal = approved_world_expansion(
+        tmp_path,
+        typed_entities=True,
+    )
+    try:
+        saved_map = repo.create_map(
+            campaign["id"],
+            generate_map(
+                title="小镇",
+                prompt="小镇调查地图",
+                location_names=["镇中心", "钟楼"],
+            ),
+            created_by="human_kp",
+        )
+        command = MaterializeWorldExpansionCommand(
+            idempotency_key="contact:typed-police-station",
+            summary="调查员抵达警长办公室并见到值班巡警。",
+            happened_at="1928-10-03 22:15",
+            facts=(
+                EncounterFact(
+                    fact_type="canonical_fact",
+                    subject="警长办公室",
+                    predicate="实际存在",
+                    object_text="镇中心存在警长办公室。",
+                ),
+            ),
+            entities=(
+                EncounterEntityRealization(
+                    local_ref="local_agency",
+                    name="黑溪镇警长办公室",
+                    description="负责镇内治安与案卷保管。",
+                    visibility="kp",
+                ),
+                EncounterEntityRealization(
+                    local_ref="duty_officer",
+                    name="约瑟夫·贝尔",
+                    description="今晚的值班巡警。",
+                ),
+            ),
+            map_placement=EncounterMapPlacement(
+                map_id=saved_map["id"],
+                location_name="镇中心",
+                entity_ref="duty_officer",
+            ),
+        )
+
+        materialized = WorldExpansionMaterializationService(repo).materialize(
+            proposal["id"], identity, command
+        )
+        receipt = materialized["world_expansion_materialization"]
+        assert len(receipt["world_entity_ids"]) == 2
+        stored_receipt = repo.get_world_expansion_materialization(proposal["id"])
+        assert stored_receipt is not None
+        assert len(stored_receipt["payload"]["world_entity_ids"]) == 2
+        assert receipt["npc_id"] is not None
+        entities = repo.list_campaign_world_entities(campaign["id"])
+        assert {(item["entity_kind"], item["name"]) for item in entities} == {
+            ("organization", "黑溪镇警长办公室"),
+            ("npc", "约瑟夫·贝尔"),
+        }
+        kp_projection = WorldService(repo).list_world_entities(
+            campaign["id"], view="kp"
+        )
+        player_projection = WorldService(repo).list_world_entities(
+            campaign["id"], view="player"
+        )
+        assert len(kp_projection["entities"]) == 2
+        assert len(kp_projection["relations"]) == 1
+        assert [item["name"] for item in player_projection["entities"]] == [
+            "约瑟夫·贝尔"
+        ]
+        assert player_projection["relations"] == []
+        by_origin = {item["origin_ref"]: item for item in entities}
+        officer = by_origin[f"{proposal['id']}:duty_officer"]
+        agency = by_origin[f"{proposal['id']}:local_agency"]
+        relations = repo.list_campaign_world_entity_relations(campaign["id"])
+        assert [(item["source_entity_id"], item["relation_slot_id"], item["target_entity_id"]) for item in relations] == [
+            (officer["id"], "agency", agency["id"])
+        ]
+        token = repo.get_map_token(receipt["map_token_id"])
+        assert token["actor_id"] == officer["npc_id"]
+        context = ContextBuilder(connection).build(
+            campaign_id=campaign["id"],
+            player_action="我向约瑟夫·贝尔询问黑溪镇警长办公室的案卷。",
+        )
+        world_sources = [
+            item
+            for item in context.included_sources
+            if item["kind"] == "campaign_world_entity"
+        ]
+        assert {item["id"] for item in world_sources} == {officer["id"], agency["id"]}
+        assert any('"relation_slot_id": "agency"' in item["content"] for item in world_sources)
+        player_sources: list[dict] = []
+        ContextBuilder(connection)._add_world_entities(
+            campaign["id"],
+            "我继续问约瑟夫·贝尔案卷的事。",
+            ("table",),
+            player_sources,
+        )
+        assert {item["id"] for item in player_sources} == {officer["id"]}
+        assert "黑溪镇警长办公室" not in json.dumps(
+            player_sources, ensure_ascii=False
+        )
+    finally:
+        connection.close()
+
+
+def test_missing_typed_entity_realization_rolls_back_contact(
+    tmp_path: Path,
+) -> None:
+    connection, repo, campaign, identity, proposal = approved_world_expansion(
+        tmp_path,
+        typed_entities=True,
+    )
+    try:
+        command = MaterializeWorldExpansionCommand(
+            idempotency_key="contact:missing-typed-entity",
+            summary="只填写了机构，漏掉值班巡警。",
+            happened_at="1928-10-03 22:15",
+            facts=(
+                EncounterFact(
+                    fact_type="canonical_fact",
+                    subject="警长办公室",
+                    predicate="实际存在",
+                    object_text="镇中心存在警长办公室。",
+                ),
+            ),
+            entities=(
+                EncounterEntityRealization(
+                    local_ref="local_agency",
+                    name="黑溪镇警长办公室",
+                ),
+            ),
+        )
+        with pytest.raises(InvalidInputError, match="exactly match"):
+            WorldExpansionMaterializationService(repo).materialize(
+                proposal["id"], identity, command
+            )
+        assert repo.list_campaign_world_entities(campaign["id"]) == []
+        assert repo.get_world_expansion_materialization(proposal["id"]) is None
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type = 'world_expansion.encountered'"
+        ).fetchone()[0] == 0
     finally:
         connection.close()
 

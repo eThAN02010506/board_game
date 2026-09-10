@@ -127,23 +127,9 @@ export function AwarenessMap({ activeMap, loading, onRefresh }: Props) {
             if (state === "destroyed") return null;
             const isCurrent = state === "current";
             const isSeen = state === "seen";
-            if (!isCurrent && !isSeen) {
-              return (
-                <rect
-                  aria-label={`${loc.name}（未探索）`}
-                  className="awareness-unknown-mask"
-                  fill="rgba(11, 14, 19, 0.82)"
-                  height={60}
-                  key={loc.id}
-                  rx={4}
-                  width={90}
-                  x={loc.x - 45}
-                  y={loc.y - 30}
-                >
-                  <title>未探索</title>
-                </rect>
-              );
-            }
+            // Unknown locations are removed by the server projection. Treat an
+            // unexpected state as absent instead of trying to hide leaked data.
+            if (!isCurrent && !isSeen) return null;
             return (
               <g
                 aria-label={`${loc.name}${isCurrent ? "（当前位置）" : ""}`}
@@ -186,7 +172,7 @@ export function AwarenessMap({ activeMap, loading, onRefresh }: Props) {
         </svg>
       </div>
       <small className="permission-hint">
-        <Eye size={13} /> 小地图只显示你见过的车厢；未探索区域被迷雾遮住。
+        <Eye size={13} /> 小地图只接收你已经见过的位置；未探索区域不会发送到此设备。
       </small>
     </section>
   );

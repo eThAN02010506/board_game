@@ -61,6 +61,7 @@ class ModuleKnowledgeService:
         )
         agent = ModuleKnowledgeAgent(llm)
         processed = accepted = rejected = 0
+        accepted_candidate_ids: list[str] = []
         for chunk in chunks:
             attempt = self.repo.claim_module_chunk_for_knowledge(chunk["id"])
             # Publish the claim before the external model call. SQLite allows one
@@ -118,7 +119,7 @@ class ModuleKnowledgeService:
                             module_id,
                             payload,
                         )
-                        self.repo.store_module_knowledge_candidate(
+                        stored = self.repo.store_module_knowledge_candidate(
                             module_id,
                             candidate,
                             object_hash=object_hash,
@@ -126,6 +127,7 @@ class ModuleKnowledgeService:
                             source_model=model_name,
                             prompt_version=PROMPT_VERSION,
                         )
+                        accepted_candidate_ids.append(str(stored["id"]))
                         accepted_for_chunk += 1
                     except (KeyError, TypeError, ValueError):
                         rejected_for_chunk += 1
@@ -148,6 +150,7 @@ class ModuleKnowledgeService:
             "module_id": module_id,
             "processed_count": processed,
             "accepted_count": accepted,
+            "accepted_candidate_ids": list(dict.fromkeys(accepted_candidate_ids)),
             "rejected_count": rejected,
             "prompt_version": PROMPT_VERSION,
             "model": model_name,

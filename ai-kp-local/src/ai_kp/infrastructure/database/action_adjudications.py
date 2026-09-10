@@ -72,6 +72,7 @@ class ActionAdjudicationRepository(SQLiteRepository):
             item.pop("payload_json", None)
         proposal = self.get_turn_proposal(str(result["proposal_id"]))
         result["ruling"] = proposal.get("action_ruling") or {}
+        result["tabletop_turn"] = proposal.get("tabletop_turn")
         return result
 
     def list_proposal_adjudications(self, proposal_id: str) -> list[dict[str, Any]]:
@@ -133,6 +134,17 @@ class ActionAdjudicationRepository(SQLiteRepository):
             "reason": str(option["reason"]),
             "difficulty": str(option["difficulty"]),
             "hidden": bool(option["hidden"]),
+            "bonus_dice": int(option.get("bonus_dice") or 0),
+            "allow_push": bool(option.get("allow_push", True)),
+            "scope": str(option.get("scope") or ""),
+            "supporting_factors": list(option.get("supporting_factors") or ()),
+            "automatic_information": list(
+                option.get("automatic_information") or ()
+            ),
+            "failure_stakes": str(option.get("failure_stakes") or ""),
+            "pushed_failure_stakes": str(
+                option.get("pushed_failure_stakes") or ""
+            ),
         }
         self.connection.execute(
             "UPDATE turn_proposals SET proposed_checks_json = ? WHERE id = ? AND status = 'draft'",
